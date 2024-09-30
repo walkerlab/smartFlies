@@ -191,7 +191,7 @@ def training_loop(agent, envs, args, device, actor_critic,
         if not args.dryrun:
             utils.save_tc_schedule(schedule, num_updates, args.num_processes, args.num_steps, args.save_dir)
     
-    obs = envs.reset()
+    obs = envs.reset(seed=args.seed) # reset the envs and get the initial obs
     rollouts.obs[0].copy_(obs) # https://discuss.pytorch.org/t/which-copy-is-better/56393
     rollouts.to(device)
     start = time.time()
@@ -228,7 +228,8 @@ def training_loop(agent, envs, args, device, actor_critic,
                     rollouts.obs[step], 
                     rollouts.recurrent_hidden_states[step],
                     rollouts.masks[step])
-            obs, reward, done, infos = envs.step(action)
+            obs, reward, terminated, truncated, infos = envs.step(action)
+            done = terminated or truncated
             for i, d in enumerate(done): # if done, log the episode info. Care about what kind of env is encountered
                 if d:
                     try:

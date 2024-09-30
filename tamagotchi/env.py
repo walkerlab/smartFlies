@@ -8,8 +8,8 @@ import sys
 import pandas as pd
 import numpy as np
 import torch
-import gym
-from gym import spaces
+import gymnasium as gym
+from gymnasium import spaces
 from pprint import pprint
 from scipy.spatial.distance import cdist 
 from stable_baselines3.common.monitor import Monitor
@@ -1746,9 +1746,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                     obs_noise=args.obs_noise,
                     act_noise=args.act_noise,
                     seed=args.seed
-                    )
-
-        env.seed(seed + rank)        
+                    )  
 
         if str(env.__class__.__name__).find('TimeLimit') >= 0:
             env = TimeLimitMask(env)
