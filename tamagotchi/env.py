@@ -412,9 +412,7 @@ class PlumeEnvironment(gym.Env):
     self.tidx_max_episode = self.tidx + self.episode_steps_max*int(100/self.fps) + self.fps 
 
     # SPEEDUP (subset puffs to those only needed for episode)
-    # self.data_puffs = self.data_puffs_all.query('(time > @self.t_val-1) and (time < @self.t_val_max_episode)') # Speeds up queries!
     self.data_puffs = self.data_puffs_all.query('(tidx >= @self.tidx-1) and (tidx <= @self.tidx_max_episode)') # Speeds up queries!
-    # print("puff_number_all", self.data_puffs['puff_number'].nunique())
     # Dynamic birthx for each episode
     self.puff_density = 1
     if self.birthx < 0.99:
@@ -1082,9 +1080,7 @@ class PlumeEnvironment_v2(gym.Env):
     self.tidx_max_episode = self.tidx + self.episode_steps_max*int(100/self.fps) + self.fps 
 
     # SPEEDUP (subset puffs to those only needed for episode)
-    # self.data_puffs = self.data_puffs_all.query('(time > @self.t_val-1) and (time < @self.t_val_max_episode)') # Speeds up queries!
     self.data_puffs = self.data_puffs_all.query('(tidx >= @self.tidx-1) and (tidx <= @self.tidx_max_episode)') # Speeds up queries!
-    # print("puff_number_all", self.data_puffs['puff_number'].nunique())
     # Dynamic birthx for each episode
     self.puff_density = 1
     if self.birthx < 0.99:
@@ -1392,6 +1388,318 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         # Return an array with [wind x, y, odor, air vel x, y, egocentric course direction x, y]
             # Wind can either be relative wind or apparent wind, depending on the setting
         observation = super(PlumeEnvironment_v3, self).reset()
+        if len(observation) == 7:
+            observation[5:] = 0 # course direction to 0
+        return observation
+    
+    def step(self, action):
+        """
+        return observation, reward, done, info
+        same as v2, but with ground velco and air velco as attributes
+        """
+        self.episode_step += 1 
+        self.agent_location_last = self.agent_location
+        # Update internal variables
+        try:
+            self.tidx = self.tidxs[self.episode_step + self.step_offset]
+            self.t_val = self.t_vals[self.episode_step + self.step_offset]
+        except Exception as ex:
+            # Debug case where the env tries to access t_val outside puff_data!
+            print("[PEv3 step]", ex, self.episode_step, self.step_offset, self.t_val_min, self.t_vals[-5:], self.tidxs[-5:])
+            sys.exit(-1)
+        
+        self.stray_distance_last = self.stray_distance
+        self.stray_distance = self.get_stray_distance()
+        self.ambient_wind = self.get_current_wind_xy()
+
+        # Handle action 
+        if self.verbose > 1:
+            print("step action:", action, action.shape)
+        if self.squash_action: # always true in training and eval. Bkw compt for Sat's older logs in visualization scripts... Not touching this yet.
+            action = (np.tanh(action) + 1)/2
+        action = np.clip(action, 0.0, 1.0)
+        move_action = action[0] # Move [0, 1], with 0.0 = no movement
+        turn_action = action[1] # # Turn [0, 1], with 0.5 = no turn... maybe change to [-1, 1]
+        # Action noise (multiplicative)
+        move_action *= 1.0 + np.random.uniform(-self.act_noise, +self.act_noise) 
+        turn_action *= 1.0 + np.random.uniform(-self.act_noise, +self.act_noise) 
+        
+        # Flipping arena? 
+        if self.flipping and self.flipx < 0:
+            turn_action = 1 - turn_action
+
+        # Consequences of Actions
+        # Turn/Update orientation and move to new location 
+        old_angle_radians = np.angle(self.agent_angle[0] + 1j*self.agent_angle[1], deg=False)
+        new_angle_radians = old_angle_radians + self.turn_capacity*self.turnx*(turn_action - 0.5)*self.dt # in radians; (Turn~[0, 1], with 0.5 = no turn, <0.5 turn cw, >0.5 turn ccw)
+        self.agent_angle = [ np.cos(new_angle_radians), np.sin(new_angle_radians) ]    
+        assert np.linalg.norm(self.agent_angle) < 1.1
+        # New location = old location + agent movement + wind advection
+        agent_move_x = self.agent_angle[0]*self.move_capacity*self.movex*move_action*self.dt
+        agent_move_y = self.agent_angle[1]*self.move_capacity*self.movex*move_action*self.dt
+        wind_drift_x = self.ambient_wind[0]*self.dt
+        wind_drift_y = self.ambient_wind[1]*self.dt
+        self.agent_location = [
+        self.agent_location[0] + agent_move_x + wind_drift_x,
+        self.agent_location[1] + agent_move_y + wind_drift_y,
+        ]
+        # Air and ground velocity
+        self.air_velocity = np.array([agent_move_x, agent_move_y])/self.dt # Rel_wind = Amb_wind - Air_vel
+        self.ground_velocity = (np.array(self.agent_location) - self.agent_location_last)/self.dt
+        
+        ### ----------------- End conditions / Is the trial over ----------------- ### 
+        is_home = np.linalg.norm(self.agent_location) <= self.homed_radius 
+        is_outoftime = self.episode_step >= self.episode_steps_max - 1           
+        is_outofbounds = self.get_oob()
+        done = bool(is_home or is_outofbounds or is_outoftime)
+
+        # If has not ended, make new observations
+        observation = self.sense_environment()
+
+        ### ----------------- Reward function ----------------- ### 
+        reward = self.rewards['homed'] if is_home else self.rewards['tick']
+        if observation[2] <= config.env['odor_threshold'] : # if off plume, more tick penalty
+            reward += 5*self.rewards['tick']
+        # Reward shaping         
+        if is_outofbounds and 'oob' in self.r_shaping:
+            # Going OOB should be worse than radial reward shaping
+            # OOB Overshooting should be worse!
+            oob_penalty = 5*np.linalg.norm(self.agent_location) + self.stray_distance
+            oob_penalty *= 2 if self.agent_location[0] < 0 else 1  
+            reward -= oob_penalty
+        # Radial distance decrease at each STEP of episode
+        r_radial_step = 0
+        if 'step' in self.r_shaping:
+            r_radial_step = 5*( np.linalg.norm(self.agent_location_last) - np.linalg.norm(self.agent_location) )
+            r_radial_step = min(0, r_radial_step) if observation[2] <= config.env['odor_threshold'] else r_radial_step
+            # Multiplier for overshooting source
+            if 'overshoot' in self.r_shaping and self.agent_location[0] < 0:
+                r_radial_step *= 2 # Both encourage and discourage agent more
+            # Additive reward for reducing stray distance from plume
+            if ('stray' in self.r_shaping) and (self.stray_distance > self.stray_max/3):
+                    r_radial_step += 1*(self.stray_distance_last - self.stray_distance)
+            reward += r_radial_step * self.reward_decay
+
+        # Radial distance decrease at END of episode    
+        radial_distance_reward = 0 # keep for logging
+        if done and 'end' in self.r_shaping:
+            # 1: Radial distance r_decreasease at end of episode
+            radial_distance_decrease = ( np.linalg.norm(self.agent_location_init) - np.linalg.norm(self.agent_location) )
+            self.stray_distance = self.get_stray_distance()
+            end_reward = radial_distance_decrease - self.stray_distance
+            reward += end_reward
+
+        r_location = 0 # incorrect, leads to cycling in place
+        if 'loc' in self.r_shaping:
+            r_location = 1/( 1  + np.linalg.norm(np.array(self.agent_location)) )
+            r_location /= (1 + 5*self.stray_distance)
+            reward += r_location 
+
+        if 'turn' in self.r_shaping:
+            reward -= 0.05*np.abs(2*(turn_action - 0.5))
+
+        if 'move' in self.r_shaping:
+            reward -= 0.05*np.abs(move_action)
+
+        if 'found' in self.r_shaping:
+            if self.found_plume is False and observation[-1] > 0.:
+                # print("found_plume")
+                reward += 10
+                self.found_plume = True
+
+
+        reward = reward*self.rewardx # Scale reward for A3C
+        
+        # Optional/debug info
+        done_reason = "HOME" if is_home else \
+            "OOB" if is_outofbounds else \
+            "OOT" if is_outoftime else \
+            "NA"    
+        info = {
+            't_val':self.t_val, 
+            'tidx':self.tidx, 
+            'flipx':self.flipx,
+            'location':self.agent_location, 
+            'location_last':self.agent_location_last, 
+            'location_initial':self.agent_location_init, 
+            'stray_distance': self.stray_distance,
+            'ambient_wind': self.ambient_wind,
+            'angle': self.agent_angle,
+            'reward': reward,
+            'r_radial_step': r_radial_step,
+            'movex': self.movex,
+            'done': done_reason if done else None,
+            'radiusx': self.radiusx,
+            'air_velcity': self.air_velocity,
+            'ground_velocity': self.ground_velocity,
+            'wind_obs': observation[:2],
+            'odor_obs': observation[2],
+            'allocentric_head_direction': observation[3:5],
+            'egocentric_course_direction': observation[5:7] # within SubprocVecEnv, unnormalized obs. Later nomalized in VecPyTorch
+            }
+
+        if done:
+            self.outcomes.append(done_reason)
+            if len(self.outcomes) > 10:
+                self.outcomes = self.outcomes[1:] # maintain list size
+
+        if done and self.verbose > 0:
+            print("{} at (x,y): {}, {} steps w/ reward {}".format( \
+                done_reason, 
+                self.agent_location, 
+                self.episode_step, 
+                reward))
+
+        if self.action_feedback:
+            # print(observation.shape, action.shape)
+            observation = np.concatenate([observation, action])
+
+        if self.flipping and self.flipx < 0:
+            observation[1] *= -1.0 # observation: [x, y, o] 
+
+        self.episode_reward += reward
+        
+        if done:
+            info['episode'] = {'r': self.episode_reward }
+            info['dataset'] = self.dataset
+            info['num_puffs'] = self.data_puffs.puff_number.nunique()
+            info['plume_density'] = self.puff_density
+
+
+        if self.verbose > 0:
+            print(observation, reward, done, info)
+        return observation, reward, done, info
+
+
+class PlumeEnvironment_v4(PlumeEnvironment_v2):
+    def __init__(self, visual_feedback=False, flip_ventral_optic_flow=False, **kwargs):
+        super(PlumeEnvironment_v3, self).__init__(**kwargs)
+        self.set_dataset()
+        self.wind_directions = 1 # only support 1, 2, 3 which correspons to constant, switch, noisy
+        self.flip_ventral_optic_flow = flip_ventral_optic_flow
+        if self.verbose > 0:
+            print("PlumeEnvironment_v3")
+            print("visual_feedback", visual_feedback)
+            print("flip_ventral_optic_flow", flip_ventral_optic_flow)
+        self.visual_feedback = visual_feedback
+        self.ground_velocity = np.array([0, 0]) # for egocentric course direction calculation
+        if self.visual_feedback:
+            self.observation_space = spaces.Box(low=-1, high=+1,
+                                        shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
+        else:
+            self.observation_space = spaces.Box(low=-1, high=+1,
+                                    shape=(3,), dtype=np.float32) # [(apparent/ambient) wind x, y, odor]
+        # convert obs_noise to radians
+        if self.obs_noise:
+            self.obs_noise = np.deg2rad(self.obs_noise)
+
+            
+    def set_dataset(self):
+        self.data_puffs_all = []
+        self.data_wind_all = []
+        for dataset in ['constantx5b5', 'switch45x5b5', 'noisy3x5b5']:
+            data_puffs_all, data_wind_all = load_plume(
+                dataset=dataset, 
+                t_val_min=self.t_val_min, 
+                t_val_max=self.t_val_max,
+                env_dt=self.dt,
+                puff_sparsity=np.clip(self.birthx_max, a_min=0.01, a_max=1.00),
+                diffusion_multiplier=self.diffusion_max,
+                radius_multiplier=self.radiusx,
+                )
+            self.data_puffs_all.append(data_puffs_all)
+            self.data_wind_all.append(data_wind_all)
+
+
+    def sample_env_condition(self):
+        wind_dir = np.random.randint(1, self.wind_directions+1)
+        self.data_puffs = self.data_puffs_all[wind_dir-1].copy() # trim this per episode
+        self.data_wind = self.data_wind_all[wind_dir-1].copy() # trim/flip this per episode
+        self.t_vals = self.data_wind['time'].tolist()
+        self.tidxs = self.data_wind['tidx'].tolist()
+        
+
+    def sense_environment(self):
+        '''
+        Return an array with [wind x, y, odor, allocentric head direction x, y, egocentric course direction x, y]
+        '''
+        # Get an array with [wind x, y, odor]
+            # Wind can either be relative wind or apparent wind, depending on the setting
+        observation = super(PlumeEnvironment_v3, self).sense_environment()
+        # Visual feedback
+        if self.visual_feedback:
+            # head direction
+            allocentric_head_direction_radian = np.angle(self.agent_angle[0] + 1j*self.agent_angle[1], deg=False)
+            # course direction
+            allocentric_course_direction_radian = np.angle(self.ground_velocity[0] + 1j*self.ground_velocity[1], deg=False)
+            egocentric_course_direction_radian = allocentric_course_direction_radian - allocentric_head_direction_radian # leftward positive - standard CWW convention
+            if self.flip_ventral_optic_flow:
+                egocentric_course_direction_radian = allocentric_head_direction_radian - allocentric_course_direction_radian # rightward positive - for eval to see the behavioral impact of flipping course direction perception.
+            if self.obs_noise:
+                allocentric_head_direction_radian += np.random.normal(0, self.obs_noise)
+                egocentric_course_direction_radian += np.random.normal(0, self.obs_noise)
+                apparent_wind_radian = np.angle(observation[0] + 1j*observation[1], deg=False) + np.random.normal(0, self.obs_noise)
+                observation[:2] = [np.cos(apparent_wind_radian), np.sin(apparent_wind_radian)]
+            observation = np.append(observation, [np.cos(allocentric_head_direction_radian), np.sin(allocentric_head_direction_radian), np.cos(egocentric_course_direction_radian), np.sin(egocentric_course_direction_radian)])
+        if self.verbose > 1:
+            print('observation', observation)
+        return observation
+    
+    
+    def reset(self):
+        # Return an array with [wind x, y, odor, air vel x, y, egocentric course direction x, y]
+            # Wind can either be relative wind or apparent wind, depending on the setting
+        self.sample_env_condition() # for curriculumn learning - sample env condition
+        self.episode_reward = 0
+        self.episode_step = 0 # skip_steps already done during loading
+        # Add randomness to start time PER TRIAL!
+        self.step_offset = self.get_initial_step_offset(self.time_algo)
+        self.t_val = self.t_vals[self.episode_step + self.step_offset] 
+        self.t_val_max_episode = self.t_val + 1.0*self.episode_steps_max/self.fps + 1.0
+        self.tidx = self.tidxs[self.episode_step + self.step_offset] # Use tidx when possible
+        self.tidx_min_episode = self.tidx
+        self.tidx_max_episode = self.tidx + self.episode_steps_max*int(100/self.fps) + self.fps 
+
+        # SPEEDUP (subset puffs to those only needed for episode)
+        self.data_puffs = self.data_puffs.query('(tidx >= @self.tidx-1) and (tidx <= @self.tidx_max_episode)') # Speeds up queries!
+        # Dynamic birthx for each episode
+        self.puff_density = 1
+        if self.birthx < 0.99:
+            puff_density = np.clip(np.random.uniform(low=self.birthx, high=1.0), 0.0, 1.0)
+            self.puff_density = puff_density
+            # print("puff_density", self.puff_density)
+            drop_idxs = self.data_puffs['puff_number'].unique()
+            drop_idxs = pd.Series(drop_idxs).sample(frac=(1 - self.puff_density))
+            self.data_puffs = self.data_puffs.query("puff_number not in @drop_idxs") # No deep copy being made
+            # print("puff_number", self.data_puffs['puff_number'].nunique())
+            
+
+        if self.diffusion_min < (self.diffusion_max - 0.01):
+            diffx = np.random.uniform(low=self.diffusion_min, high=self.diffusion_max)
+            self.diffusion_adjust(diffx)
+
+        # Generalization: Randomly flip plume data across x_axis
+        if self.flipping:
+            self.flipx = -1.0 if np.random.uniform() > 0.5 else 1.0 
+        else:
+            self.flipx = 1.0
+
+        # Initialize agent to random location 
+        self.agent_location = self.get_initial_location(self.loc_algo)
+        self.agent_location_last = self.agent_location
+        self.agent_location_init = self.agent_location
+
+        self.stray_distance = self.get_stray_distance()
+        self.stray_distance_last = self.stray_distance
+
+        self.agent_angle = self.get_initial_angle(self.angle_algo)
+        if self.verbose > 0:
+            print("Agent initial location {} and orientation {}".format(self.agent_location, self.agent_angle))
+        self.air_velocity = np.array([0, 0])
+        self.ambient_wind = self.get_current_wind_xy() # Observe after flip
+        observation = self.sense_environment()
+
+        self.found_plume = True if observation[-1] > 0. else False 
         if len(observation) == 7:
             observation[5:] = 0 # course direction to 0
         return observation
