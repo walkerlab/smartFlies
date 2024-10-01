@@ -2371,6 +2371,232 @@ class SubprocVecEnv(SubprocVecEnv_):
         return [self.remotes[i] for i in indices]
 
 
+class SubprocVecEnv_v2(SubprocVecEnv_):
+    # SubprocVecEnv_ is from gym, as seen above in imports
+    # my version that supports running only a subset of envs 
+    # also manages swapping of environments 
+    # also manages current MAX delta wind direction
+    
+    def __init__(self, env_fns: List[Callable[[], gym.Env]], start_method: Optional[str] = None):
+        # inherit __init__ from Gym SubprocVecEnv
+        SubprocVecEnv_.__init__(self, env_fns, start_method)
+        # lists of remotes and processes that are currently deployed
+        self.deployed_remotes = list(self.remotes)
+        self.deployed_processes = self.processes
+        self.wind_directions = 1 # the MAX number of directions of wind in the environment
+        self.remote_directory = {} # key: index of remote, value: dataset name and deployment status
+        available_datasets = self.get_attr_all_envs('dataset') # list of all available datasets 
+        
+        for i, ds in enumerate(available_datasets):
+            self.remote_directory[i] = {'dataset': ds, 'deployed': True, 'wind_direction': self.ds2wind(ds)}
+        
+    def update_wind_direction(self, new_max_wind_direction: int):
+        # only support 1, 2, 3 which correspons to constant, switch, noisy
+        assert new_max_wind_direction <= 3 
+        assert new_max_wind_direction > 0 
+        self.wind_directions = new_max_wind_direction
+    
+    def sample_wind_direction(self):
+        wind_dir = np.random.randint(1, self.wind_directions+1) # +1 because randint is end-exclusive
+        return wind_dir
+    
+    def refresh_deployment_status(self):
+        # check all processes and update deployment status
+        for i, r in enumerate(self.remotes):
+            if r in self.deployed_remotes:
+                self.remote_directory[i]['deployed'] = True
+            else:
+                self.remote_directory[i]['deployed'] = False
+        
+    def deploy(self, indices: VecEnvIndices = None) -> None:
+        """
+        Deploy envs in subprocesses.
+        :param indices: refers to indices of envs.
+        """
+        indices = self._get_indices(indices)
+        self.deployed_remotes = [self.remotes[i] for i in indices]
+        self.deployed_processes = [self.processes[i] for i in indices]
+        assert len(indices) == self.num_envs, "cannot deploy more envs than the predetermined num_processes "
+        self.refresh_deployment_status()
+        
+    def ds2wind(self, ds):
+        # translate dataset name to number of changes in wind direction
+        # input: dataset name
+        # output: number of changes in wind direction (3 as in the agent may encounter up to 3 different wind directions)
+        # TODO: add switch condition... Skip for now. Now sure if concrete difference from nosiy.. 
+        if 'noisy' in ds:
+            return 3
+        elif 'constant' in ds:
+            return 1
+        elif 'switch' in ds:
+            return 2
+        else:
+            raise NotImplementedError
+        
+    def swap(self, idx: int, idx_replacement_item: int) -> None:
+        """
+        Swap envs in subprocesses.
+        :param indices: refers to indices of envs.
+        """
+        self.deployed_remotes[idx] = self.remotes[idx_replacement_item]
+        self.deployed_processes[idx] = self.processes[idx_replacement_item]
+        self.refresh_deployment_status()
+        
+    def step_async(self, actions: np.ndarray) -> None:
+        for remote, action in zip(self.deployed_remotes, actions):
+            remote.send(("step", action))
+        self.waiting = True
+
+    def check_remote_sanity(self):
+        # check if there are any duplicated remotes that are deployed
+        # actually won't be a problem since iterates over self.deployed_remotes
+        assert len(self.deployed_remotes) == len(set(self.deployed_processes)), "duplicated remotes"
+    
+    def step_wait(self) -> VecEnvStepReturn:
+        results = [remote.recv() for remote in self.deployed_remotes]
+        self.waiting = False
+        swapped = False
+        obs, rews, dones, infos = zip(*results)
+        for i, d in enumerate(dones): 
+            if d:
+                # log the final observation
+                infos[i]["terminal_observation"] = obs[i]
+                # sample a new wind condition
+                new_wind_direction = self.sample_wind_direction()
+                # print('[DEBUG] sampled wind direction:', new_wind_direction)
+                current_wind_direction = self.ds2wind(self.get_attr('dataset', i)[0])
+                # print('[DEBUG] current wind direction:', current_wind_direction)
+                # if wind condtion changed, then swap
+                if new_wind_direction != current_wind_direction:
+                    # print(f"[DEBUG] new wind dir selected... pre swap {self.get_attr('dataset')}")
+                    # check the remote_directory to swap with an undeployed env with the condition of interest
+                    for remote_idx, status in self.remote_directory.items():
+                        if status['deployed'] == False and status['wind_direction'] == new_wind_direction:
+                            self.swap(i, remote_idx)
+                            # print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
+                            swapped = True
+                            break
+                
+                # update the newest observation
+                list(obs)[i] = self.reset_deployed_at(i)
+                obs = tuple(obs)
+        
+        return _flatten_obs(obs, self.observation_space), np.stack(rews), np.stack(dones), infos
+
+    def seed(self, seed: Optional[int] = None) -> List[Union[None, int]]:
+        if seed is None:
+            seed = np.random.randint(0, 2**32 - 1)
+        for idx, remote in enumerate(self.deployed_remotes):
+            remote.send(("seed", seed + idx))
+        return [remote.recv() for remote in self.deployed_remotes]
+
+    def reset(self) -> VecEnvObs:
+        # only reset deployed envs
+        for remote in self.deployed_remotes:
+            remote.send(("reset", None))
+        obs = [remote.recv() for remote in self.deployed_remotes]
+        return _flatten_obs(obs, self.observation_space)
+    
+    def reset_deployed_at(self, indices: VecEnvIndices = None) -> VecEnvObs:
+        # reset only envs at indices
+        indices = self._get_indices(indices)
+        for i in indices:
+            self.deployed_remotes[i].send(("reset", None))
+        obs = [self.deployed_remotes[i].recv() for i in indices]
+        return _flatten_obs(obs, self.observation_space)
+
+    def close(self) -> None:
+        # unchanged. Not sure when it is called automatically. Never called manually
+        if self.closed:
+            return
+        if self.waiting:
+            for remote in self.remotes:
+                remote.recv()
+        for remote in self.remotes:
+            remote.send(("close", None))
+        for process in self.processes:
+            process.join()
+        self.closed = True
+
+    def get_images(self) -> Sequence[np.ndarray]:
+        # unchanged. Not sure when it is called automatically. Never called manually
+        for pipe in self.remotes:
+            # gather images from subprocesses
+            # `mode` will be taken into account later
+            pipe.send(("render", "rgb_array"))
+        imgs = [pipe.recv() for pipe in self.remotes]
+        return imgs
+
+    def get_attr(self, attr_name: str, indices: VecEnvIndices = None) -> List[Any]:
+        """Return attribute from the DEPLOYED environments."""
+        target_remotes = self._get_target_remotes(indices, deployed=True)
+        for remote in target_remotes:
+            remote.send(("get_attr", attr_name))
+        return [remote.recv() for remote in target_remotes]
+    
+    def get_attr_all_envs(self, attr_name: str) -> List[Any]:
+        """Return attribute from vectorized environment (see base class)."""
+        indices = range(len(self.remotes))
+        target_remotes = self._get_target_remotes(indices)
+        for remote in target_remotes:
+            remote.send(("get_attr", attr_name))
+        return [remote.recv() for remote in target_remotes]
+
+    def set_attr(self, attr_name: str, value: Any, indices: VecEnvIndices = None) -> None:
+        """Set attribute inside vectorized environments (see base class)."""
+        raise NotImplementedError("set_attr is deprecated... can set attr but does not take effect. need to set via env_method!")
+        target_remotes = self._get_target_remotes(indices, deployed=True)
+        for remote in target_remotes:
+            remote.send(("set_attr", (attr_name, value)))
+        for remote in target_remotes:
+            remote.recv()
+            
+    def set_attr_all_env(self, attr_name: str, value: Any) -> None:
+        """Set attribute inside vectorized environments (see base class)."""
+        raise NotImplementedError("set_attr_all_env is deprecated... can set attr but does not take effect. need to set via env_method!")
+        indices = range(len(self.remotes))
+        target_remotes = self._get_target_remotes(indices)
+        for remote in target_remotes:
+            remote.send(("set_attr", (attr_name, value)))
+        for remote in target_remotes:
+            remote.recv()
+
+    def env_method(self, method_name: str, *method_args, indices: VecEnvIndices = None, **method_kwargs) -> List[Any]:
+        """Call instance methods of vectorized environments. Apply method to deployed envs only"""
+        target_remotes = self._get_target_remotes(indices) # get indices of deployed envs
+        for remote in target_remotes:
+            remote.send(("env_method", (method_name, method_args, method_kwargs)))
+        return [remote.recv() for remote in target_remotes]
+    
+    def env_method_apply_to_all(self, method_name: str, *method_args, indices: VecEnvIndices = None, **method_kwargs) -> List[Any]:
+        """Call instance methods of vectorized environments. Apply method to all environments"""
+        indices = range(len(self.remotes))
+        target_remotes = self._get_target_remotes(indices)
+        for remote in target_remotes:
+            remote.send(("env_method", (method_name, method_args, method_kwargs)))
+        return [remote.recv() for remote in target_remotes]
+
+    def env_is_wrapped(self, wrapper_class: Type[gym.Wrapper], indices: VecEnvIndices = None) -> List[bool]:
+        """Check if worker environments are wrapped with a given wrapper"""
+        target_remotes = self._get_target_remotes(indices)
+        for remote in target_remotes:
+            remote.send(("is_wrapped", wrapper_class))
+        return [remote.recv() for remote in target_remotes]
+
+    def _get_target_remotes(self, indices: VecEnvIndices, deployed: bool = False) -> List[Any]:
+        """
+        Get the connection object needed to communicate with the wanted
+        envs that are in subprocesses.
+
+        :param indices: refers to indices of envs.
+        :return: Connection object to communicate between processes.
+        """
+        indices = self._get_indices(indices)
+        if deployed:
+            return [self.deployed_remotes[i] for i in indices]
+        return [self.remotes[i] for i in indices]
+    
+    
 # Checks whether done was caused my timit limits or not
 class TimeLimitMask(gym.Wrapper):
     def step(self, action):
