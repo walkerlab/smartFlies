@@ -412,9 +412,7 @@ class PlumeEnvironment(gym.Env):
     self.tidx_max_episode = self.tidx + self.episode_steps_max*int(100/self.fps) + self.fps 
 
     # SPEEDUP (subset puffs to those only needed for episode)
-    # self.data_puffs = self.data_puffs_all.query('(time > @self.t_val-1) and (time < @self.t_val_max_episode)') # Speeds up queries!
     self.data_puffs = self.data_puffs_all.query('(tidx >= @self.tidx-1) and (tidx <= @self.tidx_max_episode)') # Speeds up queries!
-    # print("puff_number_all", self.data_puffs['puff_number'].nunique())
     # Dynamic birthx for each episode
     self.puff_density = 1
     if self.birthx < 0.99:
@@ -1082,7 +1080,6 @@ class PlumeEnvironment_v2(gym.Env):
     self.tidx_max_episode = self.tidx + self.episode_steps_max*int(100/self.fps) + self.fps 
 
     # SPEEDUP (subset puffs to those only needed for episode)
-    # self.data_puffs = self.data_puffs_all.query('(time > @self.t_val-1) and (time < @self.t_val_max_episode)') # Speeds up queries!
     self.data_puffs = self.data_puffs_all.query('(tidx >= @self.tidx-1) and (tidx <= @self.tidx_max_episode)') # Speeds up queries!
     # print("puff_number_all", self.data_puffs['puff_number'].nunique())
     # Dynamic birthx for each episode
@@ -1345,6 +1342,8 @@ class PlumeEnvironment_v2(gym.Env):
 class PlumeEnvironment_v3(PlumeEnvironment_v2):
     def __init__(self, visual_feedback=False, flip_ventral_optic_flow=False, **kwargs):
         super(PlumeEnvironment_v3, self).__init__(**kwargs)
+        self.set_dataset()
+        self.wind_directions = 1 # only support 1, 2, 3 which correspons to constant, switch, noisy
         self.flip_ventral_optic_flow = flip_ventral_optic_flow
         if self.verbose > 0:
             print("PlumeEnvironment_v3")
@@ -1361,6 +1360,32 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         # convert obs_noise to radians
         if self.obs_noise:
             self.obs_noise = np.deg2rad(self.obs_noise)
+
+            
+    def set_dataset(self):
+        self.data_puffs_all = []
+        self.data_wind_all = []
+        for dataset in ['constantx5b5', 'switch45x5b5', 'noisy3x5b5']:
+            data_puffs_all, data_wind_all = load_plume(
+                dataset=dataset, 
+                t_val_min=self.t_val_min, 
+                t_val_max=self.t_val_max,
+                env_dt=self.dt,
+                puff_sparsity=np.clip(self.birthx_max, a_min=0.01, a_max=1.00),
+                diffusion_multiplier=self.diffusion_max,
+                radius_multiplier=self.radiusx,
+                )
+            self.data_puffs_all.append(data_puffs_all)
+            self.data_wind_all.append(data_wind_all)
+
+
+    def sample_env_condition(self):
+        wind_dir = np.random.randint(1, self.wind_directions+1)
+        self.data_puffs = self.data_puffs_all[wind_dir-1].copy() # trim this per episode
+        self.data_wind = self.data_wind_all[wind_dir-1].copy() # trim/flip this per episode
+        self.t_vals = self.data_wind['time'].tolist()
+        self.tidxs = self.data_wind['tidx'].tolist()
+        
 
     def sense_environment(self):
         '''
@@ -1388,10 +1413,61 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print('observation', observation)
         return observation
     
+    
     def reset(self):
         # Return an array with [wind x, y, odor, air vel x, y, egocentric course direction x, y]
             # Wind can either be relative wind or apparent wind, depending on the setting
-        observation = super(PlumeEnvironment_v3, self).reset()
+        self.sample_env_condition() # for curriculumn learning - sample env condition
+        self.episode_reward = 0
+        self.episode_step = 0 # skip_steps already done during loading
+        # Add randomness to start time PER TRIAL!
+        self.step_offset = self.get_initial_step_offset(self.time_algo)
+        self.t_val = self.t_vals[self.episode_step + self.step_offset] 
+        self.t_val_max_episode = self.t_val + 1.0*self.episode_steps_max/self.fps + 1.0
+        self.tidx = self.tidxs[self.episode_step + self.step_offset] # Use tidx when possible
+        self.tidx_min_episode = self.tidx
+        self.tidx_max_episode = self.tidx + self.episode_steps_max*int(100/self.fps) + self.fps 
+
+        # SPEEDUP (subset puffs to those only needed for episode)
+        self.data_puffs = self.data_puffs.query('(tidx >= @self.tidx-1) and (tidx <= @self.tidx_max_episode)') # Speeds up queries!
+        # Dynamic birthx for each episode
+        self.puff_density = 1
+        if self.birthx < 0.99:
+            puff_density = np.clip(np.random.uniform(low=self.birthx, high=1.0), 0.0, 1.0)
+            self.puff_density = puff_density
+            # print("puff_density", self.puff_density)
+            drop_idxs = self.data_puffs['puff_number'].unique()
+            drop_idxs = pd.Series(drop_idxs).sample(frac=(1 - self.puff_density))
+            self.data_puffs = self.data_puffs.query("puff_number not in @drop_idxs") # No deep copy being made
+            # print("puff_number", self.data_puffs['puff_number'].nunique())
+            
+
+        if self.diffusion_min < (self.diffusion_max - 0.01):
+            diffx = np.random.uniform(low=self.diffusion_min, high=self.diffusion_max)
+            self.diffusion_adjust(diffx)
+
+        # Generalization: Randomly flip plume data across x_axis
+        if self.flipping:
+            self.flipx = -1.0 if np.random.uniform() > 0.5 else 1.0 
+        else:
+            self.flipx = 1.0
+
+        # Initialize agent to random location 
+        self.agent_location = self.get_initial_location(self.loc_algo)
+        self.agent_location_last = self.agent_location
+        self.agent_location_init = self.agent_location
+
+        self.stray_distance = self.get_stray_distance()
+        self.stray_distance_last = self.stray_distance
+
+        self.agent_angle = self.get_initial_angle(self.angle_algo)
+        if self.verbose > 0:
+            print("Agent initial location {} and orientation {}".format(self.agent_location, self.agent_angle))
+        self.air_velocity = np.array([0, 0])
+        self.ambient_wind = self.get_current_wind_xy() # Observe after flip
+        observation = self.sense_environment()
+
+        self.found_plume = True if observation[-1] > 0. else False 
         if len(observation) == 7:
             observation[5:] = 0 # course direction to 0
         return observation
