@@ -1618,6 +1618,7 @@ class PlumeEnvironment_v4(PlumeEnvironment_v2):
     ):
     super(PlumeEnvironment_v2, self).__init__()
 
+    np.random.seed(seed)    
     self.arguments = locals()
     print("PlumeEnvironment v4:", self.arguments)
     
