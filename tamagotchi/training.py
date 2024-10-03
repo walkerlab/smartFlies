@@ -24,10 +24,12 @@ def update_by_schedule(envs, schedule_dict, curr_step):
             updated = k
             # different update functions since birthx is managed by each process, while wind_cond is managed by my custom SubprocVecEnv
             if k == 'birthx': # update the birthx value in the envs. Sparsity is decided in each envs.reset() at each trial
-                envs.env_method_apply_to_all("update_env_param", {k: _schedule_dict[curr_step]})
+                # envs.env_method_apply_to_all("update_env_param", {k: _schedule_dict[curr_step]})
+                envs.env_method("update_env_param", {k: _schedule_dict[curr_step]})
                 print(f"update_env_param {k}: {_schedule_dict[curr_step]} at {curr_step}")
             elif k == 'wind_cond': 
-                envs.update_wind_direction(_schedule_dict[curr_step])
+                # envs.update_wind_direction(_schedule_dict[curr_step])
+                envs.env_method("update_env_param", {k: _schedule_dict[curr_step]})
                 print(f"update_env_param {k}: {_schedule_dict[curr_step]} at {curr_step}")
             else:
                 raise NotImplementedError
