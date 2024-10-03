@@ -334,7 +334,7 @@ class PlumeEnvironment(gym.Env):
 
     if 'quantile' in algo:
         """ 
-        Distance curriculum
+        Distance curriculum - not used in current experiments
         Start the agent at a location with random location with mean and var
         decided by distribution/percentile of puffs 
         """
@@ -1018,7 +1018,7 @@ class PlumeEnvironment_v2(gym.Env):
         Y_pcts
         Y_mean, Y_var = Y_pcts[1], min(1, Y_pcts[1] - Y_pcts[0]) # TODO: What was min for?
         # print(Y_mean, Y_var)
-        varx = self.qvar 
+        varx = self.qvar
         loc_xy = np.array([X_mean + varx*X_var*np.random.randn(), 
             Y_mean + varx*Y_var*np.random.randn()]) 
 
@@ -1571,206 +1571,189 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         return observation, reward, done, info
 
 
-class PlumeEnvironment_v4(PlumeEnvironment_v2):
+class PlumeEnvironment_v4(gym.Env):
+    def __init__(self, 
+        t_val_min=60.00, 
+        sim_steps_max=300, # steps
+        reset_offset_tmax=30, # seconds; max secs for initial offset from t_val_min
+        dataset=['constantx5b5', 'switch45x5b5', 'noisy3x5b5'],
+        move_capacity=2.0, # Max agent speed in m/s
+        turn_capacity=6.25*np.pi, # Max agent CW/CCW turn per second
+        wind_obsx=1.0, # normalize/divide wind observations by this quantity (move_capacity + wind_max) 
+        movex=1.0, # move_max multiplier for tuning
+        turnx=1.0, # turn_max multiplier for tuning
+        birthx=1.0, # per-episode puff birth rate sparsity minimum
+        birthx_max=1.0, # overall odor puff birth rate sparsity max
+        env_dt=0.04,
+        loc_algo='quantile',
+        qvar=1.0, # Variance of init. location; higher = more off-plume initializations
+        time_algo='uniform',
+        angle_algo='uniform',
+        homed_radius=0.2, # meters, at which to end flying episode
+        stray_max=2.0, # meters, max distance agent can stray from plume
+        wind_rel=True, # Agent senses relative wind speed (not ground speed) # will be overridden by apparent wind if turned on
+        auto_movex=False, # simple autocurricula for movex
+        auto_reward=False, # simple autocurricula for reward decay
+        diff_max=0.8, # teacher curriculum; sets the quantile of init x location 
+        diff_min=0.4, # teacher curriculum; sets the quantile of init x location 
+        r_shaping=['step', 'oob'], # 'step', 'end'
+        rewardx=1.0, # scale reward for e.g. A3C
+        squash_action=False, # apply tanh and rescale (useful with PPO) i.e. convert action [0,1] to [-1,1] and then rescale to [0,1]
+        walking=False,
+        radiusx=1.0, 
+        diffusion_min=1.00, 
+        diffusion_max=1.00, 
+        action_feedback=False,
+        flipping=False, # Generalization/reduce training data bias
+        odor_scaling=False, # Generalization/reduce training data bias
+        obs_noise=0.0, # Multiplicative: Wind & Odor observation noise.
+        act_noise=0.0, # Multiplicative: Move & Turn action noise.
+        seed=137,
+        verbose=0,
+        apparent_wind=False,
+        apparent_wind_allo=False, # deprecated!
+        visual_feedback=False, 
+        flip_ventral_optic_flow=False
+        ):
+        # TODO - not inheriting from v1 as v2 did - check that all that's needed is here
+        super(PlumeEnvironment_v4, self).__init__()
+
+        np.random.seed(seed)    
+        self.arguments = locals()
+        print("PlumeEnvironment v4:", self.arguments)
+        # Load wind condition specific settings
+        self.datasets = dataset 
+        # TODO make sure this is compatible with eval
+        self.qvars = qvar # not used in training but in eval 
+        self.diff_maxs = diff_max # not used in training but in eval 
+        self.diff_mins = diff_min # not used in training but in eval 
+        self.t_val_mins = t_val_min
+        self.reset_offset_tmaxs = reset_offset_tmax
+        self.t_val_maxs = np.add(self.t_val_mins + self.reset_offset_tmaxs) + 1.0*self.episode_steps_max/self.fps + 1.00
+        self.set_dataset()
+        self.wind_directions = 1 # only support 1, 2, 3 which correspons to constant, switch, noisy
+        self.sample_env_condition()
+        self.verbose = verbose
+        self.venv = self
+        self.stray_max = stray_max
+        self.squash_action = squash_action
+        self.obs_noise = obs_noise
+        # Fixed evaluation related:
+        self.fixed_time_offset = 0.0 # seconds
+        self.fixed_angle = 0.0 # downwind
+        self.fixed_x = 7.0 
+        self.fixed_y = 0.0 # might not work for switch/noisy! 
+        # Environment/state variables
+        self.dt = env_dt # 0.1, 0.2, 0.4, 0.5 sec
+        self.fps = int(1/self.dt)
+        self.episode_step = 0 # skip_steps done during loading
+        # Load simulated data
+        self.radiusx = radiusx
+        self.birthx = birthx
+        self.birthx_max = birthx_max
+        self.episode_steps_max = sim_steps_max # Short training episodes to gather rewards
     
-  def __init__(self, 
-    t_val_min=60.00, 
-    sim_steps_max=300, # steps
-    reset_offset_tmax=30, # seconds; max secs for initial offset from t_val_min
-    dataset='constantx5b5',
-    move_capacity=2.0, # Max agent speed in m/s
-    turn_capacity=6.25*np.pi, # Max agent CW/CCW turn per second
-    wind_obsx=1.0, # normalize/divide wind observations by this quantity (move_capacity + wind_max) 
-    movex=1.0, # move_max multiplier for tuning
-    turnx=1.0, # turn_max multiplier for tuning
-    birthx=1.0, # per-episode puff birth rate sparsity minimum
-    birthx_max=1.0, # overall odor puff birth rate sparsity max
-    env_dt=0.04,
-    loc_algo='quantile',
-    qvar=1.0, # Variance of init. location; higher = more off-plume initializations
-    time_algo='uniform',
-    angle_algo='uniform',
-    homed_radius=0.2, # meters, at which to end flying episode
-    stray_max=2.0, # meters, max distance agent can stray from plume
-    wind_rel=True, # Agent senses relative wind speed (not ground speed) # will be overridden by apparent wind if turned on
-    auto_movex=False, # simple autocurricula for movex
-    auto_reward=False, # simple autocurricula for reward decay
-    diff_max=0.8, # teacher curriculum; sets the quantile of init x location 
-    diff_min=0.4, # teacher curriculum; sets the quantile of init x location 
-    r_shaping=['step', 'oob'], # 'step', 'end'
-    rewardx=1.0, # scale reward for e.g. A3C
-    squash_action=False, # apply tanh and rescale (useful with PPO) i.e. convert action [0,1] to [-1,1] and then rescale to [0,1]
-    walking=False,
-    radiusx=1.0, 
-    diffusion_min=1.00, 
-    diffusion_max=1.00, 
-    action_feedback=False,
-    flipping=False, # Generalization/reduce training data bias
-    odor_scaling=False, # Generalization/reduce training data bias
-    obs_noise=0.0, # Multiplicative: Wind & Odor observation noise.
-    act_noise=0.0, # Multiplicative: Move & Turn action noise.
-    seed=137,
-    verbose=0,
-    apparent_wind=False,
-    apparent_wind_allo=False, # deprecated!
-    visual_feedback=False, 
-    flip_ventral_optic_flow=False
-    ):
-    super(PlumeEnvironment_v2, self).__init__()
+        self.flip_ventral_optic_flow = flip_ventral_optic_flow
+        if self.verbose > 0:
+            print("PlumeEnvironment_v4")
+            print("visual_feedback", visual_feedback)
+            print("flip_ventral_optic_flow", flip_ventral_optic_flow)
+        self.visual_feedback = visual_feedback
+        
+        # Correction for short simulations
+        if self.data_wind.shape[0] < self.episode_steps_max:
+            if self.verbose > 0:
+                print("Wind data available only up to {} steps".format(self.data_wind.shape[0]))
+            self.episode_steps_max = self.data_wind.shape[0]
 
-    np.random.seed(seed)    
-    self.arguments = locals()
-    print("PlumeEnvironment v4:", self.arguments)
-    
-    self.verbose = verbose
-    self.venv = self
-    self.walking = walking
-    self.rewardx = rewardx
-    self.odor_scaling = odor_scaling
-    self.stray_max = stray_max
-    self.wind_obsx = wind_obsx
-    self.reset_offset_tmax = reset_offset_tmax
-    self.action_feedback = action_feedback
-    self.qvar = qvar
-    self.squash_action = squash_action
-    self.obs_noise = obs_noise
-    self.act_noise = act_noise
-    
-    # Fixed evaluation related:
-    self.fixed_time_offset = 0.0 # seconds
-    self.fixed_angle = 0.0 # downwind
-    self.fixed_x = 7.0 
-    self.fixed_y = 0.0 # might not work for switch/noisy! 
+        # Other initializations -- many redundant, see .reset() 
+        # self.agent_location = np.array([1, 0]) # TODO: Smarter
+        self.agent_location = None
+        self.agent_location_last = self.agent_location
+        self.agent_location_init = self.agent_location
+        random_angle = np.pi * np.random.uniform(0, 2)
+        self.agent_angle_radians = [np.cos(random_angle), np.sin(random_angle)] # Sin and Cos of angle of orientation
+        self.step_offset = 0 # random offset per trial in reset()
+        self.t_val = self.t_vals[self.episode_step + self.step_offset] 
+        self.tidx = self.tidxs[self.episode_step + self.step_offset] 
+        self.tidx_min_episode = self.tidx
+        self.tidx_max_episode = self.tidx
+        self.ambient_wind = None
+        self.stray_distance = 0
+        self.stray_distance_last = 0
+        self.air_velocity = np.array([0, 0]) # Maintain last timestep velocity (in absolute coordinates) for relative sensory observations
+        self.episode_reward = 0
 
+        # Generalization & curricula
+        self.r_shaping = r_shaping
+        # print("Reward Shaping", self.r_shaping)
+        self.flipping = flipping 
+        self.flipx = 1.0 # flip puffs around x-axis? 
+        self.difficulty = diff_max # Curriculum
+        self.diff_max = diff_max # Curriculum
+        self.diff_min = diff_min # Curriculum
+        self.odorx = 1.0 # Doesn't make a difference except when thresholding
+        self.turnx = turnx
+        self.movex = movex
+        self.auto_movex = auto_movex
+        self.auto_reward = auto_reward
+        self.reward_decay = 1.00
+        self.loc_algo = loc_algo
+        self.angle_algo = angle_algo
+        self.time_algo = time_algo
+        assert self.time_algo in ['uniform', 'linear', 'fixed']
+        self.outcomes = [] # store outcome last N episodes
 
-    # Environment/state variables
-    # self.dt = config.env['dt'] 
-    self.dt = env_dt # 0.1, 0.2, 0.4, 0.5 sec
-    # self.fps = config.env['fps'] # 20/25/50/100 steps/sec
-    self.fps = int(1/self.dt)
-    # self.sim_fps = 100 # not used
-    self.episode_step = 0 # skip_steps done during loading
+        # Constants
+        self.wind_rel = wind_rel
+        self.turn_capacity = turn_capacity
+        self.move_capacity = move_capacity 
+        self.arena_bounds = config.env['arena_bounds'] 
+        self.homed_radius = homed_radius  # End session if dist(agent - source) < homed_radius
+        self.rewards = {
+        'tick': -10/self.episode_steps_max,
+        'homed': 101.0,
+        }
 
-    # Load simulated data
-    self.radiusx = radiusx
-    self.birthx = birthx
-    self.birthx_max = birthx_max
-    self.diffusion_max = diffusion_max # Puff diffusion multiplier (initial)
-    self.diffusion_min = diffusion_min # Puff diffusion multiplier (reset-time)
-    self.t_val_min = t_val_min
-    self.episode_steps_max = sim_steps_max # Short training episodes to gather rewards
-    self.t_val_max = self.t_val_min + self.reset_offset_tmax + 1.0*self.episode_steps_max/self.fps + 1.00
-    curriculum_vars = {
-        'dataset': args.dataset,
-        'qvar': args.qvar,
-        'diff_max': args.diff_max,
-        'diff_min': args.diff_min,
-        'reset_offset_tmax': [30, 3, 30], # 3 for switch condition, according to evalCli 
-        't_val_min': [60, 58, 60] # start time of plume data. 58 for switch condition, at around when the switching happens accoding to evalCli
-    }
-    self.set_dataset(dataset)
-    self.wind_directions = 1 # only support 1, 2, 3 which correspons to constant, switch, noisy
-    self.flip_ventral_optic_flow = flip_ventral_optic_flow
-    if self.verbose > 0:
-        print("PlumeEnvironment_v3")
-        print("visual_feedback", visual_feedback)
-        print("flip_ventral_optic_flow", flip_ventral_optic_flow)
-    self.visual_feedback = visual_feedback
-    
-    # Correction for short simulations
-    if self.data_wind.shape[0] < self.episode_steps_max:
-      if self.verbose > 0:
-        print("Wind data available only up to {} steps".format(self.data_wind.shape[0]))
-      self.episode_steps_max = self.data_wind.shape[0]
+        # Wind Sensing 
+        self.apparent_wind = apparent_wind # egocentric app wind = -air velocity (intended direction of movement)
 
-    # Other initializations -- many redundant, see .reset() 
-    # self.agent_location = np.array([1, 0]) # TODO: Smarter
-    self.agent_location = None
-    self.agent_location_last = self.agent_location
-    self.agent_location_init = self.agent_location
-    random_angle = np.pi * np.random.uniform(0, 2)
-    self.agent_angle_radians = [np.cos(random_angle), np.sin(random_angle)] # Sin and Cos of angle of orientation
-    self.step_offset = 0 # random offset per trial in reset()
-    self.t_val = self.t_vals[self.episode_step + self.step_offset] 
-    self.tidx = self.tidxs[self.episode_step + self.step_offset] 
-    self.tidx_min_episode = self.tidx
-    self.tidx_max_episode = self.tidx
-    self.ambient_wind = None
-    self.stray_distance = 0
-    self.stray_distance_last = 0
-    self.air_velocity = np.array([0, 0]) # Maintain last timestep velocity (in absolute coordinates) for relative sensory observations
-    self.episode_reward = 0
+        # Define action and observation spaces
+        # Actions:
+        # Move [0, 1], with 0.0 = no movement
+        # Turn [0, 1], with 0.5 = no turn... maybe change to [-1, 1]
+        self.action_space = spaces.Box(low=0, high=+1,
+                                            shape=(2,), dtype=np.float32)
 
-    # Generalization & curricula
-    self.r_shaping = r_shaping
-    # print("Reward Shaping", self.r_shaping)
-    self.flipping = flipping 
-    self.flipx = 1.0 # flip puffs around x-axis? 
-    self.difficulty = diff_max # Curriculum
-    self.diff_max = diff_max # Curriculum
-    self.diff_min = diff_min # Curriculum
-    self.odorx = 1.0 # Doesn't make a difference except when thresholding
-    self.turnx = turnx
-    self.movex = movex
-    self.auto_movex = auto_movex
-    self.auto_reward = auto_reward
-    self.reward_decay = 1.00
-    self.loc_algo = loc_algo
-    self.angle_algo = angle_algo
-    self.time_algo = time_algo
-    assert self.time_algo in ['uniform', 'linear', 'fixed']
-    self.outcomes = [] # store outcome last N episodes
-
-    # Constants
-    self.wind_rel = wind_rel
-    self.turn_capacity = turn_capacity
-    self.move_capacity = move_capacity 
-    self.arena_bounds = config.env['arena_bounds'] 
-    self.homed_radius = homed_radius  # End session if dist(agent - source) < homed_radius
-    self.rewards = {
-      'tick': -10/self.episode_steps_max,
-      'homed': 101.0,
-      }
-
-    # Wind Sensing 
-    self.apparent_wind = apparent_wind # egocentric app wind = -air velocity (intended direction of movement)
-
-    # Define action and observation spaces
-    # Actions:
-    # Move [0, 1], with 0.0 = no movement
-    # Turn [0, 1], with 0.5 = no turn... maybe change to [-1, 1]
-    self.action_space = spaces.Box(low=0, high=+1,
-                                        shape=(2,), dtype=np.float32)
-
-    # Observations
-    # Wind velocity [-1, 1] * 2, Odor concentration [0, 1]
-    obs_dim = 3 if not self.action_feedback else 3+2
-    self.observation_space = spaces.Box(low=-1, high=+1,
-                                        shape=(obs_dim,), dtype=np.float32)
-
-    self.ground_velocity = np.array([0, 0]) # for egocentric course direction calculation
-    if self.visual_feedback:
+        # Observations
+        # Wind velocity [-1, 1] * 2, Odor concentration [0, 1]
+        obs_dim = 3 if not self.action_feedback else 3+2
         self.observation_space = spaces.Box(low=-1, high=+1,
-                                    shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
-    else:
-        self.observation_space = spaces.Box(low=-1, high=+1,
-                                shape=(3,), dtype=np.float32) # [(apparent/ambient) wind x, y, odor]
-    # convert obs_noise to radians
-    if self.obs_noise:
-        self.obs_noise = np.deg2rad(self.obs_noise)
+                                            shape=(obs_dim,), dtype=np.float32)
 
-            
+        self.ground_velocity = np.array([0, 0]) # for egocentric course direction calculation
+        if self.visual_feedback:
+            self.observation_space = spaces.Box(low=-1, high=+1,
+                                        shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
+        else:
+            self.observation_space = spaces.Box(low=-1, high=+1,
+                                    shape=(3,), dtype=np.float32) # [(apparent/ambient) wind x, y, odor]
+        # convert obs_noise to radians
+        if self.obs_noise:
+            self.obs_noise = np.deg2rad(self.obs_noise)
+
+                
     def set_dataset(self):
         self.data_puffs_all = []
         self.data_wind_all = []
-        for dataset in ['constantx5b5', 'switch45x5b5', 'noisy3x5b5']:
+        for i, dataset in enumerate(self.datasets):
             data_puffs_all, data_wind_all = load_plume(
                 dataset=dataset, 
-                t_val_min=self.t_val_min, 
-                t_val_max=self.t_val_max,
+                t_val_min=self.t_val_mins[i], 
+                t_val_max=self.t_val_maxs[i],
                 env_dt=self.dt,
                 puff_sparsity=np.clip(self.birthx_max, a_min=0.01, a_max=1.00),
-                diffusion_multiplier=self.diffusion_max,
+                diffusion_multiplier=self.diff_maxs[i],
                 radius_multiplier=self.radiusx,
                 )
             self.data_puffs_all.append(data_puffs_all)
@@ -1779,6 +1762,10 @@ class PlumeEnvironment_v4(PlumeEnvironment_v2):
 
     def sample_env_condition(self):
         wind_dir = np.random.randint(1, self.wind_directions+1)
+        self.qvar = self.qvars[wind_dir-1]
+        self.diffusion_min = self.diff_mins[wind_dir-1]
+        self.diffusion_max = self.diff_maxs[wind_dir-1]
+        self.dataset = self.datasets[wind_dir-1]
         self.data_puffs = self.data_puffs_all[wind_dir-1].copy() # trim this per episode
         self.data_wind = self.data_wind_all[wind_dir-1].copy() # trim/flip this per episode
         self.t_vals = self.data_wind['time'].tolist()
