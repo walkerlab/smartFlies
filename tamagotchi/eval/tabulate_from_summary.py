@@ -35,10 +35,17 @@ def parse_summary_files(fnames, BASE_DIR):
             row['seed'] = row["model_dir"].split("_")[1]
             
         counts_df.append(row)
-        
+    def is_number(s):
+        try:
+            float(s)
+            return True
+        except ValueError:
+            return False
     counts_df = pd.DataFrame(counts_df)
-    counts_df['relative_plume_density'] = [1 if len(ds.split("_")) == 1 else ds.split("_")[1] for ds in counts_df['dataset']]
-    counts_df['condition'] = [ds.split("_")[0] for ds in counts_df['dataset']]
+    # Eg poisson_mag_noisy3x5b5_0.7 - first check if the last part is a number, if not, set it to 1
+    counts_df['relative_plume_density'] = [ds.split("_")[-1] if is_number(ds.split("_")[-1]) else 1 for ds in counts_df['dataset']]
+    # Eg poisson_mag_noisy3x5b5_0.7 - then check if the last part is a number, if not, the whole string is the condition
+    counts_df['condition'] = ["_".join(ds.split("_")[:-1]) if is_number(ds.split("_")[-1]) else ds for ds in counts_df['dataset']]
     counts_df['Success_pct'] = counts_df['HOME'] / counts_df['total'] * 100
     # pivot_df = counts_df.pivot(index=['model_dir', 'seed'], columns='dataset', values='HOME').reset_index()
     return counts_df
