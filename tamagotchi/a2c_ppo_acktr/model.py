@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from tamagotchi.a2c_ppo_acktr.gnODE import GNODE
 from tamagotchi.a2c_ppo_acktr.distributions import Bernoulli, Categorical, DiagGaussian, BetaCustom
 from tamagotchi.a2c_ppo_acktr.utils import init
 
@@ -89,22 +90,36 @@ class NNBase(nn.Module):
 
         self._hidden_size = hidden_size
         self._recurrent = recurrent
+        layer_size = 250
 
         if recurrent:
             print("hidden_size", hidden_size)
             if rnn_type == 'VRNN':
                 print("Using VanillaRNN")
                 self.rnn = nn.RNN(recurrent_input_size, hidden_size)
-            else:
+            elif rnn_type == 'GRU':
                 print("Using GRU")
                 self.rnn = nn.GRU(recurrent_input_size, hidden_size)
-            for name, param in self.rnn.named_parameters():
-                if 'bias' in name:
-                    nn.init.constant_(param, 0) 
-                elif 'weight' in name:
-                    # nn.init.orthogonal_(param)
-                    # nn.init.normal_(param, mean=0.0, std=1./hidden_size)
-                    nn.init.normal_(param, mean=0.0, std=1./np.sqrt(hidden_size))
+            elif rnn_type == 'GNODE':
+                print("Using GNODE")
+                self.rnn = GNODE(recurrent_input_size, hidden_size, layer_size)
+            
+            if rnn_type == 'GNODE':
+                for name, param in self.rnn.named_parameters():
+                        if 'bias' in name:
+                            nn.init.constant_(param, 0) 
+                        elif 'weight' in name:
+                            if len(param.shape) == 2:  # Linear layer
+                                fan_in = param.shape[1]
+                                nn.init.trunc_normal_(param, mean=0.0, std=np.sqrt(1.414/fan_in))
+            else:
+                for name, param in self.rnn.named_parameters():
+                    if 'bias' in name:
+                        nn.init.constant_(param, 0) 
+                    elif 'weight' in name:
+                        # nn.init.orthogonal_(param)
+                        # nn.init.normal_(param, mean=0.0, std=1./hidden_size)
+                        nn.init.normal_(param, mean=0.0, std=1./np.sqrt(hidden_size))
 
 
     @property
@@ -213,6 +228,52 @@ class MLPBase(NNBase):
         hx1_actor = self.actor1(x)
         hidden_critic = self.critic(hx1_critic)
         hidden_actor = self.actor(hx1_actor)
+
+        value = self.critic_linear(hidden_critic)
+        
+        activities = {
+            'rnn_hxs': rnn_hxs,
+            'hx1_actor': hx1_actor,
+            'hx1_critic': hx1_critic,
+            'hidden_actor': hidden_actor,
+            'hidden_critic': hidden_critic,
+            'value': value,
+        }
+
+        return value, hidden_actor, rnn_hxs, activities
+
+class Simple_MLPBase(NNBase):
+    def __init__(self, num_inputs, recurrent=False, hidden_size=64, rnn_type='GRU'):
+        super(Simple_MLPBase, self).__init__(recurrent, num_inputs, hidden_size, rnn_type)
+
+        if recurrent:
+            num_inputs = hidden_size
+
+        init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
+                               constant_(x, 0), np.sqrt(2))
+
+        self.actor = nn.Sequential(
+            init_(nn.Linear(num_inputs, hidden_size)), nn.Identity())
+
+        self.critic1 = nn.Sequential(
+            init_(nn.Linear(num_inputs, hidden_size)), nn.ReLU())
+        self.critic = nn.Sequential(
+            init_(nn.Linear(hidden_size, hidden_size)), nn.ReLU())
+
+        self.critic_linear = init_(nn.Linear(hidden_size, 1))
+
+        self.train() # tells your model that you are training the model not eval().
+
+    def forward(self, inputs, rnn_hxs, masks):
+        x = inputs
+
+        if self.is_recurrent:
+            x, rnn_hxs = self._forward_rnn(x, rnn_hxs, masks)
+
+        hx1_critic = self.critic1(x)
+        hx1_actor = self.actor(x)
+        hidden_actor = hx1_actor
+        hidden_critic = self.critic(hx1_critic)
 
         value = self.critic_linear(hidden_critic)
         
