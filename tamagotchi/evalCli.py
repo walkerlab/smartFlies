@@ -117,8 +117,12 @@ def evaluate_agent(actor_critic, env, args):
         rewards = []
         infos = []
         activities = []
-
+        env.venv.train()
+        
         while True:
+            np.random.seed(0)
+            # set random seed for pytorch
+            torch.manual_seed(0)
             with torch.no_grad():
                 value, action, _, recurrent_hidden_states, activity = actor_critic.act(
                     obs, 
@@ -129,6 +133,7 @@ def evaluate_agent(actor_critic, env, args):
                     recurrent_hidden_states = agent_analysis.perturb_rnn_activity(recurrent_hidden_states, orthogonal_basis, sigma_noise, args.perturb_RNN_by)
                     
             obs, reward, done, info = env.step(action)
+            print("step",ep_step, "\nobs", obs.to("cpu").numpy().astype(np.float32), "\naction", action.to("cpu").numpy().astype(np.float32))
             masks.fill_(0.0 if done else 1.0)
 
             if args.device != 'cpu':
@@ -186,6 +191,10 @@ def evaluate_agent(actor_critic, env, args):
             ep_step += 1
 
             if _done:
+                # for i in range(len(trajectory)):
+                #     print(f"step {i}")
+                #     print(f"obs {observations[i]}")
+                #     print(f"action {actions[i]}")
                 num_tests += 1
                 reward_total_sum += reward_sum
                 reward_mean = reward_total_sum / num_tests
@@ -476,7 +485,7 @@ if __name__ == "__main__":
     
     # actor_critic, ob_rms, optimizer_state_dict = torch.load(args.model_fname, map_location=torch.device('cpu'))
     try:
-        actor_critic, ob_rms, optimizer_state_dict = torch.load(args.model_fname, map_location=torch.device(args.device))
+        actor_critic, ob_rms, optimizer_state_dict = torch.load(args.model_fname, map_location=torch.device(args.device), weights_only=False)
     except ValueError:
         actor_critic, ob_rms = torch.load(args.model_fname, map_location=torch.device(args.device))
     

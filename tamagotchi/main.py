@@ -147,9 +147,9 @@ def load_model(args, curriculum_vars):
       
     # load model
     try:
-        actor_critic, ob_rms, optimizer_state_dict = torch.load(args.model_fpath, map_location=torch.device(args.device))
+        actor_critic, ob_rms, optimizer_state_dict = torch.load(args.model_fpath, map_location=torch.device(args.device), weights_only=False)
     except ValueError:
-        actor_critic, ob_rms = torch.load(args.model_fpath, map_location=torch.device(args.device))
+        actor_critic, ob_rms = torch.load(args.model_fpath, map_location=torch.device(args.device), weights_only=False)
     except Exception as e:
         print(f"Loading model failed.. see exception message: {e}", flush=True)
         raise e
@@ -251,7 +251,7 @@ def main(args=None):
     # creates the envs and deploys the first 'num_processes' envs 
     envs = make_vec_envs(
         args.env_name,
-        args.seed,
+        args.seed + 1000,
         args.num_processes,
         args.gamma,
         args.log_dir,
@@ -317,33 +317,33 @@ def main(args=None):
                         actor_critic.recurrent_hidden_state_size)
     
     # Set our tracking server uri for logging
-    mlflow.set_tracking_uri(uri="https://dev0.uwcnc.net/mlflow/")
-    mlflow.set_system_metrics_sampling_interval(3600)
-    # Create a new MLflow Experiment
-    experiment_name = os.path.basename((os.path.dirname(args.save_dir))) 
-    run_name = args.outsuffix
-    mlflow.set_experiment(experiment_name)
-    # Start an MLflow run
-    run_object = mlflow.search_runs(filter_string=f"attributes.run_name = '{run_name}'")
-    run_params = {}
-    if len(run_object) > 0:
-        # Run exists - use its run_id
-        run_id = run_object.iloc[0]["run_id"]
-        run_params['run_id'] = run_id
-        run_params['log_system_metrics'] = True
-        print(f"Continuing existing run: {run_name} (ID: {run_id})")
-    else:
-        # Run doesn't exist - use run_name
-        run_params['run_name'] = run_name
-        run_params['log_system_metrics'] = True
-        print(f"Starting new run: {run_name}")
+    # mlflow.set_tracking_uri(uri="https://dev0.uwcnc.net/mlflow/")
+    # mlflow.set_system_metrics_sampling_interval(3600)
+    # # Create a new MLflow Experiment
+    # experiment_name = os.path.basename((os.path.dirname(args.save_dir))) 
+    # run_name = args.outsuffix
+    # mlflow.set_experiment(experiment_name)
+    # # Start an MLflow run
+    # run_object = mlflow.search_runs(filter_string=f"attributes.run_name = '{run_name}'")
+    # run_params = {}
+    # if len(run_object) > 0:
+    #     # Run exists - use its run_id
+    #     run_id = run_object.iloc[0]["run_id"]
+    #     run_params['run_id'] = run_id
+    #     run_params['log_system_metrics'] = True
+    #     print(f"Continuing existing run: {run_name} (ID: {run_id})")
+    # else:
+    #     # Run doesn't exist - use run_name
+    #     run_params['run_name'] = run_name
+    #     run_params['log_system_metrics'] = True
+    #     print(f"Starting new run: {run_name}")
 
-    # Single block using the appropriate parameters
-    with mlflow.start_run(**run_params):
-        # Log the hyperparameters dict to mlflow
-        mlflow.log_params(vars(args)) 
+    # # Single block using the appropriate parameters
+    # with mlflow.start_run(**run_params):
+    #     # Log the hyperparameters dict to mlflow
+    #     mlflow.log_params(vars(args)) 
 
-        training_log, eval_log = training_loop(agent, envs, args, device, actor_critic, 
+    training_log, eval_log = training_loop(agent, envs, args, device, actor_critic, 
             training_log=training_log, eval_log=eval_log, eval_env=None, rollouts=rollouts)
 
     # close the envs

@@ -190,6 +190,27 @@ def training_loop(agent, envs, args, device, actor_critic,
         if not args.dryrun:
             utils.save_tc_schedule(schedule, num_updates, args.num_processes, args.num_steps, args.save_dir)
     
+    envs.swap(0,12)
+    envs.swap(1,13)
+    envs.swap(2,14)
+    envs.swap(3,15)
+    envs.env_method_apply_to_all("update_env_param", {'loc_algo': 'fixed', 
+                                                        'angle_algo': 'fixed', 
+                                                        'time_algo': 'fixed',
+                                                        'fixed_y': -0.0194244384765625,
+                                                        'fixed_angle': 0.0,
+                                                        'fixed_x': 4.0, 
+                                                        'fixed_time_offset': 0.0,
+                                                        'flipping': False,
+                                                        'puff_density': 1,
+                                                        'odorx': 1,
+                                                        'birthx': 1,
+                                                        })
+    attr_to_see = ['loc_algo', 'angle_algo', 'time_algo', 'fixed_y', 'fixed_angle', 'fixed_x', 'fixed_time_offset', 'flipping', 'puff_density']
+    for attr in attr_to_see:
+        print(envs.get_attr(attr))
+    
+    print(envs.get_attr("dataset"))
     obs = envs.reset()
     rollouts.obs[0].copy_(obs) # https://discuss.pytorch.org/t/which-copy-is-better/56393
     rollouts.to(device)
@@ -199,6 +220,7 @@ def training_loop(agent, envs, args, device, actor_critic,
         update_range = range(update, num_updates)
     else:
         update_range = range(num_updates)
+    update_range = range(1218, 1220)
     for j in update_range:
         # decrease learning rate linearly
         if args.use_linear_lr_decay:
@@ -225,7 +247,7 @@ def training_loop(agent, envs, args, device, actor_critic,
         # Initialize df to track episode statistics
         update_episodes_df = pd.DataFrame(columns=[
             'episode_id', 'dataset', 'outcome', 'reward', 'plume_density', 
-            'start_tidx', 'end_tidx', 'location_initial', 'init_angle'
+            'start_tidx', 'end_tidx', 'location_initial', 'init_angle', 'flipping',
         ])
         episode_counter = 0
 
@@ -233,12 +255,17 @@ def training_loop(agent, envs, args, device, actor_critic,
         # at each step of training 
         ##############################################################################################################
         for step in range(args.num_steps):
+            np.random.seed(0)
+            # set random seed for pytorch       
+            torch.manual_seed(0)
             with torch.no_grad():
                 value, action, action_log_prob, recurrent_hidden_states, activities = actor_critic.act(
                     rollouts.obs[step], 
                     rollouts.recurrent_hidden_states[step],
-                    rollouts.masks[step])
+                    rollouts.masks[step],
+                    deterministic=True) 
             obs, reward, done, infos = envs.step(action)
+            print("step", step, "\nobs", obs[0].to("cpu").numpy().astype(np.float32), "\naction", action[0].to("cpu").numpy().astype(np.float32))
             for i, d in enumerate(done): # if done, log the episode info. Care about what kind of env is encountered
                 if d:
                     try:

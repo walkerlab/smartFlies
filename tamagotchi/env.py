@@ -905,6 +905,7 @@ class PlumeEnvironment_v2(gym.Env):
         diffusion_multiplier=self.diffusion_max,
         radius_multiplier=self.radiusx,
         )
+    print("dataset", dataset, "puff_number", self.data_puffs_all['puff_number'].nunique(), )
     self.data_puffs = self.data_puffs_all.copy() # trim this per episode
     self.data_wind = self.data_wind_all.copy() # trim/flip this per episode
     self.t_vals = self.data_wind['time'].tolist()
@@ -1062,6 +1063,7 @@ class PlumeEnvironment_v2(gym.Env):
     return agent_angle
 
   def diffusion_adjust(self, diffx):
+    print("diffusion_adjust", diffx)
     min_radius = 0.01
     self.data_puffs.loc[:,'radius'] -= min_radius # subtract initial radius
     self.data_puffs.loc[:,'radius'] *= diffx/self.diffusion_max  # adjust 
@@ -1091,7 +1093,7 @@ class PlumeEnvironment_v2(gym.Env):
     # SPEEDUP (subset puffs to those only needed for episode)
     # self.data_puffs = self.data_puffs_all.query('(time > @self.t_val-1) and (time < @self.t_val_max_episode)') # Speeds up queries!
     self.data_puffs = self.data_puffs_all.query('(tidx >= @self.tidx-1) and (tidx <= @self.tidx_max_episode)') # Speeds up queries!
-    # print("puff_number_all", self.data_puffs['puff_number'].nunique())
+    print("After reset data_puffs['puff_number'].nunique()", self.data_puffs['puff_number'].nunique())
     # Dynamic birthx for each episode
     self.puff_density = 1
     if self.birthx < 0.99:
@@ -1101,7 +1103,7 @@ class PlumeEnvironment_v2(gym.Env):
         drop_idxs = self.data_puffs['puff_number'].unique()
         drop_idxs = pd.Series(drop_idxs).sample(frac=(1 - self.puff_density))
         self.data_puffs = self.data_puffs.query("puff_number not in @drop_idxs") # No deep copy being made
-        # print("puff_number", self.data_puffs['puff_number'].nunique())
+        print("puff_number after sparsifying", self.data_puffs['puff_number'].nunique())
         
 
     if self.diffusion_min < (self.diffusion_max - 0.01):
@@ -1956,7 +1958,7 @@ class SubprocVecEnv(SubprocVecEnv_):
                     for remote_idx, status in self.remote_directory.items():
                         if status['deployed'] == False and status['wind_direction'] == new_wind_direction:
                             self.swap(i, remote_idx)
-                            # print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
+                            print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
                             swapped = True
                             break
                 
