@@ -318,7 +318,7 @@ def log_eps_artifacts(j, args, update_episodes_df):
         # Get unique datasets
         datasets = successful_df['dataset'].unique()    
         
-        plt.figure(figsize=(6, 6))
+        plt.figure(figsize=(4, 4))
         # Create histogram for each dataset
         for i, dataset in enumerate(datasets):
             subset = successful_df[successful_df['dataset'] == dataset]
@@ -332,8 +332,63 @@ def log_eps_artifacts(j, args, update_episodes_df):
         plt.grid(True, alpha=0.3)
 
         # Save the figure to a file in your update directory
-        plt_path = f"{args.save_dir}/tmp/{args.model_fname}HOME_density_{j}.png"
-        plt.savefig(plt_path, dpi=150, bbox_inches='tight')
+        plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}HOME_density_{j}.png"
+
+        plt.savefig(plt_path, dpi=100, bbox_inches='tight')
+        plt.close()  # Close the figure to free memory
+        try:
+            mlflow.log_artifact(plt_path, artifact_path=f"figs")
+        except Exception as e:
+            print(f"Error logging artifact {plt_path}: {e}")
+        os.remove(plt_path)
+        
+        # Plot success rate by plume density and dataset
+        # Define common bins for plume density
+        bins = np.linspace(update_episodes_df['plume_density'].min(), 
+                        update_episodes_df['plume_density'].max(), 10)
+        bin_width = bins[1] - bins[0]
+        # Get unique datasets
+        datasets = update_episodes_df['dataset'].unique()
+        # Set up the plot
+        plt.figure(figsize=(4, 4))
+        # Offset width to prevent bar overlap
+        offset_factor = 0.8 / len(datasets)
+
+        for i, dataset in enumerate(datasets):
+            subset = update_episodes_df[update_episodes_df['dataset'] == dataset].copy()
+            subset['plume_bin'] = pd.cut(subset['plume_density'], bins=bins)
+            
+            grouped = subset.groupby('plume_bin')
+            
+            # Compute success rate and number of successes
+            success_rate = grouped['outcome'].apply(lambda x: (x == 'HOME').mean())
+            n_success = grouped['outcome'].apply(lambda x: (x == 'HOME').sum())
+            bin_centers = grouped['plume_density'].apply(lambda x: x.mean()).values
+            
+            # Apply offset to bin centers to avoid bar overlap
+            bin_centers_shifted = bin_centers + (i - len(datasets)/2) * offset_factor * bin_width
+
+            # Plot bars
+            plt.bar(bin_centers_shifted, success_rate.values, 
+                    width=offset_factor * bin_width, 
+                    label=dataset, alpha=0.8, color=config.mlflow_colors[dataset])
+
+            # Annotate number of successes, colored by group
+            for x, y, n in zip(bin_centers_shifted, success_rate.values, n_success.values):
+                if np.isfinite(x) and np.isfinite(y):
+                    plt.text(x, y + 0.02, str(n), ha='center', va='bottom', fontsize=8, color=config.mlflow_colors[dataset])
+
+        # Labels and formatting
+        plt.xlabel('Plume Density')
+        plt.ylabel('Success Rate (Fraction of HOME outcomes)')
+        plt.title(f'Success Rate by Plume Density and Dataset (Update {j})')
+        plt.ylim(0, 1.05)
+        plt.legend(title='Dataset')
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        # Save the figure to a file in your update directory
+        plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}HOME_density_{j}_rate.png"
+        plt.savefig(plt_path, dpi=100, bbox_inches='tight')
         plt.close()  # Close the figure to free memory
         try:
             mlflow.log_artifact(plt_path, artifact_path=f"figs")
