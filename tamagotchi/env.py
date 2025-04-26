@@ -1882,7 +1882,7 @@ class SubprocVecEnv(SubprocVecEnv_):
         self.wind_directions = new_max_wind_direction
     
     def sample_wind_direction(self):
-        if np.random.random() > 0.5:
+        if np.random.random() > 0.3:
             wind_dir = self.wind_directions
         else:
             wind_dir = np.random.randint(1, self.wind_directions+1) # +1 because randint is end-exclusive
