@@ -333,25 +333,32 @@ def visualize_episodes(episode_logs,
         )
     t_vals_all = data_puffs_all['time'].unique()
 
+    # check if traj_df is None - get traj_df from episode_logs for each episode
+    get_traj_df = True if traj_df is None else False
+    
+    if not get_traj_df:
+        traj_df_all = traj_df.copy()
+    
     # Plot and animate individual episodes
     n_episodes = len(episode_logs)
     if episode_idxs is None:
         episode_idxs = [i for i in range(n_episodes)]
-
+    
     figs, axs = [], []
     for episode_idx in range(n_episodes): 
         episode_idx_title = episode_idxs[episode_idx] # Hack to take in custom idxs
         ep_log = episode_logs[episode_idx]
         t_val_end = t_ends[episode_idx]
 
-        if traj_df is None: # traj_df is passed in the postEvalCli workflow
+        if get_traj_df: # get traj_df for each row of epsiode_logs
             traj_df = log_analysis.get_traj_df(ep_log, 
             extended_metadata=False, 
             squash_action=True)
-
+        else:
+            traj_df = traj_df_all.query("ep_idx == @episode_idx_title").copy()
 
         if title_text:
-            title_text = f"ep:{episode_idx} t:{t_val_end:0.2f} "
+            title_text = f"ep:{episode_idx_title} t:{t_val_end:0.2f} "
             title_text += "step: {}".format(traj_df.shape[0])
         else:
             title_text = None
