@@ -36,7 +36,7 @@ class GNODE(nn.Module):
             combined_r = torch.cat((x_t, h_t), dim=-1)
             h_candidate = F.relu(self.W_1(combined_r))
             h_candidate = F.relu(self.W_2(h_candidate))
-            h_candidate = F.tanh(h_candidate)
+            h_candidate = torch.tanh(h_candidate)
             # Updated hidden state
             h_t = (1 - z_t) * h_t + z_t * h_candidate
             h_seq.append(h_t)
