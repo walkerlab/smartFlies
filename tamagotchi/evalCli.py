@@ -476,9 +476,9 @@ if __name__ == "__main__":
     
     # actor_critic, ob_rms, optimizer_state_dict = torch.load(args.model_fname, map_location=torch.device('cpu'))
     try:
-        actor_critic, ob_rms, optimizer_state_dict = torch.load(args.model_fname, map_location=torch.device(args.device))
+        actor_critic, ob_rms, optimizer_state_dict = torch.load(args.model_fname, map_location=torch.device(args.device), weights_only=False)
     except ValueError:
-        actor_critic, ob_rms = torch.load(args.model_fname, map_location=torch.device(args.device))
+        actor_critic, ob_rms = torch.load(args.model_fname, map_location=torch.device(args.device), weights_only=False)
     
     if args.mlflow:
         import mlflow
