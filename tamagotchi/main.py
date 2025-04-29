@@ -147,9 +147,9 @@ def load_model(args, curriculum_vars):
       
     # load model
     try:
-        actor_critic, ob_rms, optimizer_state_dict = torch.load(args.model_fpath, map_location=torch.device(args.device))
+        actor_critic, ob_rms, optimizer_state_dict = torch.load(args.model_fpath, map_location=torch.device(args.device), weights_only=False)
     except ValueError:
-        actor_critic, ob_rms = torch.load(args.model_fpath, map_location=torch.device(args.device))
+        actor_critic, ob_rms = torch.load(args.model_fpath, map_location=torch.device(args.device), weights_only=False)
     except Exception as e:
         print(f"Loading model failed.. see exception message: {e}", flush=True)
         raise e
