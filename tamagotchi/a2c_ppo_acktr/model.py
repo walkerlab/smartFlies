@@ -90,7 +90,10 @@ class NNBase(nn.Module):
 
         self._hidden_size = hidden_size
         self._recurrent = recurrent
-        layer_size = 250
+        if hidden_size == 16:
+            layer_size = 250
+        elif hidden_size == 2:
+            layer_size = 2000
 
         if recurrent:
             print("hidden_size", hidden_size)
