@@ -1146,7 +1146,8 @@ class PlumeEnvironment_v2(gym.Env):
     return is_outofbounds
 
   def get_current_wind_xy(self):
-    # df_idx = self.data_wind.query("time == {}".format(self.t_val)).index[0] # Safer
+    if isinstance(self.vr_wind, (list, np.ndarray)):
+        return self.vr_wind
     df_idx = self.data_wind.query(f"tidx == {self.tidx}").index[0] # Safer
     return self.data_wind.loc[df_idx,['wind_x', 'wind_y']].tolist() # Safer
 
@@ -1369,6 +1370,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.obs_noise:
             self.obs_noise = np.deg2rad(self.obs_noise)
 
+        self.vr_wind = False # for virtual reality wind - list: [wind_x, wind_y]; when set, will set the wind to this value at one step. Needs to be set at every step when using.
+        
     def sense_environment(self):
         '''
         Return an array with [wind x, y, odor, allocentric head direction x, y, egocentric course direction x, y]
