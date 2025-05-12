@@ -71,10 +71,10 @@ def post_eval(args):
         print(f"Loading model from {model_fname}")
         try:
             actor_critic, ob_rms, optimizer_state_dict= \
-                torch.load(model_fname, map_location=torch.device('cpu'))
+                torch.load(model_fname, map_location=torch.device('cpu'), weights_only=False)
         except ValueError:
             actor_critic, ob_rms= \
-                torch.load(model_fname, map_location=torch.device('cpu'))
+                torch.load(model_fname, map_location=torch.device('cpu'),  weights_only=False)
         net = actor_critic.base.rnn #.weight_hh_l0.detach().numpy()
         J0 = net.weight_hh_l0.detach().numpy()
 
@@ -100,6 +100,7 @@ def post_eval(args):
         traj_df = log_analysis.get_traj_df_tmp(row['log'], # use the tmp version before rerunning eval where unnormalized values are saved to infos. 
                     extended_metadata=False, 
                     squash_action=squash_action)
+        traj_df['ep_idx'] = row['idx']
         dataset = row['dataset']
         outcome = row['outcome']
         fprefix = f'{row["dataset"]}_{outcome}'
