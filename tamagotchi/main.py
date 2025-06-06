@@ -101,6 +101,7 @@ def get_args():
     parser.add_argument('--apparent_wind_allo', type=bool, default=False) 
     parser.add_argument('--visual_feedback', type=bool, default=False) 
     parser.add_argument('--flip_ventral_optic_flow', type=bool, default=False) # PEv3: for eval to see the behavioral impact of flipping course direction perception.
+    parser.add_argument('--rotate_by', default=None) # PEv3: for rotate the env by a given angle in degrees. Only None means no rotation. 
     parser.add_argument('--birthx_max',  type=float, default=1.0) # Only used for sparsity
     parser.add_argument('--dryrun',  type=bool, default=False) 
     parser.add_argument('--curriculum', type=bool, default=False) # not used 
