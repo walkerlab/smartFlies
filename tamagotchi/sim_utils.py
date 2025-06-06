@@ -4,6 +4,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib
 import pandas
 import scipy
 import scipy as sp
@@ -182,8 +183,11 @@ def get_wind_xyt(duration, dt, wind_magnitude, verbose=True, regime='noisy3'):
     #         noisy=wind_noisy, 
     #         switch_direction=switch_direction)
 
-    # if flexible:
-    wind_x, wind_y = get_wind_vectors_flexible(T, wind_magnitude, regime=regime)
+    if 'eval' in regime:
+        local_state = np.random.RandomState(6) # seed for eval_noisy with a good range of wind directions 
+    else:
+        local_state = None # init in function 
+    wind_x, wind_y = get_wind_vectors_flexible(T, wind_magnitude, regime=regime, local_state=local_state)
 
     data_wind = pd.DataFrame({'wind_x': wind_x[0:len(T)],
                               'wind_y': wind_y[0:len(T)],
@@ -447,3 +451,108 @@ def get_puffs_df_vector(wind_df, wind_y_var, birth_rate, verbose=True):
     assert n_times_pre == len(puffs_df['time'].unique()) # Make sure compression lossless
     return puffs_df
 
+
+# from plume.sim_analysis for plot_puffs_and_wind_vectors
+
+# New version: One circle at hardcoded (x,y) with quiver 
+def plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=False):
+    # Instantaneous wind velocity
+    # Normalize wind (just care about angle)
+    data_at_t = data_wind[data_wind.time==t_val]
+    v_x, v_y = data_at_t.wind_x.mean(), data_at_t.wind_y.mean()
+    v_xy = np.sqrt(v_x**2 + v_y**2)*20
+    v_x, v_y = v_x/v_xy, v_y/v_xy
+    # print("v_x, v_y", v_x, v_y)
+
+    # Arrow
+    x,y = -0.15, 0.6 # Arrow Center [Note usu. xlim=(-0.5, 8)]
+    if invert_colors:
+        color='white'
+    else:
+        color='black'
+    ax.quiver(x, y, v_x, v_y, color=color, scale=2.5)
+    # ax.quiver(x, y, v_x, v_y, color='black', scale=500)
+
+    # Circle is 1 scatterplot point!
+    ax.scatter(x, y, s=500, 
+        facecolors='none', 
+        edgecolors=color,
+        linestyle='--')
+
+def plot_puffs(data, t_val, ax=None, show=True):
+    # TODO check color to concentration mapping
+    if ax is None:
+        fig = plt.figure()
+        ax = fig.add_subplot(111)
+    else:
+        fig = ax.figure
+        
+    # xmin = -2 #data.x.min()
+    # xmax = 12 #data.x.max()
+    # ymin = -5 #data.y.min()
+    # ymax = +5 #data.y.max()
+    # set limits
+    # ax.set_xlim(xmin, xmax)
+    # ax.set_ylim(ymin, ymax)
+    ax.set_aspect('equal')
+
+    # data_at_t = data[data.time==t_val] # Float equals is dangerous!
+    data_at_t = data[np.isclose(data.time, t_val, atol=1e-3)] # Smallest dt=0.01, so this is more than enough!
+    # print("data_at_t.shape", data_at_t.shape, t_val, data.time.min(), data.time.max())
+
+    c = data_at_t.concentration
+    # print(c, t_val)
+
+    # alphas = (np.log(c+1e-5)+np.abs(np.log(1e-5))).values
+    # alphas /= np.max(alphas)
+    # alphas = np.clip(alphas, 0.0, 1.0)
+
+    alphas = c.values
+    alphas /= np.max(alphas) # 0...1
+    alphas = np.power(alphas, 1/8) # See minimal2 notebook
+    # alphas = np.power(alphas, 10)
+    alphas = np.clip(alphas, 0.2, 0.4)
+
+    alphas *= 2.5/data_at_t.x # decay alpha by distance too
+    alphas = np.clip(alphas, 0.05, 0.4)
+
+
+    rgba_colors = np.zeros((data_at_t.time.shape[0],4))
+    # rgba_colors[:,0] = 1.0 # Red
+    # rgba_colors[:,2] = 1.0 # Blue
+    # https://matplotlib.org/3.1.1/gallery/color/named_colors.html
+    # https://matplotlib.org/3.1.0/tutorials/colors/colors.html
+    rgba_colors[:,0:3] = matplotlib.colors.to_rgba('gray')[:3] # decent
+    # rgba_colors[:,0:3] = matplotlib.colors.to_rgba('darkgray')[:3] # decent
+    # rgba_colors[:,0:3] = matplotlib.colors.to_rgba('dimgray')[:3] # decent
+    # rgba_colors[:,0:3] = matplotlib.colors.to_rgba('darkslategray')[:3] # too dark
+    # rgba_colors[:,0:3] = matplotlib.colors.to_rgba('lightsteelblue')[:3] # ok
+    # rgba_colors[:,0:3] = matplotlib.colors.to_rgba('red')[:3] 
+    # rgba_colors[:,0:3] = matplotlib.colors.to_rgba('lightskyblue')[:3] 
+
+    # the fourth column needs to be your alphas
+    rgba_colors[:, 3] = alphas
+
+    # fig.canvas.draw()
+    # s = ((ax.get_window_extent().width  / (xmax-xmin+1.) * 72./fig.dpi) ** 2)
+    k = 6250*((fig.get_figwidth()/8.0)**2) # trial-and-error
+    s = k*(data_at_t.radius)**2 
+    # print('size', s) # 885
+
+    ax.scatter(data_at_t.x, data_at_t.y, s=s, facecolor=rgba_colors, edgecolor='none')
+
+    if show:
+        plt.show()
+
+def plot_puffs_and_wind_vectors(data_puffs, data_wind, t_val, ax=None, fname='', plotsize=(10,10), show=True, invert_colors=False):
+    if ax is None:
+        fig = plt.figure(figsize=plotsize)
+        ax = fig.add_subplot(111)
+    plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=invert_colors)
+    plot_puffs(data_puffs, t_val, ax, show=False)
+    
+    if len(fname) > 0:
+        # fname = savedir + '/' + 'puff_animation_' + str(idx).zfill(int(np.log10(data['puffs'].shape[1]))+1) + '.jpg'
+        fig.savefig(fname, format='jpg', bbox_inches='tight')
+        plt.close()
+    return fig, ax
