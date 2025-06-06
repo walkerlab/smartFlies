@@ -76,6 +76,56 @@ def load_plume(
 
     return data_puffs, data_wind
 
+def rotate_wind_and_puffs(data_wind, data_puffs, rotation_angle_degrees):
+    """
+    Rotate wind direction and puff locations by the same angle around origin.
+    
+    Parameters:
+    -----------
+    data_wind : pd.DataFrame
+        Wind dataframe with columns: wind_x, wind_y, time, tidx
+    data_puffs : pd.DataFrame  
+        Puff dataframe with columns: puff_number, time, x, y, radius, tidx,
+        x_minus_radius, x_plus_radius, y_minus_radius, y_plus_radius, concentration
+    rotation_angle_degrees : float
+        Rotation angle in degrees (positive = counterclockwise)
+    
+    Returns:
+    --------
+    tuple: (rotated_wind_df, rotated_puffs_df)
+    """
+    
+    # Convert angle to radians
+    theta = np.radians(rotation_angle_degrees)
+    cos_theta = np.cos(theta)
+    sin_theta = np.sin(theta)
+    
+    # Copy dataframes to avoid modifying originals
+    wind_rotated = data_wind.copy()
+    puffs_rotated = data_puffs.copy()
+    
+    # Rotate wind direction
+    wind_x_new = wind_rotated['wind_x'] * cos_theta - wind_rotated['wind_y'] * sin_theta
+    wind_y_new = wind_rotated['wind_x'] * sin_theta + wind_rotated['wind_y'] * cos_theta
+    
+    wind_rotated['wind_x'] = wind_x_new
+    wind_rotated['wind_y'] = wind_y_new
+    
+    # Rotate puff positions
+    x_new = puffs_rotated['x'] * cos_theta - puffs_rotated['y'] * sin_theta
+    y_new = puffs_rotated['x'] * sin_theta + puffs_rotated['y'] * cos_theta
+    
+    puffs_rotated['x'] = x_new
+    puffs_rotated['y'] = y_new
+    
+    # Update radius-based columns
+    puffs_rotated['x_minus_radius'] = puffs_rotated['x'] - puffs_rotated['radius']
+    puffs_rotated['x_plus_radius'] = puffs_rotated['x'] + puffs_rotated['radius']
+    puffs_rotated['y_minus_radius'] = puffs_rotated['y'] - puffs_rotated['radius']
+    puffs_rotated['y_plus_radius'] = puffs_rotated['y'] + puffs_rotated['radius']
+    
+    return wind_rotated, puffs_rotated
+
 def get_concentration_at_tidx(data, tidx, x_val, y_val):
     # find the indices for all puffs that intersect the given x,y,time point
     qx = str(x_val) + ' > x_minus_radius and ' + str(x_val) + ' < x_plus_radius'
