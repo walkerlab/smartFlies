@@ -408,6 +408,8 @@ def manual_integrator(puff_t, wind_t, tidx,
     
     # Trim plume
     puff_t = puff_t.query("(radius > 0) & (x<10) & (y<10) & (x>-2) & (y>-10)")
+    # max_extent = 10
+    # puff_t = puff_t.query(f"(radius > 0) & (abs(x) < {max_extent}) & (abs(y) < {max_extent})")
 
     # Grow plume
     puff_t = grow_puffs(birth_rate, puff_t, tidx)
