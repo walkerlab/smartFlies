@@ -1435,6 +1435,13 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print('observation', observation)
         return observation
     
+    def get_current_wind_xy(self):
+        if isinstance(self.vr_wind, (list, np.ndarray)):
+            return self.vr_wind
+        df_idx = self.data_wind.query(f"tidx == {self.tidx}").index[0] # Safer
+        return self.data_wind.loc[df_idx,['wind_x', 'wind_y']].tolist() # Safer
+
+        
     def reset(self):
         # Return an array with [wind x, y, odor, air vel x, y, egocentric course direction x, y]
             # Wind can either be relative wind or apparent wind, depending on the setting
