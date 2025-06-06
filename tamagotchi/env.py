@@ -1388,7 +1388,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         df_idx = self.data_wind.query(f"tidx == {self.tidx}").index[0] # Safer
         if self.rotate_by:
             df = rotate_wind(self.data_wind.loc[df_idx], self.rotate_by) # Rotate wind by self.rotate_by degrees
-            return df['wind_x', 'wind_y'].tolist() # Safer
+            return df[['wind_x', 'wind_y']].tolist() # Safer
         else:
             return self.data_wind.loc[df_idx,['wind_x', 'wind_y']].tolist() # Safer
 
