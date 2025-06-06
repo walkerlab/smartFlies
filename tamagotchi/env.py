@@ -1351,7 +1351,7 @@ class PlumeEnvironment_v2(gym.Env):
     pass
 
 class PlumeEnvironment_v3(PlumeEnvironment_v2):
-    def __init__(self, visual_feedback=False, flip_ventral_optic_flow=False, rotate_by=0,**kwargs):
+    def __init__(self, visual_feedback=False, flip_ventral_optic_flow=False, rotate_by=None,**kwargs):
         super(PlumeEnvironment_v3, self).__init__(**kwargs)
         self.flip_ventral_optic_flow = flip_ventral_optic_flow
         if self.verbose > 0:
@@ -1361,6 +1361,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.visual_feedback = visual_feedback
         self.ground_velocity = np.array([0, 0]) # for egocentric course direction calculation
         self.rotate_by = rotate_by # PEv3 - rotate the data by this angle (in degrees) before using it. Used for evaluation to see the behavioral impact of rotating the data.
+        self.rotate_angles = [0, 90, 180, -90] if self.rotate_by is None else self.rotate_by # PEv3 - rotate the data by this angle (in degrees) before using it. Used for evaluation to see the behavioral impact of rotating the data.
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                         shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
@@ -1373,6 +1374,24 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
 
         self.vr_wind = False # for virtual reality wind - list: [wind_x, wind_y]; when set, will set the wind to this value at one step. Needs to be set at every step when using.
         
+    def sample_rotate_by(self):
+        """
+        Sample a random rotation angle in degrees
+        """
+        if self.rotate_by is not None:
+            tick = np.random.choice(3)
+            self.rotate_by = self.rotate_angles[tick]
+        
+    def get_current_wind_xy(self):
+        if isinstance(self.vr_wind, (list, np.ndarray)):
+            return self.vr_wind
+        df_idx = self.data_wind.query(f"tidx == {self.tidx}").index[0] # Safer
+        if self.rotate_by:
+            df = rotate_wind(self.data_wind.loc[df_idx], self.rotate_by) # Rotate wind by self.rotate_by degrees
+            return df['wind_x', 'wind_y'].tolist() # Safer
+        else:
+            return self.data_wind.loc[df_idx,['wind_x', 'wind_y']].tolist() # Safer
+
     def sense_environment(self):
         '''
         Return an array with [wind x, y, odor, allocentric head direction x, y, egocentric course direction x, y]
@@ -1436,21 +1455,12 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.verbose > 1:
             print('observation', observation)
         return observation
-    
-    def get_current_wind_xy(self):
-        if isinstance(self.vr_wind, (list, np.ndarray)):
-            return self.vr_wind
-        df_idx = self.data_wind.query(f"tidx == {self.tidx}").index[0] # Safer
-        if self.rotate_by:
-            df = rotate_wind(self.data_wind.loc[df_idx], self.rotate_by) # Rotate wind by self.rotate_by degrees
-            return df['wind_x', 'wind_y'].tolist() # Safer
-        else:
-            return self.data_wind.loc[df_idx,['wind_x', 'wind_y']].tolist() # Safer
 
     def reset(self):
         # Return an array with [wind x, y, odor, air vel x, y, egocentric course direction x, y]
             # Wind can either be relative wind or apparent wind, depending on the setting
-        observation = super(PlumeEnvironment_v3, self).reset()
+        self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
+        observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
         if len(observation) == 7:
             observation[5:] = 0 # course direction to 0
         self.init_angle = self.agent_angle
@@ -1474,7 +1484,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         
         self.stray_distance_last = self.stray_distance
         self.stray_distance = self.get_stray_distance()
-        self.ambient_wind = self.get_current_wind_xy()
+        self.ambient_wind = self.get_current_wind_xy() # will rotate wind by self.rotate_by degrees if set
 
         # Handle action 
         if self.verbose > 1:
@@ -1630,6 +1640,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             info['location_initial'] = self.agent_location_init
             info['step_offset'] = self.step_offset
             info['init_angle'] = self.init_angle
+            info['rotate_by'] = self.rotate_by
 
 
         if self.verbose > 0:
@@ -1782,7 +1793,8 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         seed=args.seed,
                         apparent_wind=args.apparent_wind,
                         visual_feedback=args.visual_feedback,
-                        flip_ventral_optic_flow=args.flip_ventral_optic_flow
+                        flip_ventral_optic_flow=args.flip_ventral_optic_flow,
+                        rotate_by=args.rotate_by
                         )
             else:
                 # bkw compat before cleaning up TC hack. Useful when evalCli
