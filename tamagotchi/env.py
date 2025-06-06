@@ -1,5 +1,5 @@
 ##### from plume/plume_env.py  ##### from plume/plume_env.py  ##### from plume/plume_env.py
-from data_util import load_plume, get_concentration_at_tidx
+from data_util import load_plume, get_concentration_at_tidx, rotate_wind
 import config as config
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -1351,7 +1351,7 @@ class PlumeEnvironment_v2(gym.Env):
     pass
 
 class PlumeEnvironment_v3(PlumeEnvironment_v2):
-    def __init__(self, visual_feedback=False, flip_ventral_optic_flow=False, **kwargs):
+    def __init__(self, visual_feedback=False, flip_ventral_optic_flow=False, rotate_by=0,**kwargs):
         super(PlumeEnvironment_v3, self).__init__(**kwargs)
         self.flip_ventral_optic_flow = flip_ventral_optic_flow
         if self.verbose > 0:
@@ -1360,6 +1360,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print("flip_ventral_optic_flow", flip_ventral_optic_flow)
         self.visual_feedback = visual_feedback
         self.ground_velocity = np.array([0, 0]) # for egocentric course direction calculation
+        self.rotate_by = rotate_by # PEv3 - rotate the data by this angle (in degrees) before using it. Used for evaluation to see the behavioral impact of rotating the data.
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                         shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
@@ -1407,7 +1408,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print('agent_angle', self.agent_angle)
 
         odor_observation = get_concentration_at_tidx(
-            self.data_puffs, self.tidx, self.agent_location[0], self.agent_location[1])
+            self.data_puffs, self.tidx, self.agent_location[0], self.agent_location[1], rotate_by = self.rotate_by) # PEv3 - add option to rotate df by angle
+        
         if self.verbose > 1:
             print('odor_observation', odor_observation)
         if self.odor_scaling:
@@ -1439,9 +1441,12 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if isinstance(self.vr_wind, (list, np.ndarray)):
             return self.vr_wind
         df_idx = self.data_wind.query(f"tidx == {self.tidx}").index[0] # Safer
-        return self.data_wind.loc[df_idx,['wind_x', 'wind_y']].tolist() # Safer
+        if self.rotate_by:
+            df = rotate_wind(self.data_wind.loc[df_idx], self.rotate_by) # Rotate wind by self.rotate_by degrees
+            return df['wind_x', 'wind_y'].tolist() # Safer
+        else:
+            return self.data_wind.loc[df_idx,['wind_x', 'wind_y']].tolist() # Safer
 
-        
     def reset(self):
         # Return an array with [wind x, y, odor, air vel x, y, egocentric course direction x, y]
             # Wind can either be relative wind or apparent wind, depending on the setting
