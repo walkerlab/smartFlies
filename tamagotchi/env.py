@@ -1376,9 +1376,46 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         '''
         Return an array with [wind x, y, odor, allocentric head direction x, y, egocentric course direction x, y]
         '''
-        # Get an array with [wind x, y, odor]
-            # Wind can either be relative wind or apparent wind, depending on the setting
-        observation = super(PlumeEnvironment_v3, self).sense_environment()
+        if (self.verbose > 1) and (self.episode_step >= self.episode_steps_max): # Debug mode
+            pprint(vars(self))
+
+        # Wind
+        wind_absolute = self.ambient_wind # updated by step(); ambient wind x, y
+        
+        # Subtract agent velocity to convert to (observed) relative velocity
+        if self.wind_rel: 
+            wind_absolute = self.ambient_wind - self.air_velocity
+        # Use apparent wind (negative of air velocity) for training
+        if self.apparent_wind:
+            wind_absolute = - self.air_velocity # allocentric apparent wind = negative of air velocity (allocentric)
+        if self.verbose > 1:
+            print('t_val', self.t_val)
+            print('sensed wind (allocentric, before rotating angle by agent direction) ', wind_absolute) 
+            
+        # Get wind relative angle
+        agent_angle_radians = np.angle( self.agent_angle[0] + 1j*self.agent_angle[1], deg=False )
+        wind_angle_radians = np.angle( wind_absolute[0] + 1j*wind_absolute[1], deg=False )
+        # Add observation noise
+        wind_relative_angle_radians = wind_angle_radians - agent_angle_radians 
+        wind_observation = [ np.cos(wind_relative_angle_radians), np.sin(wind_relative_angle_radians) ]    
+        # Un-normalize wind observation by multiplying by magnitude
+        wind_magnitude = np.linalg.norm(np.array( wind_absolute ))/self.wind_obsx
+        wind_observation = [ x*wind_magnitude for x in wind_observation ] # convert back to velocity
+
+        if self.verbose > 1:
+            print('wind egocentric', wind_observation)
+            print('agent_angle', self.agent_angle)
+
+        odor_observation = get_concentration_at_tidx(
+            self.data_puffs, self.tidx, self.agent_location[0], self.agent_location[1])
+        if self.verbose > 1:
+            print('odor_observation', odor_observation)
+        if self.odor_scaling:
+            odor_observation *= self.odorx # Random scaling to improve generalization 
+        odor_observation = 0.0 if odor_observation < config.env['odor_threshold'] else odor_observation
+        odor_observation = np.clip(odor_observation, 0.0, 1.0) # clip
+
+        observation = np.array(wind_observation + [odor_observation]).astype(np.float32) # per Gym spec
         # Visual feedback
         if self.visual_feedback:
             # head direction
