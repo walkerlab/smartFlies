@@ -1379,7 +1379,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         Sample a random rotation angle in degrees
         """
         if self.rotate_by is not None:
-            tick = np.random.choice(3)
+            tick = np.random.choice(len(self.rotate_angles))
             self.rotate_by = self.rotate_angles[tick]
         
     def get_current_wind_xy(self):
