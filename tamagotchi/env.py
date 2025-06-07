@@ -1394,7 +1394,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
     
     def get_abunchofpuffs(self, max_samples=300):  
         if self.rotate_by:
-            Z = rotate_puffs(self.data_puffs.query(f"tidx == {self.tidx}"), self.rotate_by)
+            Z = rotate_puffs(self.data_puffs.query(f"tidx == {self.tidx}"), self.rotate_by).loc[:,['x','y']]
         else:
             Z = self.data_puffs.query(f"tidx == {self.tidx}").loc[:,['x','y']]
         Z = Z.sample(n=max_samples, replace=False) if Z.shape[0] > max_samples else Z
