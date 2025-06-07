@@ -101,7 +101,7 @@ def get_args():
     parser.add_argument('--apparent_wind_allo', type=bool, default=False) 
     parser.add_argument('--visual_feedback', type=bool, default=False) 
     parser.add_argument('--flip_ventral_optic_flow', type=bool, default=False) # PEv3: for eval to see the behavioral impact of flipping course direction perception.
-    parser.add_argument('--rotate_by', default=None) # PEv3: for rotate the env by a given angle in degrees. Only None means no rotation. 
+    parser.add_argument('--rotate_by', default=False) # PEv3: for rotate the env by a given angle in degrees. Only None means no rotation - False will be transformed to None.
     parser.add_argument('--birthx_max',  type=float, default=1.0) # Only used for sparsity
     parser.add_argument('--dryrun',  type=bool, default=False) 
     parser.add_argument('--curriculum', type=bool, default=False) # not used 
@@ -138,6 +138,7 @@ def get_args():
     # args.cuda = not args.no_cuda and 
     cuda_available = torch.cuda.is_available()
     args.cuda = cuda_available
+    args.rotate_by = None if args.rotate_by is False else args.rotate_by # False means no rotation, None means no rotation
     print("CUDA:", args.cuda)
     assert args.algo in ['a2c', 'ppo']
     print(args)
