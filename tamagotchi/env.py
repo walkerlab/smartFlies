@@ -1,5 +1,5 @@
 ##### from plume/plume_env.py  ##### from plume/plume_env.py  ##### from plume/plume_env.py
-from data_util import load_plume, get_concentration_at_tidx, rotate_wind
+from data_util import load_plume, get_concentration_at_tidx, rotate_wind, rotate_puffs
 import config as config
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -1391,6 +1391,14 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             return df[['wind_x', 'wind_y']].tolist() # Safer
         else:
             return self.data_wind.loc[df_idx,['wind_x', 'wind_y']].tolist() # Safer
+    
+    def get_abunchofpuffs(self, max_samples=300):  
+        if self.rotate_by:
+            Z = rotate_puffs(self.data_puffs.query(f"tidx == {self.tidx}"), self.rotate_by)
+        else:
+            Z = self.data_puffs.query(f"tidx == {self.tidx}").loc[:,['x','y']]
+        Z = Z.sample(n=max_samples, replace=False) if Z.shape[0] > max_samples else Z
+        return Z
 
     def sense_environment(self):
         '''
