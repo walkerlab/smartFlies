@@ -131,6 +131,7 @@ def get_args():
     parser.add_argument('--act_noise', type=float, default=0.0)
     parser.add_argument('--if_vec_norm', type=int, default=1) # whether to normalize the input
     parser.add_argument('--if_train_actor_std', type=bool, default=False) # whether to train the std of the stochastic policy
+    parser.add_argument('--mlflow', type=int, default=1) # whether to train the std of the stochastic policy
     args = parser.parse_args()
     assert len(args.dataset) == len(args.qvar) 
     assert len(args.dataset) == len(args.diff_max) 
@@ -319,32 +320,37 @@ def main(args=None):
                         actor_critic.recurrent_hidden_state_size)
     
     # Set our tracking server uri for logging
-    mlflow.set_tracking_uri(uri="https://dev0.uwcnc.net/mlflow/")
-    mlflow.set_system_metrics_sampling_interval(3600)
     # Create a new MLflow Experiment
     experiment_name = os.path.basename((os.path.dirname(args.save_dir))) 
     run_name = args.outsuffix
-    mlflow.set_experiment(experiment_name)
-    # Start an MLflow run
-    run_object = mlflow.search_runs(filter_string=f"attributes.run_name = '{run_name}'")
-    run_params = {}
-    if len(run_object) > 0:
-        # Run exists - use its run_id
-        run_id = run_object.iloc[0]["run_id"]
-        run_params['run_id'] = run_id
-        run_params['log_system_metrics'] = True
-        print(f"Continuing existing run: {run_name} (ID: {run_id})")
+    if args.mlflow:
+        mlflow.set_tracking_uri(uri="https://dev0.uwcnc.net/mlflow/")
+        mlflow.set_system_metrics_sampling_interval(3600)
+        mlflow.set_experiment(experiment_name)
+        # Start an MLflow run
+        run_object = mlflow.search_runs(filter_string=f"attributes.run_name = '{run_name}'")
+        run_params = {}
+        if len(run_object) > 0:
+            # Run exists - use its run_id
+            run_id = run_object.iloc[0]["run_id"]
+            run_params['run_id'] = run_id
+            run_params['log_system_metrics'] = True
+            print(f"Continuing existing run: {run_name} (ID: {run_id})")
+        else:
+            # Run doesn't exist - use run_name
+            run_params['run_name'] = run_name
+            run_params['log_system_metrics'] = True
+            print(f"Starting new run: {run_name}")
+
+        # Single block using the appropriate parameters
+        with mlflow.start_run(**run_params):
+            # Log the hyperparameters dict to mlflow
+            mlflow.log_params(vars(args)) 
+
+            training_log, eval_log = training_loop(agent, envs, args, device, actor_critic, 
+                training_log=training_log, eval_log=eval_log, eval_env=None, rollouts=rollouts)
     else:
-        # Run doesn't exist - use run_name
-        run_params['run_name'] = run_name
-        run_params['log_system_metrics'] = True
-        print(f"Starting new run: {run_name}")
-
-    # Single block using the appropriate parameters
-    with mlflow.start_run(**run_params):
-        # Log the hyperparameters dict to mlflow
-        mlflow.log_params(vars(args)) 
-
+        print("MLflow is not enabled. Running training without logging.")
         training_log, eval_log = training_loop(agent, envs, args, device, actor_critic, 
             training_log=training_log, eval_log=eval_log, eval_env=None, rollouts=rollouts)
 
