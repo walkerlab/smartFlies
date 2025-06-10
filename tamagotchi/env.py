@@ -1361,6 +1361,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.visual_feedback = visual_feedback
         self.ground_velocity = np.array([0, 0]) # for egocentric course direction calculation
         self.rotate_by = rotate_by # PEv3 - rotate the data by this angle (in degrees) before using it. Used for evaluation to see the behavioral impact of rotating the data.
+        print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}")
         self.rotate_angles = [0, 90, 180, -90] # PEv3 - rotate the data by this angle (in degrees) before using it. Used for evaluation to see the behavioral impact of rotating the data.
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
@@ -1381,6 +1382,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.rotate_by is not None:
             tick = np.random.choice(len(self.rotate_angles))
             self.rotate_by = self.rotate_angles[tick]
+            if self.verbose: print(f"[DEBUG] PEv3 sample_rotate_by: self.rotate_by is set to {self.rotate_by} degrees")
         
     def get_current_wind_xy(self):
         if isinstance(self.vr_wind, (list, np.ndarray)):
@@ -1388,6 +1390,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         df_idx = self.data_wind.query(f"tidx == {self.tidx}").index[0] # Safer
         if self.rotate_by:
             df = rotate_wind(self.data_wind.loc[df_idx], self.rotate_by) # Rotate wind by self.rotate_by degrees
+            if self.verbose: print(f"[DEBUG] PEv3 get_current_wind_xy: rotating wind by {self.rotate_by} degrees; wind degrees: {np.degrees(np.angle(df['wind_x'] + 1j*df['wind_y'], deg=False)):.2f}")
             return df[['wind_x', 'wind_y']].tolist() # Safer
         else:
             return self.data_wind.loc[df_idx,['wind_x', 'wind_y']].tolist() # Safer
@@ -1395,6 +1398,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
     def get_abunchofpuffs(self, max_samples=300):  
         if self.rotate_by:
             Z = rotate_puffs(self.data_puffs.query(f"tidx == {self.tidx}"), self.rotate_by).loc[:,['x','y']]
+            if self.verbose: print(f"[DEBUG] PEv3 get_abunchofpuffs: rotating puffs by {self.rotate_by} degrees; mean x, y: {Z['x'].mean():.2f}, {Z['y'].mean():.2f}")
         else:
             Z = self.data_puffs.query(f"tidx == {self.tidx}").loc[:,['x','y']]
         Z = Z.sample(n=max_samples, replace=False) if Z.shape[0] > max_samples else Z
