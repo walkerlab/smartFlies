@@ -351,7 +351,7 @@ def visualize_episodes(episode_logs,
         t_val_end = t_ends[episode_idx]
 
         if get_traj_df: # get traj_df for each row of epsiode_logs
-            traj_df = log_analysis.get_traj_df(ep_log, 
+            traj_df = log_analysis.get_traj_df_tmp(ep_log, 
             extended_metadata=False, 
             squash_action=True)
         else:
