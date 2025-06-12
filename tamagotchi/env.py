@@ -1602,6 +1602,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             "OOT" if is_outoftime else \
             "NA"    
         info = {
+            'rotate_by': self.rotate_by, # PEv3 - rotate the data by this angle (in degrees) before using it
             't_val':self.t_val, 
             'tidx':self.tidx, 
             'flipx':self.flipx,
