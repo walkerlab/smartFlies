@@ -179,6 +179,7 @@ def get_concentration_at_tidx(data, tidx, x_val, y_val, rotate_by=0):
     qx = str(x_val) + ' > x_minus_radius and ' + str(x_val) + ' < x_plus_radius'
     qy = str(y_val) + ' > y_minus_radius and ' + str(y_val) + ' < y_plus_radius'
     q = qx + ' and ' + qy
+    print("get_concentration_at_tidx", tidx, q, rotate_by)
     if rotate_by:
         data_rot = rotate_puffs(data[data.tidx==tidx], rotate_by)
         d = data_rot.query(q)

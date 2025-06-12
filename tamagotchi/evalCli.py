@@ -409,6 +409,7 @@ if __name__ == "__main__":
     parser.add_argument('--flip_ventral_optic_flow', type=bool, default=False) # for eval to see the behavioral impact of flipping course direction perception.
     parser.add_argument('--perturb_RNN_by_ortho_set', type=str, default=False, help='a file that stores an orthogonal basis, where the first vector is the wind encoding subspace')
     parser.add_argument('--perturb_RNN_by', type=str, default=False, help='set to "subspace" to perturb hidden states along the wind encoding subspace')
+    parser.add_argument('--rotate_by', type=int, default=0, help='rotate wind direction on/off')
     
     parser.add_argument('--no_vec_norm_stats', action='store_true', default=False, help='an agent that is trained without storing vecNormalize stats, or did not use it during training')
     parser.add_argument('--out_dir', type=str, default='eval')
@@ -422,6 +423,8 @@ if __name__ == "__main__":
         raise ValueError("When perturbing RNN, need to provide a file that stores the orthogonal basis for the wind encoding subspace.")
     elif args.perturb_RNN_by and not os.path.isfile(args.perturb_RNN_by_ortho_set):
         raise ValueError(f"File {args.perturb_RNN_by_ortho_set} does not exist.")
+    
+    args.rotate_by = None if not args.rotate_by else args.rotate_by # convert to None if False
         
     print(args)
     args.det = True # override
