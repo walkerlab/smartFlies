@@ -40,7 +40,7 @@ def smart_outprefix(model_dir, dataset, out_reldir):
 
 
 def post_eval(args):
-    is_recurrent = True if ('GRU' in args.model_dir) or ('VRNN' in args.model_dir) else False
+    is_recurrent = True
     selected_df = log_analysis.get_selected_df(args.model_dir, 
                                   args.use_datasets, 
                                   n_episodes_home=60, 
@@ -166,7 +166,7 @@ def post_eval(args):
     for birthx in args.birthxs:
         if birthx == 1 or not birthx or birthx == 'None': # skip. 1 is not sparse. The rest is for supporting old format
             continue 
-        sparse_dataset = [f'constantx5b5_{birthx}', f'switch45x5b5_{birthx}', f'noisy3x5b5_{birthx}']
+        sparse_dataset = [str(ds) + f"_{birthx}" for ds in args.use_datasets] 
         
         try:
             sparse_selected_df = log_analysis.get_selected_df(args.model_dir, 
@@ -184,19 +184,20 @@ def post_eval(args):
             reg = agent_analysis.fit_regression_from_neural_activity_to_latent(sparse_subset_df, \
                 'wind_angle_ground_theta') # have not tested if works on sparse cases with different files names. This function should be able to handle that. Just a note so im not surprised. You are doing good.)
 
-        for idx, row in sparse_subset_df.iterrows():
+        for episode_idx, row in sparse_subset_df.iterrows():
             ep_activity = log_analysis.get_activity(row['log'], 
                 is_recurrent, 
                 do_plot=False)
-            traj_df = log_analysis.get_traj_df(row['log'], 
+            traj_df = log_analysis.get_traj_df_tmp(row['log'], 
                         extended_metadata=False, 
                         squash_action=squash_action)
             
-            dataset = row['dataset'].split('_')[0]
+            dataset = "_".join(row['dataset'].split('_')[:-1])
             outcome = row['outcome']
-            fprefix = f'{row["dataset"]}_{birthx}_{outcome}'
-            OUTPREFIX = smart_outprefix(args.model_dir, dataset)
+            
+            fprefix = f'{row["dataset"]}_{outcome}'
             print("dataset",dataset)
+            OUTPREFIX = smart_outprefix(args.model_dir, row['dataset'], args.out_reldir) # row['dataset']: dataset_sparsity
 
             try:
                 # Need to regenerate since no guarantee present already?
@@ -205,6 +206,7 @@ def post_eval(args):
                 # zoom = 0 
                 zoom = 3 if args.walking else zoom
                 agent_analysis.visualize_episodes(episode_logs=[row['log']], 
+                                                    # traj_df=traj_df,
                                                     episode_idxs=[row['idx']],
                                                     zoom=zoom, 
                                                     dataset=dataset,
@@ -213,6 +215,10 @@ def post_eval(args):
                                                     outprefix=OUTPREFIX,
                                                     birthx=float(birthx),
                                                     diffusionx=args.diffusionx,
+                                                    image_type=args.image_type,
+                                                    title_text=False, # not supported anyway
+                                                    legend=False,
+                                                    invert_colors=args.invert_colors,
                                                     )    
                 if args.viz_sensory_angles:
                     agent_analysis.animate_visual_feedback_angles_1episode(traj_df, OUTPREFIX, fprefix, row['idx'])
