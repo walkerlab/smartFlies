@@ -139,7 +139,6 @@ def get_args():
     # args.cuda = not args.no_cuda and 
     cuda_available = torch.cuda.is_available()
     args.cuda = cuda_available
-    args.rotate_by = None if not args.rotate_by else args.rotate_by # False means no rotation, None means no rotation
     print("CUDA:", args.cuda)
     assert args.algo in ['a2c', 'ppo']
     print(args)
@@ -197,7 +196,8 @@ def main(args=None):
         args = argparse.Namespace(**args)
         args.dryrun = False
         args.flip_ventral_optic_flow = False
-    
+    args.mlflow = True
+    args.rotate_by = None if not args.rotate_by else args.rotate_by # False means no rotation, None means no rotation
     args.model_fname = f"{args.env_name}_{args.outsuffix}.pt"
     args.model_fpath = os.path.join(args.save_dir, 'weights', args.model_fname)
     args.training_log = os.path.join(args.save_dir, 'train_logs', args.model_fname.replace(".pt", '_train.csv'))

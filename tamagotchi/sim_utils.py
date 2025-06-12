@@ -91,6 +91,7 @@ def get_wind_vectors_flexible(T, wind_magnitude, local_state=None, regime=None):
 
     # Add random noise to wind degree
     if 'poisson_noisy3' in regime:
+        # note that poisson_mag_noisy3 does not get ran with this!!!! - 
         # based on /src/JH_boilerplate/check_noisy_wind_dirs.ipynb
         noise = np.zeros(len(T)) # Init
         degz = 60 # +/- degz 
