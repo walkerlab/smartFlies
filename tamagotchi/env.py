@@ -1136,7 +1136,7 @@ class PlumeEnvironment_v2(gym.Env):
     if self.action_feedback:
         observation = np.concatenate([observation, np.zeros(2)])
 
-    self.found_plume = True if observation[-1] > 0. else False 
+    self.found_plume = True if observation[2] > 0. else False 
     return observation
 
 
@@ -1404,6 +1404,97 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         Z = Z.sample(n=max_samples, replace=False) if Z.shape[0] > max_samples else Z
         return Z
 
+    def get_initial_location(self, algo):
+        loc_xy = None
+        if 'uniform' in algo:
+            loc_xy = np.array([
+                2 + np.random.uniform(-1, 1), 
+                np.random.uniform(-0.5, 0.5)])
+            
+        elif 'quantile' in algo:
+            """ 
+            Distance curriculum
+            Start the agent at a location with random location with mean and var
+            decided by distribution/percentile of puffs
+            
+            Samples a upper quantile to make a [upper-0.1, upper] quantile range
+            Sample puff Xs from this range
+            For puffs in this range, find the meadian and the lowest 5% quantile of Ys
+            Mean Y at the median, and VarY as the spread of Y from 5% to 50% quantile, capped at 1 
+            'diff_max': [0.8, 0.8, 0.8],
+            'diff_min': [0.7, 0.65, 0.4],
+            """
+            q_curriculum = np.random.uniform(self.diff_min, self.diff_max)
+
+            Z = self.get_abunchofpuffs()
+            X_pcts = Z['x'].quantile([q_curriculum-0.1, q_curriculum]).to_numpy()
+            X_mean, X_var = X_pcts[1], X_pcts[1] - X_pcts[0]
+            Y_pcts = Z.query("(x >= (@X_mean - @X_var)) and (x <= (@X_mean + @X_var))")['y'].quantile([0.05,0.5]).to_numpy()
+            Y_mean, Y_var = Y_pcts[1], min(1, Y_pcts[1] - Y_pcts[0]) # Min here cap variance at 1 
+            varx = self.qvar 
+            loc_xy = np.array([X_mean + varx*X_var*np.random.randn(), 
+                Y_mean + varx*Y_var*np.random.randn()]) 
+
+        elif 'slice' in algo:
+            """ 
+            Distance curriculum
+            Start the agent at a location with random location with mean and var
+            decided by distribution/percentile of puffs
+            
+            Samples a upper quantile to make a [upper-0.1, upper] quantile range
+            Sample puff Xs from this range
+            For puffs in this range, find the meadian and the lowest 5% quantile of Ys
+            Mean Y at the median, and VarY as the spread of Y from 5% to 50% quantile, capped at 1 
+            'diff_max': [0.8, 0.8, 0.8],
+            'diff_min': [0.7, 0.65, 0.4],
+            """
+            q_curriculum = np.random.uniform(self.diff_min, self.diff_max)
+
+            Z = self.get_abunchofpuffs()
+            
+            X_span = abs(Z['x'].max() - Z['x'].min())
+            Y_span = abs(Z['y'].max() - Z['y'].min())
+            long = 'x' if X_span > Y_span else 'y' # the long side of the plume
+            wide = 'y' if long == 'x' else 'x' # the wide side of the plume
+            
+            long_pcts = Z[long].abs().quantile([q_curriculum-0.1, q_curriculum]).to_numpy()
+            long_mean, long_var = long_pcts[1], long_pcts[1] - long_pcts[0]
+            # Perserver the sign of the long coordinate
+            long_mean *= np.sign(Z[long].mean())
+            # print("initial long mean, var, q: ", long_mean, long_var, q_curriculum)
+            lower_limit = float(algo.split('_')[1]) if '_' in algo else 0.05
+            wide_pcts = Z.query(f"({long} >= (@long_mean - @long_var)) and ({long} <= (@long_mean + @long_var))")[wide].quantile([lower_limit,0.5]).to_numpy()
+            wide_mean, wide_var = wide_pcts[1], min(1, wide_pcts[1] - wide_pcts[0]) # Min here cap variance at 1
+            # print(f"long: {long}, wide: {wide}, long_pcts: {long_pcts}, wide_pcts: {wide_pcts} {long_mean}, self.rotate_by: {self.rotate_by} {wide_mean}")
+            # print(wide_mean, wide_var)
+            varx = self.qvar 
+            # Determine which is x and y
+            X_mean, X_var = (long_mean, long_var) if long == 'x' else (wide_mean, wide_var)
+            Y_mean, Y_var = (wide_mean, wide_var) if long == 'x' else (long_mean, long_var)
+            while True:
+                # Sample location in [x, y] order
+                loc_xy = np.array([
+                    X_mean + varx * X_var * np.random.randn(),  # x
+                    Y_mean + varx * Y_var * np.random.randn()   # y
+                ])
+                # check if the long coordinate is within the range
+                if long == 'x' and abs(loc_xy[0]) < abs(Z['x']).max():
+                    # and the long coordinate should be in the same quardrant as the plume
+                    if (np.sign(X_mean) == np.sign(loc_xy[0])):
+                        break
+                elif long == 'y' and abs(loc_xy[1]) < abs(Z['y']).max():
+                    # and the long coordinate should be in the same quardrant as the plume
+                    if (np.sign(Y_mean) == np.sign(loc_xy[1])):
+                        break
+
+        elif 'fixed' in algo:
+            loc_xy = np.array( [self.fixed_x, self.fixed_y] )
+
+        else:
+            raise ValueError(f"Unknown algo: {algo} for initial location")
+        
+        return loc_xy
+
     def sense_environment(self):
         '''
         Return an array with [wind x, y, odor, allocentric head direction x, y, egocentric course direction x, y]
@@ -1441,10 +1532,10 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         odor_observation = get_concentration_at_tidx(
             self.data_puffs, self.tidx, self.agent_location[0], self.agent_location[1], rotate_by = self.rotate_by) # PEv3 - add option to rotate df by angle
         
-        if self.verbose > 1:
-            print('odor_observation', odor_observation)
         if self.odor_scaling:
             odor_observation *= self.odorx # Random scaling to improve generalization 
+        if self.verbose > 1:
+            print(f"odor_observation: {odor_observation} at tidx {self.tidx} for agent location {self.agent_location} with rotate_by {self.rotate_by}") 
         odor_observation = 0.0 if odor_observation < config.env['odor_threshold'] else odor_observation
         odor_observation = np.clip(odor_observation, 0.0, 1.0) # clip
 
@@ -1588,7 +1679,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             reward -= 0.05*np.abs(move_action)
 
         if 'found' in self.r_shaping:
-            if self.found_plume is False and observation[-1] > 0.:
+            if self.found_plume is False and observation[2] > 0.:
                 # print("found_plume")
                 reward += 10
                 self.found_plume = True
