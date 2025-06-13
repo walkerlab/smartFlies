@@ -1,4 +1,5 @@
 from tamagotchi import config
+from tamagotchi import sim_utils as sim_analysis
 import os
 import matplotlib.pyplot as plt
 import matplotlib
@@ -179,10 +180,23 @@ def get_concentration_at_tidx(data, tidx, x_val, y_val, rotate_by=0):
     qx = str(x_val) + ' > x_minus_radius and ' + str(x_val) + ' < x_plus_radius'
     qy = str(y_val) + ' > y_minus_radius and ' + str(y_val) + ' < y_plus_radius'
     q = qx + ' and ' + qy
-    print("get_concentration_at_tidx", tidx, q, rotate_by)
     if rotate_by:
         data_rot = rotate_puffs(data[data.tidx==tidx], rotate_by)
         d = data_rot.query(q)
+        # t_val = wind[wind.tidx==tidx].time.values[0] 
+        # print("d.concentration.sum()", d.concentration.sum())
+        # if d.concentration.sum() < config.env['odor_threshold']:
+        #     print("No puffs at this location and time", tidx, x_val, y_val)
+        #     fig, ax = sim_analysis.plot_puffs_and_wind_vectors(
+        #         data_rot, 
+        #         wind, 
+        #         t_val, 
+        #         fname='/src/tamagotchi/puffs_and_wind_vectors_initial.png', 
+        #         plotsize=(8,8))
+        #     # plot all start locations
+        #     ax.scatter(x_val, y_val, c='red', s=2, label='Start Locations')
+        #     ax.legend()
+        #     fig.savefig('/src/tamagotchi/puffs_and_wind_vectors_initial.png')
     else:
         d = data[data.tidx==tidx].query(q)
     return d.concentration.sum()
