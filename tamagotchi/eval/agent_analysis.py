@@ -340,9 +340,12 @@ def visualize_episodes(episode_logs,
         traj_df_all = traj_df.copy()
     
     # Plot and animate individual episodes
-    n_episodes = len(episode_logs)
+    
     if episode_idxs is None:
+        n_episodes = len(episode_logs)
         episode_idxs = [i for i in range(n_episodes)]
+    else:
+        n_episodes = len(episode_idxs) 
     
     figs, axs = [], []
     for episode_idx in range(n_episodes): 
