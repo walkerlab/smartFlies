@@ -1,5 +1,5 @@
 ##### from plume/plume_env.py  ##### from plume/plume_env.py  ##### from plume/plume_env.py
-from data_util import load_plume, get_concentration_at_tidx, rotate_wind, rotate_puffs
+from data_util import load_plume, get_concentration_at_tidx, rotate_wind, rotate_puffs, rotate_wind_optimized, rotate_puffs_optimized
 import config as config
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -1361,6 +1361,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.visual_feedback = visual_feedback
         self.ground_velocity = np.array([0, 0]) # for egocentric course direction calculation
         self.rotate_by = rotate_by # PEv3 - rotate the data by this angle (in degrees) before using it. Used for evaluation to see the behavioral impact of rotating the data.
+        self.mirror = False  # PEv3 - mirror/flip the data along the long axis of the plume - used in rotate wind function and gets turned on when rotate_by is set to a non-zero value.
         print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}")
         self.rotate_angles = [0, 90, 180, -90] # PEv3 - rotate the data by this angle (in degrees) before using it. Used for evaluation to see the behavioral impact of rotating the data.
         if self.visual_feedback:
@@ -1377,19 +1378,23 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         
     def sample_rotate_by(self):
         """
-        Sample a random rotation angle in degrees
+        At reset time, sample a random rotation angle in degrees and sample whether to mirror the data.
+        This is used to rotate the data by a random angle and mirror it along the long axis of the plume.
+        This is to help generalization.
         """
         if self.rotate_by is not None:
             tick = np.random.choice(len(self.rotate_angles))
             self.rotate_by = self.rotate_angles[tick]
-            if self.verbose: print(f"[DEBUG] PEv3 sample_rotate_by: self.rotate_by is set to {self.rotate_by} degrees")
+            coin_flip = np.random.choice(2)
+            self.mirror = True if coin_flip == 1 else False # flip the data along the long axis of the plume
+            if self.verbose: print(f"[DEBUG] PEv3 sample_rotate_by: self.rotate_by is set to {self.rotate_by} degrees, mirroring: {self.mirror}")
         
     def get_current_wind_xy(self):
         if isinstance(self.vr_wind, (list, np.ndarray)):
             return self.vr_wind
         df_idx = self.data_wind.query(f"tidx == {self.tidx}").index[0] # Safer
         if self.rotate_by:
-            df = rotate_wind(self.data_wind.loc[df_idx], self.rotate_by) # Rotate wind by self.rotate_by degrees
+            df = rotate_wind_optimized(self.data_wind.loc[df_idx], self.rotate_by, self.mirror) # Rotate wind by self.rotate_by degrees
             if self.verbose: print(f"[DEBUG] PEv3 get_current_wind_xy: rotating wind by {self.rotate_by} degrees; wind degrees: {np.degrees(np.angle(df['wind_x'] + 1j*df['wind_y'], deg=False)):.2f}")
             return df[['wind_x', 'wind_y']].tolist() # Safer
         else:
@@ -1397,7 +1402,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
     
     def get_abunchofpuffs(self, max_samples=300):  
         if self.rotate_by:
-            Z = rotate_puffs(self.data_puffs.query(f"tidx == {self.tidx}"), self.rotate_by).loc[:,['x','y']]
+            Z = rotate_puffs_optimized(self.data_puffs.query(f"tidx == {self.tidx}"), self.rotate_by, self.mirror).loc[:,['x','y']]
             if self.verbose: print(f"[DEBUG] PEv3 get_abunchofpuffs: rotating puffs by {self.rotate_by} degrees; mean x, y: {Z['x'].mean():.2f}, {Z['y'].mean():.2f}")
         else:
             Z = self.data_puffs.query(f"tidx == {self.tidx}").loc[:,['x','y']]
