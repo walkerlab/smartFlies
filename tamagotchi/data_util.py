@@ -77,6 +77,132 @@ def load_plume(
 
     return data_puffs, data_wind
 
+
+def rotate_wind_optimized(data_wind, rotation_angle_degrees, mirror):
+    """
+    Rotate wind direction vectors by specified angle around origin.
+    Optimized for angles: [0, 90, 180, -90] degrees.
+    
+    Parameters:
+    -----------
+    data_wind : pd.DataFrame
+        Wind dataframe with columns: wind_x, wind_y, time, tidx
+    rotation_angle_degrees : float
+        Rotation angle in degrees (0, 90, 180, or -90)
+    
+    Returns:
+    --------
+    pd.DataFrame: Rotated wind dataframe
+    """
+    
+    # Copy dataframe to avoid modifying original
+    wind_rotated = data_wind.copy()
+    
+    if rotation_angle_degrees == 0:
+        # No rotation needed
+        if mirror:
+            # Mirror along the long side 
+            wind_rotated['wind_y'] = -wind_rotated['wind_y']
+        else:
+            # No mirroring or rotating, just return original
+            return wind_rotated
+    elif rotation_angle_degrees == 90:
+        # 90° rotation: (x,y) -> (-y,x)
+        wind_x_new = -wind_rotated['wind_y']
+        wind_y_new = wind_rotated['wind_x']
+        if mirror:
+            # Mirror along the long side
+            wind_x_new = -wind_x_new
+    elif rotation_angle_degrees == 180:
+        # 180° rotation: (x,y) -> (-x,-y)
+        wind_x_new = -wind_rotated['wind_x']
+        wind_y_new = -wind_rotated['wind_y']
+        if mirror:
+            # Mirror along the long side
+            wind_y_new = -wind_y_new
+    elif rotation_angle_degrees == -90:
+        # -90° rotation: (x,y) -> (y,-x)
+        wind_x_new = wind_rotated['wind_y']
+        wind_y_new = -wind_rotated['wind_x']
+        if mirror:
+            # Mirror along the long side
+            wind_x_new = -wind_x_new
+    else:
+        raise ValueError(f"Unsupported rotation angle: {rotation_angle_degrees}. "
+                        "Supported angles are: [0, 90, 180, -90]")
+    
+    wind_rotated['wind_x'] = wind_x_new
+    wind_rotated['wind_y'] = wind_y_new
+    
+    return wind_rotated
+
+
+def rotate_puffs_optimized(data_puffs, rotation_angle_degrees, mirror):
+    """
+    Rotate puff locations by specified angle around origin.
+    Optimized for angles: [0, 90, 180, -90] degrees.
+    
+    Parameters:
+    -----------
+    data_puffs : pd.DataFrame  
+        Puff dataframe with columns: puff_number, time, x, y, radius, tidx,
+        x_minus_radius, x_plus_radius, y_minus_radius, y_plus_radius, concentration
+    rotation_angle_degrees : float
+        Rotation angle in degrees (0, 90, 180, or -90)
+    
+    Returns:
+    --------
+    pd.DataFrame: Rotated puffs dataframe
+    """
+    
+    # Copy dataframe to avoid modifying original
+    puffs_rotated = data_puffs.copy()
+    
+    if rotation_angle_degrees == 0:
+        # No rotation needed
+        if mirror:
+            # Mirror along the long side 
+            puffs_rotated['y'] = -puffs_rotated['y']
+        else:
+            # No mirroring or rotating, just return original
+            return puffs_rotated
+    elif rotation_angle_degrees == 90:
+        # 90° rotation: (x,y) -> (-y,x)
+        x_new = -puffs_rotated['y']
+        y_new = puffs_rotated['x']
+        if mirror:
+            # Mirror along the long side
+            x_new = -x_new
+    elif rotation_angle_degrees == 180:
+        # 180° rotation: (x,y) -> (-x,-y)
+        x_new = -puffs_rotated['x']
+        y_new = -puffs_rotated['y']
+        if mirror:
+            # Mirror along the long side
+            y_new = -y_new
+    elif rotation_angle_degrees == -90:
+        # -90° rotation: (x,y) -> (y,-x)
+        x_new = puffs_rotated['y']
+        y_new = -puffs_rotated['x']
+        if mirror:
+            # Mirror along the long side
+            x_new = -x_new
+    else:
+        raise ValueError(f"Unsupported rotation angle: {rotation_angle_degrees}. "
+                        "Supported angles are: [0, 90, 180, -90]")
+    
+    puffs_rotated['x'] = x_new
+    puffs_rotated['y'] = y_new
+    
+    # Update radius-based columns
+    puffs_rotated['x_minus_radius'] = puffs_rotated['x'] - puffs_rotated['radius']
+    puffs_rotated['x_plus_radius'] = puffs_rotated['x'] + puffs_rotated['radius']
+    puffs_rotated['y_minus_radius'] = puffs_rotated['y'] - puffs_rotated['radius']
+    puffs_rotated['y_plus_radius'] = puffs_rotated['y'] + puffs_rotated['radius']
+    
+    return puffs_rotated
+
+
 def rotate_wind(data_wind, rotation_angle_degrees):
     """
     Rotate wind direction vectors by specified angle around origin.
