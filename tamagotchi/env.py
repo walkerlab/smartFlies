@@ -1380,7 +1380,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.dataset = dataset
         if dataset == 'poisson_noisy3x5b5' or dataset == 'poisson_mag_narrow_noisy3x5b5':
             self.t_val_min = 10
-            self.t_val_max = 105
+            self.t_val_max = 120
+            self.reset_offset_tmax = 105 # start at 0 ~ 105 seconds of the dataframe. Max possible end is 118
             print(f"[DEBUG] PEv3 set_dataset: setting t_val_min={self.t_val_min}, t_val_max={self.t_val_max} for dataset {dataset}")
         self.data_puffs_all, self.data_wind_all = load_plume(
             dataset=self.dataset, 
