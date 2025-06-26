@@ -279,8 +279,8 @@ def training_loop(agent, envs, args, device, actor_critic,
                                 args.gae_lambda, args.use_proper_time_limits)
         value_loss, action_loss, dist_entropy, clip_fraction = agent.update(rollouts)
 
-        utils.log_agent_learning(j, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'])
-        utils.log_eps_artifacts(j, args, update_episodes_df)
+        utils.log_agent_learning(j, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
+        utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
                 
         rollouts.after_update()
         total_num_steps = (j + 1) * args.num_processes * args.num_steps

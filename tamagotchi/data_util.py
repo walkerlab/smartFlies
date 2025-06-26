@@ -523,7 +523,9 @@ def update_eps_info(update_episodes_df, infos, episode_counter):
     return update_episodes_df
 
 
-def log_agent_learning(j, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate):
+def log_agent_learning(j, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, use_mlflow=True):
+    if not use_mlflow:
+        return
     mlflow.log_metric("value_loss", value_loss, step=j)
     mlflow.log_metric("action_loss", action_loss, step=j)
     mlflow.log_metric("dist_entropy", dist_entropy, step=j)
@@ -532,7 +534,7 @@ def log_agent_learning(j, value_loss, action_loss, dist_entropy, clip_fraction, 
 
             
 
-def log_eps_artifacts(j, args, update_episodes_df):
+def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True):
     """
     Log episode statistics and plot a histogram of plume density for successful episodes.
     Args:
@@ -548,11 +550,12 @@ def log_eps_artifacts(j, args, update_episodes_df):
     #     mlflow.log_metric('num_episodes', len(update_episodes_df['outcome']), step=j)
     log_path = f"{args.save_dir}/tmp/{args.model_fname}_eps_log_{j}.csv"
     update_episodes_df.to_csv(log_path, index=False)
-    # try:
-    #     mlflow.log_artifact(log_path, artifact_path=f"eps_log")
-    # except Exception as e:
-    #     print(f"Error logging artifact {log_path}: {e}")
-    # os.remove(log_path)
+    if use_mlflow:
+        try:
+            mlflow.log_artifact(log_path, artifact_path=f"eps_log")
+        except Exception as e:
+            print(f"Error logging artifact {log_path}: {e}")
+        os.remove(log_path)
     
     # Plot plume density histogram for successful episodes
     successful_df = update_episodes_df[update_episodes_df['outcome'] == 'HOME']
@@ -579,11 +582,12 @@ def log_eps_artifacts(j, args, update_episodes_df):
 
         plt.savefig(plt_path, dpi=100, bbox_inches='tight')
         plt.close()  # Close the figure to free memory
-        # try:
-        #     mlflow.log_artifact(plt_path, artifact_path=f"figs")
-        # except Exception as e:
-        #     print(f"Error logging artifact {plt_path}: {e}")
-        # os.remove(plt_path)
+        if use_mlflow:
+            try:
+                mlflow.log_artifact(plt_path, artifact_path=f"figs")
+            except Exception as e:
+                print(f"Error logging artifact {plt_path}: {e}")
+            os.remove(plt_path)
         
         # Plot success rate by plume density and dataset
         # Define common bins for plume density
@@ -633,11 +637,12 @@ def log_eps_artifacts(j, args, update_episodes_df):
         plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}HOME_density_{j}_rate.png"
         plt.savefig(plt_path, dpi=100, bbox_inches='tight')
         plt.close()  # Close the figure to free memory
-        # try:
-        #     mlflow.log_artifact(plt_path, artifact_path=f"figs")
-        # except Exception as e:
-        #     print(f"Error logging artifact {plt_path}: {e}")
-        # os.remove(plt_path)
+        if use_mlflow: 
+            try:
+                mlflow.log_artifact(plt_path, artifact_path=f"figs")
+            except Exception as e:
+                print(f"Error logging artifact {plt_path}: {e}")
+            os.remove(plt_path)
         
 
 # from a2c_ppo_acktr/storage.py
