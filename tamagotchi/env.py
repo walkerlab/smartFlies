@@ -1376,6 +1376,29 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
 
         self.vr_wind = False # for virtual reality wind - list: [wind_x, wind_y]; when set, will set the wind to this value at one step. Needs to be set at every step when using.
         
+    def set_dataset(self, dataset):
+        self.dataset = dataset
+        if dataset == 'poisson_noisy3x5b5' or dataset == 'poisson_mag_narrow_noisy3x5b5':
+            self.t_val_min = 10
+            self.t_val_max = 105
+            print(f"[DEBUG] PEv3 set_dataset: setting t_val_min={self.t_val_min}, t_val_max={self.t_val_max} for dataset {dataset}")
+        self.data_puffs_all, self.data_wind_all = load_plume(
+            dataset=self.dataset, 
+            t_val_min=self.t_val_min, 
+            t_val_max=self.t_val_max,
+            env_dt=self.dt,
+            puff_sparsity=np.clip(self.birthx_max, a_min=0.01, a_max=1.00),
+            diffusion_multiplier=self.diffusion_max,
+            radius_multiplier=self.radiusx,
+            )
+        self.data_puffs = self.data_puffs_all.copy() # trim this per episode
+        self.data_wind = self.data_wind_all.copy() # trim/flip this per episode
+        self.t_vals = self.data_wind['time'].tolist()
+        # print("wind: t_val_diff", (self.t_vals[2] - self.t_vals[1]), "env_dt", self.dt)
+        t_vals_puffs = self.data_puffs['time'].unique()
+        # print("puffs: t_val_diff", (t_vals_puffs[2] - t_vals_puffs[1]), "env_dt", self.dt)
+        self.tidxs = self.data_wind['tidx'].tolist()
+
     def sample_rotate_by(self):
         """
         At reset time, sample a random rotation angle in degrees and sample whether to mirror the data.
