@@ -1394,11 +1394,11 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             )
         self.data_puffs = self.data_puffs_all.copy() # trim this per episode
         self.data_wind = self.data_wind_all.copy() # trim/flip this per episode
-        self.t_vals = self.data_wind['time'].tolist()
+        self.t_vals = self.data_wind_all['time'].tolist()
         # print("wind: t_val_diff", (self.t_vals[2] - self.t_vals[1]), "env_dt", self.dt)
-        t_vals_puffs = self.data_puffs['time'].unique()
+        t_vals_puffs = self.data_puffs_all['time'].unique()
         # print("puffs: t_val_diff", (t_vals_puffs[2] - t_vals_puffs[1]), "env_dt", self.dt)
-        self.tidxs = self.data_wind['tidx'].tolist()
+        self.tidxs = self.data_wind_all['tidx'].tolist()
 
     def sample_rotate_by(self):
         """
@@ -2176,6 +2176,27 @@ class SubprocVecEnv(SubprocVecEnv_):
             remote.send(("reset", None))
         obs = [remote.recv() for remote in self.deployed_remotes]
         return _flatten_obs(obs, self.observation_space)
+    
+    def reset_after_checkpoint(self) -> VecEnvObs:
+        # reset all deployed envs after a checkpoint - use once after loading a checkpoint
+        
+        # resampled which datasets to deploy
+        for i_deployed in range(len(self.deployed_remotes)):
+            # sample a new wind condition
+            new_wind_direction = self.sample_wind_direction()
+            current_wind_direction = self.ds2wind(self.get_attr('dataset', i_deployed)[0])
+            print('[DEBUG] i remote =', i_deployed, 'sampled wind dir:', new_wind_direction, 'current wind direction:', current_wind_direction)
+            # if wind condtion changed, then swap
+            if new_wind_direction != current_wind_direction:
+                # print(f"[DEBUG] new wind dir selected... pre swap {self.get_attr('dataset')}")
+                # check the remote_directory to swap with an undeployed env with the condition of interest
+                for remote_idx, status in self.remote_directory.items():
+                    if status['deployed'] == False and status['wind_direction'] == new_wind_direction:
+                        self.swap(i_deployed, remote_idx)
+                        print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
+                        break
+            
+        return self.reset()
     
     def reset_deployed_at(self, indices: VecEnvIndices = None) -> VecEnvObs:
         # reset only envs at indices
