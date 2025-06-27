@@ -1381,7 +1381,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if dataset == 'poisson_noisy3x5b5' or dataset == 'poisson_mag_narrow_noisy3x5b5':
             self.t_val_min = 10
             self.t_val_max = 120
-            self.reset_offset_tmax = 105 # start at 0 ~ 105 seconds of the dataframe. Max possible end is 118
+            self.reset_offset_tmax = 97 # start at 0 ~ 105 seconds of the dataframe. Max possible end is 118
             print(f"[DEBUG] PEv3 set_dataset: setting t_val_min={self.t_val_min}, t_val_max={self.t_val_max} for dataset {dataset}")
         self.data_puffs_all, self.data_wind_all = load_plume(
             dataset=self.dataset, 
@@ -1612,6 +1612,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         except Exception as ex:
             # Debug case where the env tries to access t_val outside puff_data!
             print("[PEv3 step]", ex, self.episode_step, self.step_offset, self.t_val_min, self.t_vals[-5:], self.tidxs[-5:])
+                                # range 283 2468 10 [119.84, 119.88, 119.92, 119.96000000000001, 120.0] [11984, 11988, 11992, 11996, 12000]
             sys.exit(-1)
         
         self.stray_distance_last = self.stray_distance
