@@ -177,7 +177,7 @@ def training_loop(agent, envs, args, device, actor_critic,
     best_mean = 0.0
 
     training_log = training_log if training_log is not None else [] 
-    update = len(training_log) # the number of updates already done in case of checkpointing
+    last_chkpt_update = len(training_log) # the number of updates already done in case of checkpointing
     eval_log = eval_log if eval_log is not None else []
     
     # initialize the curriculum schedule
@@ -196,28 +196,32 @@ def training_loop(agent, envs, args, device, actor_critic,
     rollouts.to(device)
     start = time.time()
     # at each bout of update
-    if update:
+    update_range = range(num_updates)
+    if last_chkpt_update:
         # if checkpointing, start updating from the last update
-        update_range = range(update, num_updates)
-    else:
-        update_range = range(num_updates)
+        update_range = range(last_chkpt_update, num_updates)
     for j in update_range:
         # decrease learning rate linearly
         if args.use_linear_lr_decay:
             utils.update_linear_schedule(
                 agent.optimizer, j, num_updates, args.lr)
         
-        # update envs according to the curriculum schedule
+        ##############################################################################################################
+        # Curriculum Learning - update envs according to the curriculum schedule
+        ##############################################################################################################
         if args.birthx_linear_tc_steps:
-            if update:
+            if last_chkpt_update:
                 # update is not 0 when resuming training - need to catch up on the schedule
-                for pre_update in range(update):
-                    if pre_update in schedule['birthx']:
-                        updated = update_by_schedule(envs, schedule, pre_update)
-                update = 0 # reset update to 0 after catching up - update will no longer be used.
-            updated = update_by_schedule(envs, schedule, j)
-            if updated and not args.dryrun: # save model if an update to env occurred during this trial
-                lesson_fpath = os.path.join(args.save_dir, 'chkpt', args.model_fname.replace(".pt", f'_before_{updated}{schedule[updated][j]}_update{j}.pt'))
+                for pre_update in range(last_chkpt_update):
+                    updated = update_by_schedule(envs, schedule, pre_update)
+                obs = envs.reset_after_checkpoint() # reset 
+                obs = torch.tensor(obs, dtype = torch.float32)
+                rollouts.obs[0].copy_(obs) # https://discuss.pytorch.org/t/which-copy-is-better/56393
+                rollouts.to(device)
+                last_chkpt_update = 0 # reset the last_chkpt_update to 0 after catching up
+            updated_var = update_by_schedule(envs, schedule, j)
+            if updated_var and not args.dryrun: # save model if an update to env occurred during this trial
+                lesson_fpath = os.path.join(args.save_dir, 'chkpt', args.model_fname.replace(".pt", f'_before_{updated_var}{schedule[updated_var][j]}_update{j}.pt'))
                 torch.save([
                     actor_critic,
                     getattr(get_vec_normalize(envs), 'ob_rms', None),
