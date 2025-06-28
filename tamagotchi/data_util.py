@@ -6,6 +6,7 @@ import matplotlib
 import numpy as np
 import pandas as pd
 import mlflow
+import math
 
 def load_plume(
     dataset='constant', 
@@ -343,6 +344,13 @@ def update_linear_schedule(optimizer, epoch, total_num_epochs, initial_lr):
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
     print("Learning rate: ", lr, flush=True)
+    
+def update_cosine_restart_schedule(optimizer, epoch, initial_lr, restart_period=100):
+    t = epoch % restart_period
+    lr = initial_lr * 0.5 * (1 + math.cos(math.pi * t / restart_period))
+    for group in optimizer.param_groups:
+        group['lr'] = lr
+    print("Epoch {} Learning rate: {}".format(epoch, lr), flush=True)
 
 def init(module, weight_init, bias_init, gain=1):
     weight_init(module.weight.data, gain=gain)
@@ -517,7 +525,8 @@ def update_eps_info(update_episodes_df, infos, episode_counter):
                     'start_tidx': infos[i]['step_offset'],
                     'end_tidx': infos[i]['tidx'],
                     'location_initial': infos[i]['location_initial'],
-                    'init_angle': infos[i]['init_angle']
+                    'init_angle': infos[i]['init_angle'],
+                    'rotate_by': infos[i]['rotate_by']
                 }])]
             )
     return update_episodes_df
