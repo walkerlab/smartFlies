@@ -46,8 +46,7 @@ def build_tc_schedule_dict(total_number_periods, interleave=True, **kwargs):
     Returns:
         schedule_dict: A dictionary of dicts. Each key is an env variable to be updated according to its schedule information.
             The schedule information is stored a dict with key: at which "episode" to update, and value: update the value to what.
-            
-            
+        restart_period: the number of updates between each stage of curriculum. Used for cosine annealing of the learning rate.
     """
     # initialize the default course directory 
     course_dirctory = {'birthx': {'num_classes': 6, 'difficulty_range': [0.7,0.001], 'dtype': 'float', 'step_type': 'log'}, 
@@ -106,7 +105,11 @@ def build_tc_schedule_dict(total_number_periods, interleave=True, **kwargs):
         schedule_dict[course_name][when_2_update[i]] = scheduled_value
 
     # print("[DEBUG] schedule_dict:", schedule_dict)
-    return schedule_dict
+
+    # Calculate total curriculum updates
+    total_num_updates = len(course_schedule)  # already computed by your code
+    restart_period = total_number_periods // (total_num_updates + 1)
+    return schedule_dict, restart_period
 
 def log_episode(training_log, j, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates, use_mlflow=True):
     # update the training log with the current episode's statistics
@@ -182,7 +185,7 @@ def training_loop(agent, envs, args, device, actor_critic,
     
     # initialize the curriculum schedule
     if args.birthx_linear_tc_steps:
-        schedule = build_tc_schedule_dict(num_updates, birthx={'num_classes': args.birthx_linear_tc_steps, 
+        schedule, restart_period = build_tc_schedule_dict(num_updates, birthx={'num_classes': args.birthx_linear_tc_steps, 
                                                                 'difficulty_range': [0.7, args.birthx], 
                                                                 'dtype': 'float', 'step_type': 'linear'}, 
                                           wind_cond={'num_classes': len(args.dataset) - 1, 'difficulty_range': [1, len(args.dataset)], 
@@ -203,8 +206,12 @@ def training_loop(agent, envs, args, device, actor_critic,
     for j in update_range:
         # decrease learning rate linearly
         if args.use_linear_lr_decay:
-            utils.update_linear_schedule(
-                agent.optimizer, j, num_updates, args.lr)
+            if 'cosine' in args.r_shaping: # HACK! 
+                # cosine annealing for the reward shaping
+                utils.update_cosine_restart_schedule(agent.optimizer, j, args.lr, restart_period=restart_period)
+            else:
+                # linear annealing for the learning rate
+                utils.update_linear_schedule(agent.optimizer, j, args.lr, num_updates)
         
         ##############################################################################################################
         # Curriculum Learning - update envs according to the curriculum schedule
