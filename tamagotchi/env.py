@@ -1410,7 +1410,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             tick = np.random.choice(len(self.rotate_angles))
             self.rotate_by = self.rotate_angles[tick]
             coin_flip = np.random.choice(2)
-            self.mirror = True if coin_flip == 1 else False # flip the data along the long axis of the plume
+            # self.mirror = True if coin_flip == 1 else False # flip the data along the long axis of the plume
+            self.mirror = False # always off! 
             if self.verbose: print(f"[DEBUG] PEv3 sample_rotate_by: self.rotate_by is set to {self.rotate_by} degrees, mirroring: {self.mirror}")
         
     def get_current_wind_xy(self):
