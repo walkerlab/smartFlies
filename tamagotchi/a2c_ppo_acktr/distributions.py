@@ -82,7 +82,10 @@ class DiagGaussian(nn.Module):
 
         self.fc_mean = init_(nn.Linear(num_inputs, num_outputs))
         if trainable_std_dev:
-            self.logstd = init_(nn.Linear(num_inputs, num_outputs))
+            # Separate initialization for logstd with negative bias
+            self.logstd = nn.Linear(num_inputs, num_outputs)
+            nn.init.orthogonal_(self.logstd.weight)
+            nn.init.constant_(self.logstd.bias, -0.5)  # Start with std ≈ 0.6
         else:
             self.logstd = AddBias(torch.zeros(num_outputs))
         self.trainable_std_dev = trainable_std_dev
@@ -98,7 +101,8 @@ class DiagGaussian(nn.Module):
             if x.is_cuda:
                 zeros = zeros.cuda()
             action_logstd = self.logstd(zeros)
-            
+        # CLAMP BEFORE EXP TO AVOID EXPLOSIVE VALUES
+        action_logstd = torch.clamp(action_logstd, min=-20, max=2)
         return FixedNormal(action_mean, action_logstd.exp())
 
 
