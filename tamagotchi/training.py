@@ -213,6 +213,91 @@ def log_episode(training_log, j, total_num_steps, start, episode_rewards, episod
         
     return training_log
 
+class TrajectoryStorage:
+    """
+    Lightweight trajectory storage that optimizes memory usage by:
+    - Only tracking trajectories while still collecting (stops when target reached)
+    - Only storing locations for environments that will be used
+    - Automatically stopping collection once 2 oob + 2 home trajectories are found
+    """
+    def __init__(self, num_envs):
+        self.num_envs = num_envs
+        self.reset_update()
+        # Track ongoing trajectories for each env
+        self.ongoing_trajectories = [[] for _ in range(num_envs)]
+    
+    def reset_update(self):
+        """Reset counters and storage for new update"""
+        self.stored_trajectories = {
+            'oob': [],
+            'home': []
+        }
+        self.oob_count = 0
+        self.home_count = 0
+        # Start tracking all environments for the new update
+        self.ongoing_trajectories = [[] for _ in range(self.num_envs)]
+        
+    def add_step(self, infos):
+        """Add current step locations to ongoing trajectories (only if still collecting)"""
+        if self.is_storage_full():
+            return  # Stop tracking once we have enough
+            
+        for i, info in enumerate(infos):
+            if 'location' in info and len(self.ongoing_trajectories[i]) > 0:
+                # Only add to trajectories we're actively tracking
+                self.ongoing_trajectories[i].append(info['location'].copy())
+    
+    def check_episode_done(self, infos, done):
+        """Check for completed episodes and store if needed"""
+        for i, (d, info) in enumerate(zip(done, infos)):
+            if d and 'done' in info:
+                # Determine episode type
+                episode_type = 'oob' if info['done'] == 'oob' else 'home'
+                
+                # Store if we haven't reached limit and were tracking this trajectory
+                if (episode_type == 'oob' and self.oob_count < 2 and 
+                    len(self.ongoing_trajectories[i]) > 0):
+                    self.stored_trajectories['oob'].append({
+                        'trajectory': self.ongoing_trajectories[i].copy(),
+                        'episode_info': info.copy()
+                    })
+                    self.oob_count += 1
+                    
+                elif (episode_type == 'home' and self.home_count < 2 and 
+                      len(self.ongoing_trajectories[i]) > 0):
+                    self.stored_trajectories['home'].append({
+                        'trajectory': self.ongoing_trajectories[i].copy(),
+                        'episode_info': info.copy()
+                    })
+                    self.home_count += 1
+                
+                # Reset trajectory for this env and decide whether to start tracking new episode
+                self.ongoing_trajectories[i] = []
+                
+                # Start tracking new episode only if we still need more trajectories
+                if not self.is_storage_full():
+                    # Initialize empty trajectory for the new episode that's starting
+                    self.ongoing_trajectories[i] = []
+    
+    def get_trajectories(self):
+        """Get stored trajectories for current update"""
+        return self.stored_trajectories.copy()
+    
+    def is_storage_full(self):
+        """Check if we've collected enough trajectories"""
+        return self.oob_count >= 2 and self.home_count >= 2
+    
+    def get_collection_status(self):
+        """Get current collection status"""
+        active_envs = sum(1 for traj in self.ongoing_trajectories if len(traj) > 0)
+        return {
+            'oob_collected': self.oob_count,
+            'home_collected': self.home_count,
+            'active_trajectories': active_envs,
+            'collection_complete': self.is_storage_full()
+        }
+
+
 def training_loop(agent, envs, args, device, actor_critic, 
     training_log=None, eval_log=None, eval_env=None, rollouts=None):
     ##############################################################################################################
@@ -226,16 +311,19 @@ def training_loop(agent, envs, args, device, actor_critic,
     num_updates = int(
         args.num_env_steps) // args.num_steps // args.num_processes # args.num_env_steps 20M for all # args.num_steps=2048 (found in logs) # args.num_processes=4=mini_batch (found in logs)
     
-    episode_rewards = deque(maxlen=50) 
-    episode_plume_densities = deque(maxlen=50)
-    episode_puffs = deque(maxlen=50)
-    episode_wind_directions = deque(maxlen=50)
-    
+
     best_mean = 0.0
 
     training_log = training_log if training_log is not None else [] 
     last_chkpt_update = len(training_log) # the number of updates already done in case of checkpointing
     eval_log = eval_log if eval_log is not None else []
+    # track trajectories for plotting
+    traj_storage = TrajectoryStorage(num_envs=envs.num_envs)
+    # track stats for logging
+    episode_rewards = deque(maxlen=50) 
+    episode_plume_densities = deque(maxlen=50)
+    episode_puffs = deque(maxlen=50)
+    episode_wind_directions = deque(maxlen=50)
     
     # initialize the curriculum schedule
     if args.birthx_linear_tc_steps:
@@ -249,14 +337,11 @@ def training_loop(agent, envs, args, device, actor_critic,
         if not args.dryrun:
             utils.save_tc_schedule(schedule, num_updates, args.num_processes, args.num_steps, args.save_dir)
 
-        # TODO plot two success and failure trials at each update!
-        # TODO get the ratio of successes and failures at each update
-        
-
     obs = envs.reset()
     rollouts.obs[0].copy_(obs) # https://discuss.pytorch.org/t/which-copy-is-better/56393
     rollouts.to(device)
     start = time.time()
+    
     # at each bout of update
     update_range = range(num_updates)
     if last_chkpt_update:
@@ -270,7 +355,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                 utils.update_cosine_restart_schedule(agent.optimizer, j, args.lr, restart_period=restart_period)
             else:
                 # linear annealing for the learning rate
-                utils.update_linear_schedule(agent.optimizer, j, args.lr, num_updates)
+                utils.update_linear_schedule(agent.optimizer, j, num_updates, args.lr)
         
         ##############################################################################################################
         # Curriculum Learning - update envs according to the curriculum schedule
@@ -280,12 +365,16 @@ def training_loop(agent, envs, args, device, actor_critic,
                 # update is not 0 when resuming training - need to catch up on the schedule
                 for pre_update in range(last_chkpt_update):
                     updated = update_by_schedule(envs, schedule, pre_update)
-                obs = envs.reset_after_checkpoint() # reset 
-                obs = torch.tensor(obs, dtype = torch.float32)
+                obs = envs.reset_after_checkpoint() # reset
+                obs = torch.tensor(obs, dtype=torch.float32)
                 rollouts.obs[0].copy_(obs) # https://discuss.pytorch.org/t/which-copy-is-better/56393
                 rollouts.to(device)
                 last_chkpt_update = 0 # reset the last_chkpt_update to 0 after catching up
             updated_var = update_by_schedule(envs, schedule, j)
+            
+            ##############################################################################################################
+            # Checkpointing
+            ##############################################################################################################
             if updated_var and not args.dryrun: # save model if an update to env occurred during this trial
                 lesson_fpath = os.path.join(args.save_dir, 'chkpt', args.model_fname.replace(".pt", f'_before_{updated_var}{schedule[updated_var][j]}_update{j}.pt'))
                 torch.save([
@@ -304,9 +393,9 @@ def training_loop(agent, envs, args, device, actor_critic,
         update_episodes_df = pd.DataFrame(columns=[
             'episode_id', 'dataset', 'outcome', 'reward', 'plume_density', 
             'start_tidx', 'end_tidx', 'location_initial', 'init_angle'
-        ])
+        ]) # track stats of episodes
         episode_counter = 0
-
+        traj_storage.reset_update() # track few trajectories for plotting
         ##############################################################################################################
         # at each step of training 
         ##############################################################################################################
@@ -317,6 +406,8 @@ def training_loop(agent, envs, args, device, actor_critic,
                     rollouts.recurrent_hidden_states[step],
                     rollouts.masks[step])
             obs, reward, done, infos = envs.step(action)
+            traj_storage.add_step(infos)
+            traj_storage.check_episode_done(infos, done)
             for i, d in enumerate(done): # if done, log the episode info. Care about what kind of env is encountered
                 if d:
                     try:
@@ -329,6 +420,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                         update_episodes_df = utils.update_eps_info(update_episodes_df, infos, episode_counter)
                     except KeyError:
                         raise KeyError("Logging info not found... check why it's not here when done")
+                            
             # If done then clean the history of observations in the recurrent_hidden_states. Done in the MLPBase forward method
             masks = torch.FloatTensor(
                 [[0.0] if done_ else [1.0] for done_ in done])
@@ -348,6 +440,10 @@ def training_loop(agent, envs, args, device, actor_critic,
         rollouts.compute_returns(next_value, args.use_gae, args.gamma,
                                 args.gae_lambda, args.use_proper_time_limits)
         value_loss, action_loss, dist_entropy, clip_fraction = agent.update(rollouts)
+        
+        # After update, get stored trajectories
+        update_trajectories = traj_storage.get_trajectories()
+        status = traj_storage.get_collection_status()
 
         utils.log_agent_learning(j, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
         utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
