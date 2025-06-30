@@ -1479,7 +1479,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             'diff_min': [0.7, 0.65, 0.4],
             """
             q_curriculum = np.random.uniform(self.diff_min, self.diff_max)
-            print(f"[DEBUG] self.diff_min: {self.diff_min}, self.diff_max: {self.diff_max}, q_curriculum: {q_curriculum}")
+            # print(f"[DEBUG] self.diff_min: {self.diff_min}, self.diff_max: {self.diff_max}, q_curriculum: {q_curriculum}")
             Z = self.get_abunchofpuffs()
             
             X_span = abs(Z['x'].max() - Z['x'].min())
