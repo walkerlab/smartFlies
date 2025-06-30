@@ -302,13 +302,13 @@ def rotate_wind_and_puffs(data_wind, data_puffs, rotation_angle_degrees):
     
     return wind_rotated, puffs_rotated
 
-def get_concentration_at_tidx(data, tidx, x_val, y_val, rotate_by=0):
+def get_concentration_at_tidx(data, tidx, x_val, y_val, rotate_by=0, mirror=False):
     # find the indices for all puffs that intersect the given x,y,time point
     qx = str(x_val) + ' > x_minus_radius and ' + str(x_val) + ' < x_plus_radius'
     qy = str(y_val) + ' > y_minus_radius and ' + str(y_val) + ' < y_plus_radius'
     q = qx + ' and ' + qy
     if rotate_by:
-        data_rot = rotate_puffs(data[data.tidx==tidx], rotate_by)
+        data_rot = rotate_puffs_optimized(data[data.tidx==tidx], rotate_by, mirror)
         d = data_rot.query(q)
         # t_val = wind[wind.tidx==tidx].time.values[0] 
         # print("d.concentration.sum()", d.concentration.sum())
@@ -359,28 +359,30 @@ def init(module, weight_init, bias_init, gain=1):
 
 # New version: One circle at hardcoded (x,y) with quiver 
 def plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=False):
-    # Instantaneous wind velocity
-    # Normalize wind (just care about angle)
-    data_at_t = data_wind[data_wind.time==t_val]
+    # Get mean wind vector at given time
+    data_at_t = data_wind[data_wind.time == t_val]
     v_x, v_y = data_at_t.wind_x.mean(), data_at_t.wind_y.mean()
-    v_xy = np.sqrt(v_x**2 + v_y**2)*20
-    v_x, v_y = v_x/v_xy, v_y/v_xy
-    # print("v_x, v_y", v_x, v_y)
-
-    # Arrow
-    x,y = -0.15, 0.6 # Arrow Center [Note usu. xlim=(-0.5, 8)]
-    if invert_colors:
-        color='white'
+    
+    # Normalize wind vector (direction only)
+    norm = np.sqrt(v_x ** 2 + v_y ** 2)
+    if norm < 1e-8:
+        v_x, v_y = 0.0, 0.0  # avoid division by zero
     else:
-        color='black'
-    ax.quiver(x, y, v_x, v_y, color=color, scale=2.5)
-    # ax.quiver(x, y, v_x, v_y, color='black', scale=500)
+        v_x, v_y = v_x / norm, v_y / norm
+    
+    # Arrow location
+    x, y = -0.15, 0.6
+    color = 'white' if invert_colors else 'black'
 
-    # Circle is 1 scatterplot point!
-    ax.scatter(x, y, s=500, 
-        facecolors='none', 
-        edgecolors=color,
-        linestyle='--')
+    # Draw wind vector (quiver automatically handles direction signs)
+    ax.quiver(x, y, v_x, v_y, color=color, scale=5, scale_units='xy', angles='xy', width=0.01)
+
+    # Draw wind circle
+    ax.scatter(x, y, s=500,
+               facecolors='none',
+               edgecolors=color,
+               linestyle='--')
+    
     return ax
 
 def plot_puffs(data, t_val, ax=None, fig=None, show=True):
