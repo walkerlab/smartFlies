@@ -12,6 +12,15 @@ from env import get_vec_normalize
 import mlflow
 
 
+def get_index_by_dataset(envs, dataset):
+    """Get indices of the remotes that loaded the provided dataset."""
+    idx = []
+    for k,v in envs.remote_directory.items():
+        if v['dataset'] == dataset:
+            idx.append(k)
+    return idx
+
+        
 def update_by_schedule(envs, schedule_dict, curr_step):
     # TODO: implement a density function over the probs of selecting a new TC value
     # updating the env_collection will change the currently running envs :o
@@ -27,12 +36,21 @@ def update_by_schedule(envs, schedule_dict, curr_step):
             elif k == 'wind_cond': 
                 envs.update_wind_direction(_schedule_dict[curr_step])
                 print(f"update_env_param {k}: {_schedule_dict[curr_step]} at {curr_step}")
+            elif 'diff_max' in k:
+                # k format: '{ds}_diff_max'
+                ds_name = k.split('_diff_max')[0] # get the dataset name
+                idx = get_index_by_dataset(envs, ds_name) 
+                if len(idx) == 0:
+                    print(f"No remote found for {ds_name} lesson")
+                else:
+                    envs.env_method_at(idx, "update_env_param", {'diff_max': _schedule_dict[curr_step]})
+                    print(f"update_env_param 'diff_max': {_schedule_dict[curr_step]} at {curr_step} for remote {idx}")
             else:
                 raise NotImplementedError
     return updated # return the course that is updated, if any
 
 
-def build_tc_schedule_dict(total_number_periods, interleave=True, **kwargs):
+def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs):
     """Builds a training curriculum schedule dictionary. 
     Args:
         total_number_periods: number of updates 
@@ -106,9 +124,45 @@ def build_tc_schedule_dict(total_number_periods, interleave=True, **kwargs):
 
     # print("[DEBUG] schedule_dict:", schedule_dict)
 
-    # Calculate total curriculum updates
+    # Calculate how often to toggle cosine annealing of the learning rate - interval of curriculum updates
     total_num_updates = len(course_schedule)  # already computed by your code
     restart_period = total_number_periods // (total_num_updates + 1)
+    
+    # add diff_max sub-lessons that is locked to the wind condition lessons
+    lesson_times = [] # all lesson times in the schedule
+    for k, v in schedule_dict.items():
+        lesson_times.append(list(v.keys()))
+    # flatten the list of lists
+    lesson_times = list(itertools.chain.from_iterable(lesson_times))
+    # sort and remove duplicates
+    lesson_times = sorted(set(lesson_times))
+    # get the wind condition lessons
+    wind_lesson_at = sorted(list(schedule_dict['wind_cond'].keys()))
+
+    available_datasets = args.dataset
+    # get a length of period where loc algo grows 
+    # get diff_min diff_max of datasets which controls the location algorithm
+    # gradually increase diff_max over 4 lessons
+    if 'linear' in args.loc_algo:
+        # for each dataset find when their lessons are introduced and when the next one is introduced
+        total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0] # over this period of time, grow diff_max
+        num_lessons = 4
+        lesson_time = round(total_lesson_time / num_lessons)
+        diff_max_step = (np.array(args.diff_max) - np.array(args.diff_min)) / num_lessons # the step size for the diff_max
+        for i, dataset in enumerate(available_datasets):
+            # init lesson for each dataset
+            lesson_name = f'{dataset}_diff_max'
+            if lesson_name not in schedule_dict:
+                schedule_dict[lesson_name] = {}
+            # get the start time of the lesson
+            ds_start = wind_lesson_at[i] # start after the i-th wind cond. is introduced
+            # add the lesson to the schedule
+            for j in range(4):
+                lesson_time_idx = ds_start + j * lesson_time
+                schedule_dict[lesson_name][lesson_time_idx] = args.diff_min[i] + (j + 1) * diff_max_step[i]
+                # eg: {'poisson_mag_narrow_noisy3x5b5_diff_max': {665: 0.4, 720: 0.5, 775: 0.6000000000000001, 830: 0.7000000000000001}
+
+
     return schedule_dict, restart_period
 
 def log_episode(training_log, j, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates, use_mlflow=True):
@@ -185,15 +239,20 @@ def training_loop(agent, envs, args, device, actor_critic,
     
     # initialize the curriculum schedule
     if args.birthx_linear_tc_steps:
-        schedule, restart_period = build_tc_schedule_dict(num_updates, birthx={'num_classes': args.birthx_linear_tc_steps, 
+        schedule, restart_period = build_tc_schedule_dict(args, num_updates, birthx={'num_classes': args.birthx_linear_tc_steps, 
                                                                 'difficulty_range': [0.7, args.birthx], 
                                                                 'dtype': 'float', 'step_type': 'linear'}, 
                                           wind_cond={'num_classes': len(args.dataset) - 1, 'difficulty_range': [1, len(args.dataset)], 
                                                      'dtype': 'int', 'step_type': 'linear'}) # wind_cond: in the sequence of args.dataset - first is 1, last is 3
         update_by_schedule(envs, schedule, 0) # update the initialized envs according to the curriculum schedule. The default init values are incorrect, hence this update s.t. reset() returns correctly.
+
         if not args.dryrun:
             utils.save_tc_schedule(schedule, num_updates, args.num_processes, args.num_steps, args.save_dir)
-    
+
+        # TODO plot two success and failure trials at each update!
+        # TODO get the ratio of successes and failures at each update
+        
+
     obs = envs.reset()
     rollouts.obs[0].copy_(obs) # https://discuss.pytorch.org/t/which-copy-is-better/56393
     rollouts.to(device)
