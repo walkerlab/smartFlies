@@ -1561,7 +1561,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print('agent_angle', self.agent_angle)
 
         odor_observation = get_concentration_at_tidx(
-            self.data_puffs, self.tidx, self.agent_location[0], self.agent_location[1], rotate_by = self.rotate_by) # PEv3 - add option to rotate df by angle
+            self.data_puffs, self.tidx, self.agent_location[0], self.agent_location[1], rotate_by = self.rotate_by, mirror = self.mirror) # PEv3 - add option to rotate df by angle
         
         if self.odor_scaling:
             odor_observation *= self.odorx # Random scaling to improve generalization 
@@ -1591,6 +1591,16 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         return observation
 
     def reset(self):
+        # Return an array with [wind x, y, odor, air vel x, y, egocentric course direction x, y]
+            # Wind can either be relative wind or apparent wind, depending on the setting
+        self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
+        observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
+        if len(observation) == 7:
+            observation[5:] = 0 # course direction to 0
+        self.init_angle = self.agent_angle
+        return observation
+
+    def soft_reset(self):
         # Return an array with [wind x, y, odor, air vel x, y, egocentric course direction x, y]
             # Wind can either be relative wind or apparent wind, depending on the setting
         self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
@@ -1726,6 +1736,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             "NA"    
         info = {
             'rotate_by': self.rotate_by, # PEv3 - rotate the data by this angle (in degrees) before using it
+            'mirror': self.mirror, # PEv3 - rotate the data by this angle (in degrees) before using it
             't_val':self.t_val, 
             'tidx':self.tidx, 
             'flipx':self.flipx,
@@ -2234,6 +2245,14 @@ class SubprocVecEnv(SubprocVecEnv_):
     def get_attr(self, attr_name: str, indices: VecEnvIndices = None) -> List[Any]:
         """Return attribute from the DEPLOYED environments."""
         target_remotes = self._get_target_remotes(indices, deployed=True)
+        for remote in target_remotes:
+            remote.send(("get_attr", attr_name))
+        return [remote.recv() for remote in target_remotes]
+    
+    def get_attr_at(self, indices: VecEnvIndices, attr_name: str) -> List[Any]:
+        """Return attribute from specific environments by index (can include deployed and undeployed)."""
+        indices = self._get_indices(indices)
+        target_remotes = self._get_target_remotes(indices, deployed=False)
         for remote in target_remotes:
             remote.send(("get_attr", attr_name))
         return [remote.recv() for remote in target_remotes]
