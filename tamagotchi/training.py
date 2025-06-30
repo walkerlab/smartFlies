@@ -9,8 +9,8 @@ from data_util import RolloutStorage
 # from tamagotchi.eval import eval_lite
 import data_util as utils
 from env import get_vec_normalize
+import matplotlib.pyplot as plt
 import mlflow
-
 
 def get_index_by_dataset(envs, dataset):
     """Get indices of the remotes that loaded the provided dataset."""
@@ -213,92 +213,315 @@ def log_episode(training_log, j, total_num_steps, start, episode_rewards, episod
         
     return training_log
 
+
 class TrajectoryStorage:
     """
-    Lightweight trajectory storage that optimizes memory usage by:
+    Lightweight trajectory storage that tracks trajectories by dataset type and episode outcome.
+    Collects 2 HOME and 2 OOB trials for each expected dataset.
+    Optimizes memory usage by:
     - Only tracking trajectories while still collecting (stops when target reached)
     - Only storing locations for environments that will be used
-    - Automatically stopping collection once 2 oob + 2 home trajectories are found
+    - Automatically stopping collection once 2 HOME + 2 OOB per expected dataset are found
     """
-    def __init__(self, num_envs):
+    def __init__(self, num_envs, possible_datasets):
         self.num_envs = num_envs
+        self.possible_datasets = possible_datasets
+        self.expected_datasets = set()  # Datasets expected in current update
+        self.trajectories_per_outcome = 2  # Target number per outcome type (HOME/OOB)
+        self.is_full = False  # Flag to indicate if storage is full
         self.reset_update()
         # Track ongoing trajectories for each env
         self.ongoing_trajectories = [[] for _ in range(num_envs)]
     
-    def reset_update(self):
-        """Reset counters and storage for new update"""
+    def set_expected_datasets(self, expected_datasets):
+        """Set which datasets to expect during this update"""
+        self.expected_datasets = set(expected_datasets)
+        # Reset storage structure for expected datasets
         self.stored_trajectories = {
-            'oob': [],
-            'home': []
+            dataset: {'HOME': [], 'OOB': []} 
+            for dataset in self.expected_datasets
         }
-        self.oob_count = 0
-        self.home_count = 0
+        self.dataset_counts = {
+            dataset: {'HOME': 0, 'OOB': 0} 
+            for dataset in self.expected_datasets
+        }
+        print(f"Expecting datasets: {self.expected_datasets}")
+        print(f"Target: {self.trajectories_per_outcome} HOME + {self.trajectories_per_outcome} OOB per dataset")
+    
+    def reset_update(self, expected_datasets=None):
+        """Reset counters and storage for new update"""
+        if expected_datasets is not None:
+            self.set_expected_datasets(expected_datasets)
+        else:
+            # If no datasets specified, reset with empty structure
+            self.stored_trajectories = {}
+            self.dataset_counts = {}
+            self.expected_datasets = set()
+        self.is_full = False 
         # Start tracking all environments for the new update
         self.ongoing_trajectories = [[] for _ in range(self.num_envs)]
-        
+    
     def add_step(self, infos):
         """Add current step locations to ongoing trajectories (only if still collecting)"""
-        if self.is_storage_full():
+        if self.is_full:
             return  # Stop tracking once we have enough
             
         for i, info in enumerate(infos):
-            if 'location' in info and len(self.ongoing_trajectories[i]) > 0:
-                # Only add to trajectories we're actively tracking
+            if 'location' in info and self.ongoing_trajectories[i] is not None:
+                # Only add to trajectories we're actively tracking (None means stopped)
                 self.ongoing_trajectories[i].append(info['location'].copy())
     
-    def check_episode_done(self, infos, done):
-        """Check for completed episodes and store if needed"""
+    def check_episode_done(self, infos, done, tracked_ds=''):
+        """Check for completed episodes and store if needed. tracked_ds - stop tracking if this dataset is full."""
         for i, (d, info) in enumerate(zip(done, infos)):
-            if d and 'done' in info:
-                # Determine episode type
-                episode_type = 'oob' if info['done'] == 'oob' else 'home'
+            if d and 'dataset' in info and 'done' in info and self.ongoing_trajectories[i] is not None:
+                # Get dataset and outcome type from episode info
+                dataset = info['dataset']
+                outcome_type = info['done']
+                if outcome_type == 'OOT':
+                    continue
                 
-                # Store if we haven't reached limit and were tracking this trajectory
-                if (episode_type == 'oob' and self.oob_count < 2 and 
-                    len(self.ongoing_trajectories[i]) > 0):
-                    self.stored_trajectories['oob'].append({
-                        'trajectory': self.ongoing_trajectories[i].copy(),
-                        'episode_info': info.copy()
-                    })
-                    self.oob_count += 1
+                # Only store if this dataset is expected and we haven't reached limit for this outcome
+                if (dataset in self.expected_datasets and 
+                    self.dataset_counts[dataset][outcome_type] < self.trajectories_per_outcome):
                     
-                elif (episode_type == 'home' and self.home_count < 2 and 
-                      len(self.ongoing_trajectories[i]) > 0):
-                    self.stored_trajectories['home'].append({
+                    self.stored_trajectories[dataset][outcome_type].append({
                         'trajectory': self.ongoing_trajectories[i].copy(),
                         'episode_info': info.copy()
                     })
-                    self.home_count += 1
-                
-                # Reset trajectory for this env and decide whether to start tracking new episode
-                self.ongoing_trajectories[i] = []
-                
-                # Start tracking new episode only if we still need more trajectories
-                if not self.is_storage_full():
-                    # Initialize empty trajectory for the new episode that's starting
+                    self.dataset_counts[dataset][outcome_type] += 1
+                if tracked_ds:
+                    tracked_ds = self.possible_datasets[tracked_ds-1] # get the dataset name from the index that is 1-based
+                self.is_storage_full(tracked_ds)
+                # Decide whether to continue tracking this environment
+                if self.is_full:
+                    # Stop tracking completely
+                    self.ongoing_trajectories[i] = None
+                else:
+                    # Start tracking new episode
                     self.ongoing_trajectories[i] = []
     
     def get_trajectories(self):
         """Get stored trajectories for current update"""
         return self.stored_trajectories.copy()
     
-    def is_storage_full(self):
-        """Check if we've collected enough trajectories"""
-        return self.oob_count >= 2 and self.home_count >= 2
+    def is_storage_full(self, tracked_ds=''):
+        """Check if we've collected enough trajectories for all expected datasets"""
+        if not self.expected_datasets:
+            return False
+
+        if tracked_ds:  # If a specific dataset is requested, check only that one
+            HOME_count = self.dataset_counts[tracked_ds]['HOME']
+            OOB_count = self.dataset_counts[tracked_ds]['OOB']
+            if (HOME_count < self.trajectories_per_outcome or 
+                OOB_count < self.trajectories_per_outcome):
+                return False
+        else:  # Check if all datasets have reached their targets for both HOME and OOB
+            for dataset in self.expected_datasets:
+                HOME_count = self.dataset_counts[dataset]['HOME']
+                OOB_count = self.dataset_counts[dataset]['OOB']
+                if (HOME_count < self.trajectories_per_outcome or 
+                    OOB_count < self.trajectories_per_outcome):
+                    return False
+                
+        self.is_full = True  # Set flag if all datasets are full
+        return True
     
     def get_collection_status(self):
         """Get current collection status"""
-        active_envs = sum(1 for traj in self.ongoing_trajectories if len(traj) > 0)
-        return {
-            'oob_collected': self.oob_count,
-            'home_collected': self.home_count,
+        active_envs = sum(1 for traj in self.ongoing_trajectories if traj is not None)
+        status = {
+            'expected_datasets': list(self.expected_datasets),
+            'dataset_counts': self.dataset_counts.copy(),
             'active_trajectories': active_envs,
-            'collection_complete': self.is_storage_full()
+            'collection_complete': self.is_full
         }
+        
+        # Add progress per dataset and outcome type
+        for dataset in self.expected_datasets:
+            HOME_collected = self.dataset_counts[dataset]['HOME']
+            OOB_collected = self.dataset_counts[dataset]['OOB']
+            status[f'{dataset}_HOME_progress'] = f"{HOME_collected}/{self.trajectories_per_outcome}"
+            status[f'{dataset}_OOB_progress'] = f"{OOB_collected}/{self.trajectories_per_outcome}"
+        
+        return status
+    
+    def get_summary_counts(self):
+        """Get a concise summary of collection counts"""
+        summary = {}
+        for dataset in self.expected_datasets:
+            HOME_count = self.dataset_counts[dataset]['HOME']
+            OOB_count = self.dataset_counts[dataset]['OOB']
+            total_count = HOME_count + OOB_count
+            target_total = self.trajectories_per_outcome * 2
+            summary[dataset] = f"{total_count}/{target_total} (H:{HOME_count}, O:{OOB_count})"
+        return summary
 
 
-def training_loop(agent, envs, args, device, actor_critic, 
+def plot_trajectories(traj_storage, envs, save_path="/src/tamagotchi/debug_plot.png", title=None, figsize=None):
+    """
+    Plot collected trajectories in a grid layout.
+    Rows = datasets, Columns = individual trajectories
+    Each subplot shows one trajectory with environmental context.
+    """
+    trajectories = traj_storage.get_trajectories()
+    
+    if not trajectories:
+        print("No trajectories to plot")
+        return
+    
+    # Flatten trajectories by dataset and count max trajectories per dataset
+    dataset_trajs = {}
+    max_trajs = 0
+    
+    for dataset, outcomes in trajectories.items():
+        # Combine HOME and OOB trajectories for this dataset
+        all_trajs = []
+        
+        # Add HOME trajectories
+        for episode in outcomes['HOME']:
+            episode_data = episode.copy()
+            episode_data['outcome'] = 'HOME'
+            all_trajs.append(episode_data)
+        
+        # Add OOB trajectories  
+        for episode in outcomes['OOB']:
+            episode_data = episode.copy()
+            episode_data['outcome'] = 'OOB'
+            all_trajs.append(episode_data)
+        
+        dataset_trajs[dataset] = all_trajs
+        max_trajs = max(max_trajs, len(all_trajs))
+    
+    if max_trajs == 0:
+        print("No trajectories to plot")
+        return
+    
+    # Create subplot grid: rows = datasets, cols = individual trajectories
+    datasets = list(dataset_trajs.keys())
+    n_rows = len(datasets)
+    n_cols = max_trajs
+    
+    # Set figure size
+    if figsize is None:
+        figsize = (4 * n_cols, 5 * n_rows)
+    
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+    
+    # Handle edge cases for subplot indexing
+    if n_rows == 1 and n_cols == 1:
+        axes = [[axes]]
+    elif n_rows == 1:
+        axes = [axes] if n_cols > 1 else [[axes]]
+    elif n_cols == 1:
+        axes = [[ax] for ax in axes]
+    
+    # Plot each trajectory
+    for row, dataset in enumerate(datasets):
+        trajs = dataset_trajs[dataset]
+        
+        for col in range(n_cols):
+            ax = axes[row][col]
+            
+            if col < len(trajs):
+                # Plot this trajectory
+                episode = trajs[col]
+                trajectory = episode['trajectory']
+                outcome = episode['outcome']
+                color = 'red' if outcome == 'OOB' else 'green'
+                
+                # Set subplot title
+                traj_num = col + 1
+                ax.set_title(f"{dataset}\nTraj {traj_num} ({outcome.upper()})", 
+                            fontsize=9, pad=10)
+                
+                if len(trajectory) == 0:
+                    ax.text(0.5, 0.5, 'Empty\ntrajectory', 
+                           ha='center', va='center', transform=ax.transAxes,
+                           fontsize=10, alpha=0.6)
+                    ax.set_xlim(0, 1)
+                    ax.set_ylim(0, 1)
+                    continue
+                
+                # Load and prepare dataset for environmental context
+                get_ds_at = get_index_by_dataset(envs, episode['episode_info']['dataset'])[0] 
+                data_puffs = envs.get_attr_at(get_ds_at, 'data_puffs_all')[0]
+                data_wind = envs.get_attr_at(get_ds_at, 'data_wind_all')[0]
+                
+                # Apply episode-specific transformations
+                drop_idxs = data_puffs['puff_number'].unique()
+                drop_idxs = pd.Series(drop_idxs).sample(frac=(1 - episode['episode_info']['plume_density']))
+                data_puffs = data_puffs.query("puff_number not in @drop_idxs")
+                data_puffs = data_puffs[data_puffs['time'] == episode['episode_info']['t_val']]
+                data_puffs = utils.rotate_puffs_optimized(data_puffs, episode['episode_info']['rotate_by'], False)
+                data_wind = utils.rotate_wind_optimized(data_wind, episode['episode_info']['rotate_by'], False)
+
+                # Plot puffs and wind vectors
+                fig, ax = utils.plot_puffs_and_wind_vectors(data_puffs, data_wind, 
+                                                          episode['episode_info']['t_val'], 
+                                                          ax=ax, fig=fig, fname='', show=False)
+                
+                # Plot the trajectory
+                x, y = zip(*trajectory)
+                ax.plot(x, y, color=color, linewidth=2.5, alpha=0.8)
+                
+                # Mark start and end points
+                ax.plot(x[0], y[0], 'o', color=color, markersize=8, alpha=0.9, 
+                       markeredgecolor='black', markeredgewidth=1)  # start
+                ax.plot(x[-1], y[-1], 's', color=color, markersize=8, alpha=0.9,
+                       markeredgecolor='black', markeredgewidth=1)  # end
+                
+                # Add trajectory info as text
+                traj_length = len(trajectory)
+                ax.text(0.02, 0.98, f'Length: {traj_length}', transform=ax.transAxes,
+                       fontsize=8, verticalalignment='top',
+                       bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+                
+            else:
+                # Empty subplot for datasets with fewer trajectories
+                ax.set_title(f"{dataset}\n(No trajectory)", fontsize=9, pad=10, alpha=0.6)
+                ax.text(0.5, 0.5, 'No trajectory\ncollected', 
+                       ha='center', va='center', transform=ax.transAxes,
+                       fontsize=10, alpha=0.4)
+                ax.set_xlim(0, 1)
+                ax.set_ylim(0, 1)
+            
+            # Set axis labels (only on edges to reduce clutter)
+            if row == n_rows - 1:  # bottom row
+                ax.set_xlabel('X position', fontsize=8)
+            if col == 0:  # left column
+                ax.set_ylabel('Y position', fontsize=8)
+            
+            # Make axis equal for proper visualization
+            ax.set_aspect('equal', adjustable='box')
+            
+            # Reduce tick label size
+            ax.tick_params(labelsize=7)
+    
+    # Add overall title
+    if title:
+        fig.suptitle(title, fontsize=16, y=0.95)
+    
+    plt.tight_layout()
+    
+    # Adjust layout to make room for suptitle and text
+    if title:
+        plt.subplots_adjust(top=0.90)
+    plt.subplots_adjust(bottom=0.12, left=0.08, right=0.92)
+    
+    fig.savefig(save_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    print(f"Trajectories plot saved to {save_path}")
+
+
+def plot_update_trajectories(traj_storage, envs, update_num):
+    """Convenience function to plot trajectories for a specific update"""
+    title = f"Individual Trajectories - Update {update_num}"
+    save_path = f"/src/tamagotchi/trajectories_update_{update_num}.png"
+    plot_trajectories(traj_storage, envs, save_path=save_path, title=title)
+    
+
+def training_loop(agent, envs, args, device, actor_critic,
     training_log=None, eval_log=None, eval_env=None, rollouts=None):
     ##############################################################################################################
     # setting up
@@ -311,14 +534,13 @@ def training_loop(agent, envs, args, device, actor_critic,
     num_updates = int(
         args.num_env_steps) // args.num_steps // args.num_processes # args.num_env_steps 20M for all # args.num_steps=2048 (found in logs) # args.num_processes=4=mini_batch (found in logs)
     
-
-    best_mean = 0.0
-
+    # See if a chkpt was loaded
     training_log = training_log if training_log is not None else [] 
     last_chkpt_update = len(training_log) # the number of updates already done in case of checkpointing
     eval_log = eval_log if eval_log is not None else []
     # track trajectories for plotting
-    traj_storage = TrajectoryStorage(num_envs=envs.num_envs)
+    best_mean = 0.0
+    traj_storage = TrajectoryStorage(num_envs=envs.num_envs, possible_datasets=args.dataset)
     # track stats for logging
     episode_rewards = deque(maxlen=50) 
     episode_plume_densities = deque(maxlen=50)
@@ -333,7 +555,6 @@ def training_loop(agent, envs, args, device, actor_critic,
                                           wind_cond={'num_classes': len(args.dataset) - 1, 'difficulty_range': [1, len(args.dataset)], 
                                                      'dtype': 'int', 'step_type': 'linear'}) # wind_cond: in the sequence of args.dataset - first is 1, last is 3
         update_by_schedule(envs, schedule, 0) # update the initialized envs according to the curriculum schedule. The default init values are incorrect, hence this update s.t. reset() returns correctly.
-
         if not args.dryrun:
             utils.save_tc_schedule(schedule, num_updates, args.num_processes, args.num_steps, args.save_dir)
 
@@ -395,7 +616,7 @@ def training_loop(agent, envs, args, device, actor_critic,
             'start_tidx', 'end_tidx', 'location_initial', 'init_angle'
         ]) # track stats of episodes
         episode_counter = 0
-        traj_storage.reset_update() # track few trajectories for plotting
+        traj_storage.reset_update(expected_datasets = args.dataset[0:int(envs.wind_directions)]) # track few trajectories for plotting
         ##############################################################################################################
         # at each step of training 
         ##############################################################################################################
@@ -407,7 +628,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                     rollouts.masks[step])
             obs, reward, done, infos = envs.step(action)
             traj_storage.add_step(infos)
-            traj_storage.check_episode_done(infos, done)
+            traj_storage.check_episode_done(infos, done, tracked_ds=int(envs.wind_directions)) 
             for i, d in enumerate(done): # if done, log the episode info. Care about what kind of env is encountered
                 if d:
                     try:
@@ -444,7 +665,7 @@ def training_loop(agent, envs, args, device, actor_critic,
         # After update, get stored trajectories
         update_trajectories = traj_storage.get_trajectories()
         status = traj_storage.get_collection_status()
-
+        summary = traj_storage.get_summary_counts()
         utils.log_agent_learning(j, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
         utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
                 
