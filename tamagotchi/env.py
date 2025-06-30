@@ -1375,7 +1375,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.obs_noise = np.deg2rad(self.obs_noise)
 
         self.vr_wind = False # for virtual reality wind - list: [wind_x, wind_y]; when set, will set the wind to this value at one step. Needs to be set at every step when using.
-        
+    
     def set_dataset(self, dataset):
         self.dataset = dataset
         if dataset == 'poisson_noisy3x5b5' or dataset == 'poisson_mag_narrow_noisy3x5b5':
@@ -1410,8 +1410,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             tick = np.random.choice(len(self.rotate_angles))
             self.rotate_by = self.rotate_angles[tick]
             coin_flip = np.random.choice(2)
-            # self.mirror = True if coin_flip == 1 else False # flip the data along the long axis of the plume
-            self.mirror = False # always off! 
+            self.mirror = True if coin_flip == 1 else False # flip the data along the long axis of the plume
+            # self.mirror = False # always off! 
             if self.verbose: print(f"[DEBUG] PEv3 sample_rotate_by: self.rotate_by is set to {self.rotate_by} degrees, mirroring: {self.mirror}")
         
     def get_current_wind_xy(self):
@@ -1479,7 +1479,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             'diff_min': [0.7, 0.65, 0.4],
             """
             q_curriculum = np.random.uniform(self.diff_min, self.diff_max)
-
+            print(f"[DEBUG] self.diff_min: {self.diff_min}, self.diff_max: {self.diff_max}, q_curriculum: {q_curriculum}")
             Z = self.get_abunchofpuffs()
             
             X_span = abs(Z['x'].max() - Z['x'].min())
@@ -1492,7 +1492,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # Perserver the sign of the long coordinate
             long_mean *= np.sign(Z[long].mean())
             # print("initial long mean, var, q: ", long_mean, long_var, q_curriculum)
-            lower_limit = float(algo.split('_')[1]) if '_' in algo else 0.05
+            # lower_limit = float(algo.split('_')[1]) if '_' in algo else 0.05 # disabled because algo does not always control this parameter
+            lower_limit = 0.05
             wide_pcts = Z.query(f"({long} >= (@long_mean - @long_var)) and ({long} <= (@long_mean + @long_var))")[wide].quantile([lower_limit,0.5]).to_numpy()
             wide_mean, wide_var = wide_pcts[1], min(1, wide_pcts[1] - wide_pcts[0]) # Min here cap variance at 1
             # print(f"long: {long}, wide: {wide}, long_pcts: {long_pcts}, wide_pcts: {wide_pcts} {long_mean}, self.rotate_by: {self.rotate_by} {wide_mean}")
@@ -2264,9 +2265,9 @@ class SubprocVecEnv(SubprocVecEnv_):
         for remote in target_remotes:
             remote.recv()
 
-    def env_method(self, method_name: str, *method_args, indices: VecEnvIndices = None, **method_kwargs) -> List[Any]:
+    def env_method(self, method_name: str, deployed=True, *method_args, indices: VecEnvIndices = None, **method_kwargs) -> List[Any]:
         """Call instance methods of vectorized environments. Apply method to deployed envs only"""
-        target_remotes = self._get_target_remotes(indices) # get indices of deployed envs
+        target_remotes = self._get_target_remotes(indices, deployed) # get indices of deployed envs
         for remote in target_remotes:
             remote.send(("env_method", (method_name, method_args, method_kwargs)))
         return [remote.recv() for remote in target_remotes]
@@ -2298,6 +2299,22 @@ class SubprocVecEnv(SubprocVecEnv_):
         if deployed:
             return [self.deployed_remotes[i] for i in indices]
         return [self.remotes[i] for i in indices]
+    
+    def env_method_at(self, indices: VecEnvIndices, method_name: str, *method_args, **method_kwargs) -> List[Any]:
+        """
+        Call instance methods of specific environments by index (can include deployed and undeployed).
+        :param method_name: name of method in the target env(s)
+        :param indices: list of indices of envs to apply the method to
+        :param method_args: positional args to pass to the method
+        :param method_kwargs: keyword args to pass to the method
+        :return: list of results returned by the method
+        """
+        indices = self._get_indices(indices)
+        target_remotes = self._get_target_remotes(indices, deployed=False)  # allow undeployed too
+        for remote in target_remotes:
+            remote.send(("env_method", (method_name, method_args, method_kwargs)))
+        return [remote.recv() for remote in target_remotes]
+
 
 
 # Checks whether done was caused my timit limits or not
