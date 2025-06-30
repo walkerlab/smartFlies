@@ -569,35 +569,7 @@ def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True):
     # Plot plume density histogram for successful episodes
     successful_df = update_episodes_df[update_episodes_df['outcome'] == 'HOME']
     # Check if there's any data to plot
-    if len(successful_df) > 0:
-        # Get unique datasets
-        datasets = successful_df['dataset'].unique()    
-        
-        plt.figure(figsize=(4, 4))
-        # Create histogram for each dataset
-        for i, dataset in enumerate(datasets):
-            subset = successful_df[successful_df['dataset'] == dataset]
-            subset['plume_density'].hist(alpha=0.7, label=f'{dataset}', 
-                                            color=config.mlflow_colors[dataset], bins=10)                
-        # Add title and labels
-        plt.title(f'Plume Density Distribution by Dataset for Successful Episodes (Update {j})')
-        plt.xlabel('Plume Density')
-        plt.ylabel('Count')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-
-        # Save the figure to a file in your update directory
-        plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}HOME_density_{j}.png"
-
-        plt.savefig(plt_path, dpi=100, bbox_inches='tight')
-        plt.close()  # Close the figure to free memory
-        if use_mlflow:
-            try:
-                mlflow.log_artifact(plt_path, artifact_path=f"figs")
-            except Exception as e:
-                print(f"Error logging artifact {plt_path}: {e}")
-            os.remove(plt_path)
-        
+    if len(successful_df) > 0:        
         # Plot success rate by plume density and dataset
         # Define common bins for plume density
         bins = np.linspace(update_episodes_df['plume_density'].min(), 
