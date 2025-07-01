@@ -290,7 +290,7 @@ class TrajectoryStorage:
                         'episode_info': info.copy()
                     })
                     self.dataset_counts[dataset][outcome_type] += 1
-                if tracked_ds:
+                if isinstance(tracked_ds, int):
                     tracked_ds = self.possible_datasets[tracked_ds-1] # get the dataset name from the index that is 1-based
                 self.is_storage_full(tracked_ds)
                 # Decide whether to continue tracking this environment
@@ -616,7 +616,9 @@ def training_loop(agent, envs, args, device, actor_critic,
             'start_tidx', 'end_tidx', 'location_initial', 'init_angle'
         ]) # track stats of episodes
         episode_counter = 0
-        traj_storage.reset_update(expected_datasets = args.dataset[0:int(envs.wind_directions)]) # track few trajectories for plotting
+        # do this every 10th update
+        if j % 10 == 0 and not args.dryrun:
+            traj_storage.reset_update(expected_datasets = args.dataset[0:int(envs.wind_directions)]) # track few trajectories for plotting
         ##############################################################################################################
         # at each step of training 
         ##############################################################################################################
@@ -627,9 +629,10 @@ def training_loop(agent, envs, args, device, actor_critic,
                     rollouts.recurrent_hidden_states[step],
                     rollouts.masks[step])
             obs, reward, done, infos = envs.step(action)
-            traj_storage.add_step(infos)
-            traj_storage.check_episode_done(infos, done, tracked_ds=int(envs.wind_directions)) 
-            for i, d in enumerate(done): # if done, log the episode info. Care about what kind of env is encountered
+            if j % 10 == 0 and not args.dryrun:
+                traj_storage.add_step(infos)
+                traj_storage.check_episode_done(infos, done, tracked_ds=int(envs.wind_directions)) 
+            for i, d in enumerate(done): # if done, log the episode info. cCare about what kind of env is encountered
                 if d:
                     try:
                         # Note: only ouput these to infos when done
@@ -663,9 +666,19 @@ def training_loop(agent, envs, args, device, actor_critic,
         value_loss, action_loss, dist_entropy, clip_fraction = agent.update(rollouts)
         
         # After update, get stored trajectories
-        update_trajectories = traj_storage.get_trajectories()
-        status = traj_storage.get_collection_status()
-        summary = traj_storage.get_summary_counts()
+        if j % 10 == 0 and not args.dryrun:
+        #     update_trajectories = traj_storage.get_trajectories()
+        #     status = traj_storage.get_collection_status()
+        #     summary = traj_storage.get_summary_counts()
+            plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}_trajectories_update{j}.png"
+            plot_trajectories(traj_storage, envs, save_path=plt_path)
+            if args.mlflow:
+                try:
+                    mlflow.log_artifact(plt_path, artifact_path=f"figs")
+                except Exception as e:
+                    print(f"Error logging artifact {plt_path}: {e}")
+                os.remove(plt_path)
+                
         utils.log_agent_learning(j, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
         utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
                 
