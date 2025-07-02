@@ -1362,8 +1362,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.ground_velocity = np.array([0, 0]) # for egocentric course direction calculation
         self.rotate_by = rotate_by # PEv3 - rotate the data by this angle (in degrees) before using it. Used for evaluation to see the behavioral impact of rotating the data.
         self.mirror = False  # PEv3 - mirror/flip the data along the long axis of the plume - used in rotate wind function and gets turned on when rotate_by is set to a non-zero value.
-        print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}")
         self.rotate_angles = [0, 90, 180, -90] # PEv3 - rotate the data by this angle (in degrees) before using it. Used for evaluation to see the behavioral impact of rotating the data.
+        self.sample_rotate_by()
+        print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}")
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                         shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
@@ -1434,7 +1435,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         Z = Z.sample(n=max_samples, replace=False) if Z.shape[0] > max_samples else Z
         return Z
 
-    def get_initial_location(self, algo):
+    def get_initial_location(self, algo = None):
         loc_xy = None
         if 'uniform' in algo:
             loc_xy = np.array([
