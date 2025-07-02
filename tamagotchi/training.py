@@ -697,9 +697,9 @@ def training_loop(agent, envs, args, device, actor_critic,
             if args.mlflow:
                 try:
                     mlflow.log_artifact(plt_path, artifact_path=f"figs")
+                    os.remove(plt_path)
                 except Exception as e:
                     print(f"Error logging artifact {plt_path}: {e}")
-                os.remove(plt_path)
                 
         utils.log_agent_learning(j, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
         utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
