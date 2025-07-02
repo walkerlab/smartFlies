@@ -441,12 +441,31 @@ def plot_puffs(data, t_val, ax=None, fig=None, show=True):
 
     # fig.canvas.draw()
     # s = ((ax.get_window_extent().width  / (xmax-xmin+1.) * 72./fig.dpi) ** 2)
-    k = 6250*((fig.get_figwidth()/8.0)**2) # trial-and-error
-    s = k*(data_at_t.radius)**2 
+    bbox = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+    ax_width = bbox.width  # in inches
+
+    k = 6250 * ((ax_width / 8.0) ** 2)  # calibrate denominator as needed
+    s = k * (data_at_t.radius)**2
     # print('size', s) # 885
-
     ax.scatter(data_at_t.x, data_at_t.y, s=s, facecolor=rgba_colors, edgecolor='none')
+    
+    # 070225 - branch for using radius as size 
+    # from matplotlib.patches import Circle
+    # for _, row in data_at_t.iterrows():
+    #     circle = Circle(
+    #         (row['x'], row['y']),
+    #         radius=row['radius'],  # This is in data units!
+    #         facecolor=plt.cm.viridis(row['concentration'] / data_at_t['concentration'].max()),
+    #         edgecolor='none',
+    #         alpha=0.7
+    #     )
+    #     ax.add_patch(circle)
 
+    # ax.set_xlim(data_at_t['x'].min() - 1, data_at_t['x'].max() + 1)
+    # ax.set_ylim(data_at_t['y'].min() - 1, data_at_t['y'].max() + 1)
+    # ax.set_aspect('equal')
+    # plt.tight_layout()
+    
     if show:
         plt.show()
     return ax
