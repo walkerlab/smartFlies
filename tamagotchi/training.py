@@ -36,7 +36,7 @@ def update_by_schedule(envs, schedule_dict, curr_step):
             elif k == 'wind_cond': 
                 envs.update_wind_direction(_schedule_dict[curr_step])
                 print(f"update_env_param {k}: {_schedule_dict[curr_step]} at {curr_step}")
-            elif 'diff_max' in k:
+            elif '_diff_max' in k:
                 # k format: '{ds}_diff_max'
                 ds_name = k.split('_diff_max')[0] # get the dataset name
                 idx = get_index_by_dataset(envs, ds_name) 
@@ -45,10 +45,18 @@ def update_by_schedule(envs, schedule_dict, curr_step):
                 else:
                     envs.env_method_at(idx, "update_env_param", {'diff_max': _schedule_dict[curr_step]})
                     print(f"update_env_param 'diff_max': {_schedule_dict[curr_step]} at {curr_step} for remote {idx}")
+            elif '_diff_min' in k:
+                # k format: '{ds}_diff_min'
+                ds_name = k.split('_diff_min')[0] # get the dataset name
+                idx = get_index_by_dataset(envs, ds_name) 
+                if len(idx) == 0:
+                    print(f"No remote found for {ds_name} lesson")
+                else:
+                    envs.env_method_at(idx, "update_env_param", {'diff_min': _schedule_dict[curr_step]})
+                    print(f"update_env_param 'diff_min': {_schedule_dict[curr_step]} at {curr_step} for remote {idx}")
             else:
                 raise NotImplementedError
     return updated # return the course that is updated, if any
-
 
 def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs):
     """Builds a training curriculum schedule dictionary. 
