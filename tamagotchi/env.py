@@ -2193,7 +2193,7 @@ class SubprocVecEnv(SubprocVecEnv_):
         return _flatten_obs(obs, self.observation_space)
     
     def reset_after_checkpoint(self) -> VecEnvObs:
-        # reset all deployed envs after a checkpoint - use once after loading a checkpoint
+        # reset all deployed envs after a checkpoint - use once after loading a checkpoint - reampled deployed envs
         
         # resampled which datasets to deploy
         for i_deployed in range(len(self.deployed_remotes)):
