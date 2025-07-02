@@ -273,12 +273,15 @@ class TrajectoryStorage:
     
     def check_episode_done(self, infos, done, tracked_ds=''):
         """Check for completed episodes and store if needed. tracked_ds - stop tracking if this dataset is full."""
+        if self.is_full:
+            return
         for i, (d, info) in enumerate(zip(done, infos)):
             if d and 'dataset' in info and 'done' in info and self.ongoing_trajectories[i] is not None:
                 # Get dataset and outcome type from episode info
                 dataset = info['dataset']
                 outcome_type = info['done']
                 if outcome_type == 'OOT':
+                    self.ongoing_trajectories[i] = []
                     continue
                 
                 # Only store if this dataset is expected and we haven't reached limit for this outcome
@@ -306,6 +309,8 @@ class TrajectoryStorage:
         return self.stored_trajectories.copy()
     
     def is_storage_full(self, tracked_ds=''):
+        if self.is_full:
+            return True
         """Check if we've collected enough trajectories for all expected datasets"""
         if not self.expected_datasets:
             return False
