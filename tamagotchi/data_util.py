@@ -419,7 +419,7 @@ def plot_puffs(data, t_val, ax=None, fig=None, show=True):
     # alphas = np.power(alphas, 10)
     alphas = np.clip(alphas, 0.2, 0.4)
 
-    alphas *= 2.5/data_at_t.x # decay alpha by distance too
+    alphas *= 2.5/abs(data_at_t.x) # decay alpha by distance too
     alphas = np.clip(alphas, 0.05, 0.4)
 
 
