@@ -167,12 +167,21 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
             # add the lesson to the schedule
             for j in range(4):
                 lesson_time_idx = ds_start + j * lesson_time
-                schedule_dict[lesson_name][lesson_time_idx] = args.diff_min[i] + (j + 1) * diff_max_step[i]
+                step = (j + 1) * diff_max_step[i]
+                schedule_dict[lesson_name][lesson_time_idx] = args.diff_min[i] + step
                 # eg: {'poisson_mag_narrow_noisy3x5b5_diff_max': {665: 0.4, 720: 0.5, 775: 0.6000000000000001, 830: 0.7000000000000001}
-
+            lesson_name = f'{dataset}_diff_min'
+            if lesson_name not in schedule_dict:
+                schedule_dict[lesson_name] = {}
+            for j in range(4):
+                lesson_time_idx = ds_start + j * lesson_time
+                step = (j + 1) * diff_max_step[i]
+                step = step / 3
+                new_diff_min = args.diff_min[i] + step
+                new_diff_min = min(0.4, new_diff_min)  # ensure it doesn't go below 0.4
+                schedule_dict[lesson_name][lesson_time_idx] = new_diff_min
 
     return schedule_dict, restart_period
-
 def log_episode(training_log, j, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates, use_mlflow=True):
     # update the training log with the current episode's statistics
     end = time.time()
