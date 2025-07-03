@@ -692,7 +692,7 @@ def training_loop(agent, envs, args, device, actor_critic,
         #     update_trajectories = traj_storage.get_trajectories()
         #     status = traj_storage.get_collection_status()
         #     summary = traj_storage.get_summary_counts()
-            plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}_trajectories_update{j}.png"
+            plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}trajectories_update{j}.png"
             plot_trajectories(traj_storage, envs, save_path=plt_path)
             if args.mlflow:
                 try:
