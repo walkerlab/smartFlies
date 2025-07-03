@@ -547,6 +547,7 @@ def update_eps_info(update_episodes_df, infos, episode_counter):
                     'start_tidx': infos[i]['step_offset'],
                     'end_tidx': infos[i]['tidx'],
                     'location_initial': infos[i]['location_initial'],
+                    'stray_initial': infos[i]['stray_initial'],
                     'end_location': infos[i]['location'],
                     'init_angle': infos[i]['init_angle'],
                     'rotate_by': infos[i]['rotate_by'],

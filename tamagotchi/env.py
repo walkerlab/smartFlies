@@ -1792,7 +1792,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             info['step_offset'] = self.step_offset
             info['init_angle'] = self.init_angle
             info['rotate_by'] = self.rotate_by
-            info['stray_at_reset'] = self.stray_distance_init
+            info['stray_initial'] = self.stray_distance_init
 
 
         if self.verbose > 0:
