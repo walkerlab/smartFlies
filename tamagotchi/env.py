@@ -1364,6 +1364,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.mirror = False  # PEv3 - mirror/flip the data along the long axis of the plume - used in rotate wind function and gets turned on when rotate_by is set to a non-zero value.
         self.rotate_angles = [0, 90, 180, -90] # PEv3 - rotate the data by this angle (in degrees) before using it. Used for evaluation to see the behavioral impact of rotating the data.
         self.sample_rotate_by()
+        self.stray_distance_init = 0 # stray distance at reset
         print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}")
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
@@ -1631,7 +1632,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.stray_distance_last = self.stray_distance
         self.stray_distance = self.get_stray_distance()
         self.ambient_wind = self.get_current_wind_xy() # will rotate wind by self.rotate_by degrees if set
-
+        if self.episode_step == 1:
+            self.stray_distance_init = self.stray_distance_last # stray distance at reset
+            
         # Handle action 
         if self.verbose > 1:
             print("step action:", action, action.shape)
@@ -1789,6 +1792,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             info['step_offset'] = self.step_offset
             info['init_angle'] = self.init_angle
             info['rotate_by'] = self.rotate_by
+            info['stray_at_reset'] = self.stray_distance_init
 
 
         if self.verbose > 0:
