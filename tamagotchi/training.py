@@ -36,7 +36,7 @@ def update_by_schedule(envs, schedule_dict, curr_step):
             elif k == 'wind_cond': 
                 envs.update_wind_direction(_schedule_dict[curr_step])
                 print(f"update_env_param {k}: {_schedule_dict[curr_step]} at {curr_step}")
-            elif 'diff_max' in k:
+            elif '_diff_max' in k:
                 # k format: '{ds}_diff_max'
                 ds_name = k.split('_diff_max')[0] # get the dataset name
                 idx = get_index_by_dataset(envs, ds_name) 
@@ -45,10 +45,18 @@ def update_by_schedule(envs, schedule_dict, curr_step):
                 else:
                     envs.env_method_at(idx, "update_env_param", {'diff_max': _schedule_dict[curr_step]})
                     print(f"update_env_param 'diff_max': {_schedule_dict[curr_step]} at {curr_step} for remote {idx}")
+            elif '_diff_min' in k:
+                # k format: '{ds}_diff_min'
+                ds_name = k.split('_diff_min')[0] # get the dataset name
+                idx = get_index_by_dataset(envs, ds_name) 
+                if len(idx) == 0:
+                    print(f"No remote found for {ds_name} lesson")
+                else:
+                    envs.env_method_at(idx, "update_env_param", {'diff_min': _schedule_dict[curr_step]})
+                    print(f"update_env_param 'diff_min': {_schedule_dict[curr_step]} at {curr_step} for remote {idx}")
             else:
                 raise NotImplementedError
     return updated # return the course that is updated, if any
-
 
 def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs):
     """Builds a training curriculum schedule dictionary. 
@@ -159,12 +167,21 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
             # add the lesson to the schedule
             for j in range(4):
                 lesson_time_idx = ds_start + j * lesson_time
-                schedule_dict[lesson_name][lesson_time_idx] = args.diff_min[i] + (j + 1) * diff_max_step[i]
+                step = (j + 1) * diff_max_step[i]
+                schedule_dict[lesson_name][lesson_time_idx] = args.diff_min[i] + step
                 # eg: {'poisson_mag_narrow_noisy3x5b5_diff_max': {665: 0.4, 720: 0.5, 775: 0.6000000000000001, 830: 0.7000000000000001}
-
+            lesson_name = f'{dataset}_diff_min'
+            if lesson_name not in schedule_dict:
+                schedule_dict[lesson_name] = {}
+            for j in range(4):
+                lesson_time_idx = ds_start + j * lesson_time
+                step = (j + 1) * diff_max_step[i]
+                step = step / 3
+                new_diff_min = args.diff_min[i] + step
+                new_diff_min = min(0.4, new_diff_min)  # ensure it doesn't go below 0.4
+                schedule_dict[lesson_name][lesson_time_idx] = new_diff_min
 
     return schedule_dict, restart_period
-
 def log_episode(training_log, j, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates, use_mlflow=True):
     # update the training log with the current episode's statistics
     end = time.time()
@@ -680,9 +697,9 @@ def training_loop(agent, envs, args, device, actor_critic,
             if args.mlflow:
                 try:
                     mlflow.log_artifact(plt_path, artifact_path=f"figs")
+                    os.remove(plt_path)
                 except Exception as e:
                     print(f"Error logging artifact {plt_path}: {e}")
-                os.remove(plt_path)
                 
         utils.log_agent_learning(j, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
         utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
