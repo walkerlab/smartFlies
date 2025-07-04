@@ -166,13 +166,21 @@ def load_model(args, curriculum_vars):
 
 def make_dirs(args):
     try:
-        os.makedirs(args.save_dir, exist_ok=True)
-        os.makedirs(os.path.join(args.save_dir, 'weights'), exist_ok=True)
-        os.makedirs(os.path.join(args.save_dir, 'train_logs'), exist_ok=True)
-        os.makedirs(os.path.join(args.save_dir, 'chkpt'), exist_ok=True)
-        os.makedirs(os.path.join(args.save_dir, 'json'), exist_ok=True)
-        os.makedirs(os.path.join(args.save_dir, 'tmp'), exist_ok=True)
-        
+        # check if exists, if not, create the directories
+        if not os.path.exists(args.save_dir):
+            os.makedirs(args.save_dir, exist_ok=True)
+        # create subdirectories
+        if not os.path.exists(os.path.join(args.save_dir, 'weights')):
+            os.makedirs(os.path.join(args.save_dir, 'weights'), exist_ok=True)
+        if not os.path.exists(os.path.join(args.save_dir, 'train_logs')):
+            os.makedirs(os.path.join(args.save_dir, 'train_logs'), exist_ok=True)
+        if not os.path.exists(os.path.join(args.save_dir, 'chkpt')):
+            os.makedirs(os.path.join(args.save_dir, 'chkpt'), exist_ok=True)
+        if not os.path.exists(os.path.join(args.save_dir, 'json')):
+            os.makedirs(os.path.join(args.save_dir, 'json'), exist_ok=True)
+        if not os.path.exists(os.path.join(args.save_dir, 'tmp')):
+            os.makedirs(os.path.join(args.save_dir, 'tmp'), exist_ok=True)
+
     except OSError:
         raise Exception("Could not create save directory")
     # some legacy code - Monitor wrapper get saved to log_dir
