@@ -1734,7 +1734,15 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # Going OOB should be worse than radial reward shaping
             # OOB Overshooting should be worse!
             oob_penalty = 5*np.linalg.norm(self.agent_location) + self.stray_distance
-            oob_penalty *= 2 if self.agent_location[0] < 0 else 1  
+            if self.rotate_by == 0:
+                oob_penalty *= 2 if self.agent_location[0] < 0 else oob_penalty
+            elif self.rotate_by == 90:
+                oob_penalty *= 2 if self.agent_location[1] < 0 else oob_penalty
+            elif self.rotate_by == -90:
+                oob_penalty *= 2 if self.agent_location[1] > 0 else oob_penalty
+            elif self.rotate_by == 180:
+                oob_penalty *= 2 if self.agent_location[0] > 0 else oob_penalty
+                
             reward -= oob_penalty
         # Radial distance decrease at each STEP of episode
         r_radial_step = 0
