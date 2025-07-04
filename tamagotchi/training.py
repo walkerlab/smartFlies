@@ -639,7 +639,7 @@ def training_loop(agent, envs, args, device, actor_critic,
         ]) # track stats of episodes
         episode_counter = 0
         # do this every 10th update
-        if j % 10 == 0 and not args.dryrun:
+        if j % 10 == 0:
             traj_storage.reset_update(expected_datasets = args.dataset[0:int(envs.wind_directions)]) # track few trajectories for plotting
         ##############################################################################################################
         # at each step of training 
@@ -651,7 +651,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                     rollouts.recurrent_hidden_states[step],
                     rollouts.masks[step])
             obs, reward, done, infos = envs.step(action)
-            if j % 10 == 0 and not args.dryrun:
+            if j % 10 == 0:
                 traj_storage.add_step(infos)
                 traj_storage.check_episode_done(infos, done, tracked_ds=int(envs.wind_directions)) 
             for i, d in enumerate(done): # if done, log the episode info. cCare about what kind of env is encountered
@@ -688,7 +688,7 @@ def training_loop(agent, envs, args, device, actor_critic,
         value_loss, action_loss, dist_entropy, clip_fraction = agent.update(rollouts)
         
         # After update, get stored trajectories
-        if j % 10 == 0 and not args.dryrun:
+        if j % 10 == 0:
         #     update_trajectories = traj_storage.get_trajectories()
         #     status = traj_storage.get_collection_status()
         #     summary = traj_storage.get_summary_counts()
