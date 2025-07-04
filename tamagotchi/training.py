@@ -106,7 +106,10 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
                                     now_course['num_classes'] +1 , endpoint=True) 
         else: 
             raise ValueError("step_type must be 'log' or 'linear'")
-        now_course['scheduled_value'] = scheduled_value 
+        if now_course['num_classes'] == 0:
+            scheduled_value = [now_course['difficulty_range'][-1]]
+
+        now_course['scheduled_value'] = scheduled_value
         tmp_schedule.append(zip(itertools.cycle([course]), scheduled_value[1:])) # the lower bound is the first value -> set at the beginning
         
     
@@ -182,6 +185,7 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
                 schedule_dict[lesson_name][lesson_time_idx] = new_diff_min
 
     return schedule_dict, restart_period
+
 def log_episode(training_log, j, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates, use_mlflow=True):
     # update the training log with the current episode's statistics
     end = time.time()
@@ -570,7 +574,7 @@ def training_loop(agent, envs, args, device, actor_critic,
     episode_wind_directions = deque(maxlen=50)
     
     # initialize the curriculum schedule
-    if args.birthx_linear_tc_steps:
+    if args.birthx_linear_tc_steps >= 0: 
         schedule, restart_period = build_tc_schedule_dict(args, num_updates, birthx={'num_classes': args.birthx_linear_tc_steps, 
                                                                 'difficulty_range': [0.7, args.birthx], 
                                                                 'dtype': 'float', 'step_type': 'linear'}, 
