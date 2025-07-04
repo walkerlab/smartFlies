@@ -146,7 +146,6 @@ def get_args():
 
 
 def load_model(args, curriculum_vars):      
-      
     # load model
     try:
         actor_critic, ob_rms, optimizer_state_dict = torch.load(args.model_fpath, map_location=torch.device(args.device), weights_only=False)
@@ -201,6 +200,9 @@ def main(args=None):
     args.model_fname = f"{args.env_name}_{args.outsuffix}.pt"
     args.model_fpath = os.path.join(args.save_dir, 'weights', args.model_fname)
     args.training_log = os.path.join(args.save_dir, 'train_logs', args.model_fname.replace(".pt", '_train.csv'))
+    if 'soft_reset' in args.r_shaping:
+        args.r_shaping.remove('soft_reset')
+        args.soft_reset = True
     # Save args and config info
     # https://stackoverflow.com/questions/16878315/what-is-the-right-way-to-treat-argparse-namespace-as-a-dictionary
     args.json_config = os.path.join(args.save_dir, 'json', args.model_fname.replace(".pt", "_args.json"))

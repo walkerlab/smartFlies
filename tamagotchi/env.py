@@ -1107,6 +1107,7 @@ class PlumeEnvironment_v2(gym.Env):
     if self.diffusion_min < (self.diffusion_max - 0.01):
         diffx = np.random.uniform(low=self.diffusion_min, high=self.diffusion_max)
         self.diffusion_adjust(diffx)
+        print("diffusion_adjusted to", diffx, "for dataset", self.dataset)
 
     # Generalization: Randomly flip plume data across x_axis
     if self.flipping:
@@ -1137,6 +1138,15 @@ class PlumeEnvironment_v2(gym.Env):
         observation = np.concatenate([observation, np.zeros(2)])
 
     self.found_plume = True if observation[2] > 0. else False 
+    # print(f'[soft_reset] keep the same {self.t_val} {self.tidx} \
+    #     {self.tidx_min_episode} {self.tidx_max_episode} \
+    #     {self.data_puffs.shape} {self.puff_density} \
+    #     {self.agent_location_last} {self.agent_location_init} \
+    #     {self.agent_location} {self.odorx} \
+    #     {self.agent_location_last} {self.agent_location_init} \
+    #     {self.agent_location} {self.odorx}', flush=True)
+    
+    # print(f'[soft_reset] resample {self.stray_distance} {self.agent_angle}', flush=True)        
     return observation
 
 
@@ -1351,8 +1361,9 @@ class PlumeEnvironment_v2(gym.Env):
     pass
 
 class PlumeEnvironment_v3(PlumeEnvironment_v2):
-    def __init__(self, visual_feedback=False, flip_ventral_optic_flow=False, rotate_by=None,**kwargs):
+    def __init__(self, visual_feedback=False, flip_ventral_optic_flow=False, rotate_by=None, soft_reset=False, **kwargs):
         super(PlumeEnvironment_v3, self).__init__(**kwargs)
+        self.soft_reset_button = False if soft_reset else None # button to trigger soft reset - set true when failed in step(), unless it's None which never gets turned on
         self.flip_ventral_optic_flow = flip_ventral_optic_flow
         if self.verbose > 0:
             print("PlumeEnvironment_v3")
@@ -1595,6 +1606,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
     def reset(self):
         # Return an array with [wind x, y, odor, air vel x, y, egocentric course direction x, y]
             # Wind can either be relative wind or apparent wind, depending on the setting
+        if self.soft_reset_button: # gets turned on when failed in step()
+            self.soft_reset_button = False # reset the button
+            return self.soft_reset()
         self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
         observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
         if len(observation) == 7:
@@ -1605,11 +1619,43 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
     def soft_reset(self):
         # Return an array with [wind x, y, odor, air vel x, y, egocentric course direction x, y]
             # Wind can either be relative wind or apparent wind, depending on the setting
-        self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
-        observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
+            # print(f'reset() called; self.birthx = {self.birthx}', flush=True)
+        self.episode_reward = 0
+        self.episode_step = 0 # skip_steps already done during loading
+        self.t_val = self.t_vals[self.episode_step + self.step_offset]
+        self.tidx = self.tidxs[self.episode_step + self.step_offset] # Use tidx when possible
+
+        
+        self.agent_location_last = self.agent_location_init
+        self.agent_location_init = self.agent_location_init
+        self.agent_location = self.agent_location_init
+
+
+        self.stray_distance = self.get_stray_distance()
+        self.stray_distance_last = self.stray_distance
+        self.agent_angle = self.get_initial_angle(self.angle_algo)
+        self.init_angle = self.agent_angle
+
+        # print(f'[soft_reset] keep the same {self.t_val} {self.tidx} \
+        #     {self.tidx_min_episode} {self.tidx_max_episode} \
+        #     {self.data_puffs.shape} {self.puff_density} \
+        #     {self.agent_location_last} {self.agent_location_init} \
+        #     {self.agent_location} {self.odorx} \
+        #     {self.agent_location_last} {self.agent_location_init} \
+        #     {self.agent_location} {self.odorx}', flush=True)
+        
+        # print(f'[soft_reset] resample {self.stray_distance} {self.agent_angle}', flush=True)
+
+        
+        self.air_velocity = np.array([0, 0])
+        self.ambient_wind = self.get_current_wind_xy() 
+        observation = self.sense_environment()
+        self.found_plume = True if observation[2] > 0. else False 
+
+        
         if len(observation) == 7:
             observation[5:] = 0 # course direction to 0
-        self.init_angle = self.agent_angle
+            
         return observation
     
     def step(self, action):
@@ -1738,7 +1784,11 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             "OOB" if is_outofbounds else \
             "OOT" if is_outoftime else \
             "NA"    
+        if self.soft_reset_button is not None:
+            self.soft_reset_button = False if done_reason == "HOME" else True
+            
         info = {
+            'soft_reset_button': self.soft_reset_button, # send in info so SubprocVecEnv can decide if to switch deploted workers
             'rotate_by': self.rotate_by, # PEv3 - rotate the data by this angle (in degrees) before using it
             'mirror': self.mirror, # PEv3 - rotate the data by this angle (in degrees) before using it
             't_val':self.t_val, 
@@ -1946,7 +1996,8 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         apparent_wind=args.apparent_wind,
                         visual_feedback=args.visual_feedback,
                         flip_ventral_optic_flow=args.flip_ventral_optic_flow,
-                        rotate_by=args.rotate_by
+                        rotate_by=args.rotate_by,
+                        soft_reset=args.soft_reset,
                         )
             else:
                 # bkw compat before cleaning up TC hack. Useful when evalCli
@@ -2158,28 +2209,30 @@ class SubprocVecEnv(SubprocVecEnv_):
         obs, rews, dones, infos = zip(*results)
         for i, d in enumerate(dones): 
             if d:
-                # log the final observation
-                infos[i]["terminal_observation"] = obs[i]
-                # sample a new wind condition
-                new_wind_direction = self.sample_wind_direction()
-                # print('[DEBUG] sampled wind direction:', new_wind_direction)
-                current_wind_direction = self.ds2wind(self.get_attr('dataset', i)[0])
-                # print('[DEBUG] current wind direction:', current_wind_direction)
-                # if wind condtion changed, then swap
-                if new_wind_direction != current_wind_direction:
-                    # print(f"[DEBUG] new wind dir selected... pre swap {self.get_attr('dataset')}")
-                    # check the remote_directory to swap with an undeployed env with the condition of interest
-                    for remote_idx, status in self.remote_directory.items():
-                        if status['deployed'] == False and status['wind_direction'] == new_wind_direction:
-                            self.swap(i, remote_idx)
-                            # print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
-                            swapped = True
-                            break
-                
-                # update the newest observation
-                list(obs)[i] = self.reset_deployed_at(i)
-                obs = tuple(obs)
-        
+                if infos[i]['soft_reset_button'] is False: # is None false? 
+                    # log the final observation
+                    # infos[i]["terminal_observation"] = obs[i] # wrong place to do this - already happened in worker step and then replaced by reset - the reseted values are not the terminal ones
+                    
+                    # sample a new wind condition
+                    new_wind_direction = self.sample_wind_direction()
+                    # print('[DEBUG] sampled wind direction:', new_wind_direction)
+                    current_wind_direction = self.ds2wind(self.get_attr('dataset', i)[0])
+                    # print('[DEBUG] current wind direction:', current_wind_direction)
+                    # if wind condtion changed, then swap
+                    if new_wind_direction != current_wind_direction:
+                        # print(f"[DEBUG] new wind dir selected... pre swap {self.get_attr('dataset')}")
+                        # check the remote_directory to swap with an undeployed env with the condition of interest
+                        for remote_idx, status in self.remote_directory.items():
+                            if status['deployed'] == False and status['wind_direction'] == new_wind_direction:
+                                self.swap(i, remote_idx)
+                                # print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
+                                swapped = True
+                                break
+                    
+                    # update the newest observation
+                    list(obs)[i] = self.reset_deployed_at(i)
+                    obs = tuple(obs)
+            
         return _flatten_obs(obs, self.observation_space), np.stack(rews), np.stack(dones), infos
 
     def seed(self, seed: Optional[int] = None) -> List[Union[None, int]]:
