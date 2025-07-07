@@ -257,6 +257,7 @@ def main(args=None):
     if os.path.isfile(args.model_fpath):
         print("Loading model from", args.model_fpath)
         actor_critic, optimizer_state_dict, curriculum_vars = load_model(args, curriculum_vars)
+        actor_critic.base.rnn.flatten_parameters()
     else:
         print(f"No model file found. Starting from scratch. {args.model_fpath}")
         actor_critic = None
