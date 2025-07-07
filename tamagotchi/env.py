@@ -1425,7 +1425,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.rotate_by is not None:
             tick = np.random.choice(len(self.rotate_angles))
             self.rotate_by = self.rotate_angles[tick]
-            coin_flip = np.random.choice(2)
+            # coin_flip = np.random.choice(2)
             # self.mirror = True if coin_flip == 1 else False # flip the data along the long axis of the plume
             self.mirror = False # always off! 
             if self.verbose: print(f"[DEBUG] PEv3 sample_rotate_by: self.rotate_by is set to {self.rotate_by} degrees, mirroring: {self.mirror}")
@@ -1533,6 +1533,13 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                     # and the long coordinate should be in the same quardrant as the plume
                     if (np.sign(Y_mean) == np.sign(loc_xy[1])):
                         break
+            # check if the long side of coordinate is past the origin
+            if long == 'x' and abs(loc_xy[0]) < 0.5:
+                loc_xy[0] = 2 + np.random.uniform(-1, 1)
+                # TODO what about when the long is supposed to be negative?  loc_xy[0] = -2 + np.random.uniform(-1, 1)
+                # TODO try to catch when this happens! The code above should not allow this to happen. 
+            elif long == 'y' and abs(loc_xy[1]) < 0.5:
+                loc_xy[1] = np.random.uniform(-0.5, 0.5)
 
         elif 'fixed' in algo:
             loc_xy = np.array( [self.fixed_x, self.fixed_y] )
@@ -2471,22 +2478,48 @@ class VecPyTorch(VecEnvWrapper):
         obs = torch.from_numpy(obs).float().to(self.device)
         reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
         return obs, reward, done, info
+    
+    def reset_obs_norm(self):
+        if hasattr(self.venv, "reset_obs_norm"):
+            self.venv.reset_obs_norm()
+    
+    def reset_ret_norm(self):
+        if hasattr(self.venv, "reset_ret_norm"):
+            self.venv.reset_ret_norm()
 
-
+from stable_baselines3.common.running_mean_std import RunningMeanStd
 class VecNormalize(VecNormalize_):
     def __init__(self, *args, **kwargs):
         super(VecNormalize, self).__init__(*args, **kwargs)
         self.training = True
     def _obfilt(self, obs, update=True):
-        if self.ob_rms:
+        if self.obs_rms:
             if self.training and update:
-                self.ob_rms.update(obs)
-            obs = np.clip((obs - self.ob_rms.mean) /
-                          np.sqrt(self.ob_rms.var + self.epsilon),
+                self.obs_rms.update(obs)
+            obs = np.clip((obs - self.obs_rms.mean) /
+                          np.sqrt(self.obs_rms.var + self.epsilon),
                           -self.clipob, self.clipob)
             return obs
         else:
             return obs
+        
+    def reset_obs_norm(self):
+        """
+        Reset observation normalization statistics.
+        Pass in a representative observation batch, e.g., envs.reset().
+        """
+        print("Resetting observation normalization statistics")
+        self.obs_rms = RunningMeanStd(shape=self.observation_space.shape)
+        print("self.obs_rms.mean", self.obs_rms.mean, "self.obs_rms.var", self.obs_rms.var)
+
+    def reset_ret_norm(self):
+        """
+        Reset reward normalization statistics.
+        """
+        self.ret_rms = RunningMeanStd(shape=())
+        self.returns = np.zeros(self.num_envs)
+        print("self.ret_rms.mean", self.ret_rms.mean, "self.ret_rms.var", self.ret_rms.var)
+
     def train(self):
         self.training = True
     def eval(self):
