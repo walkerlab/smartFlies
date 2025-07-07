@@ -622,11 +622,18 @@ def training_loop(agent, envs, args, device, actor_critic,
         envs.reset_obs_norm()
         envs.reset_ret_norm()    
         # warmup the environment with random actions
-        # this is to ensure that the observation normalization stats are updated before training
+            # this is to ensure that the observation normalization stats are updated before training
+        warmup_steps = 5000 // args.num_processes # 5000 steps for all envs
         obs = envs.reset()
-        for _ in range(10000):
-            action = envs.action_space.sample()  # or use pretrained policy
-            obs, reward, done, info = envs.step(action)
+        actions = np.stack([
+            np.stack([envs.action_space.sample() for _ in range(envs.num_envs)])
+            for _ in range(warmup_steps)
+        ])
+        actions = torch.tensor(actions, dtype=torch.float32)
+        actions = actions.to(device)
+        for _ in range(warmup_steps):
+            obs, reward, done, info = envs.step(actions[_])
+        del actions
 
     obs = envs.reset()
     rollouts.obs[0].copy_(obs) # https://discuss.pytorch.org/t/which-copy-is-better/56393
