@@ -148,9 +148,9 @@ def get_args():
 def load_model(args, curriculum_vars):      
     # load model
     try:
-        actor_critic, ob_rms, optimizer_state_dict = torch.load(args.model_fpath, map_location=torch.device(args.device), weights_only=False)
+        actor_critic, obs_rms, optimizer_state_dict = torch.load(args.model_fpath, map_location=torch.device(args.device), weights_only=False)
     except ValueError:
-        actor_critic, ob_rms = torch.load(args.model_fpath, map_location=torch.device(args.device), weights_only=False)
+        actor_critic, obs_rms = torch.load(args.model_fpath, map_location=torch.device(args.device), weights_only=False)
     except Exception as e:
         print(f"Loading model failed.. see exception message: {e}", flush=True)
         raise e
@@ -294,7 +294,7 @@ def main(args=None):
             start_fname = f'{args.model_fpath}.start'
             torch.save([
                 actor_critic,
-                getattr(get_vec_normalize(envs), 'ob_rms', None)
+                getattr(get_vec_normalize(envs), 'obs_rms', None)
             ], start_fname)
             print('Saved', start_fname)
 
@@ -311,10 +311,17 @@ def main(args=None):
         weight_decay=args.weight_decay,
         track_ppo_fraction=True)
     
+    
     # handling checkpoint loading
-    if optimizer_state_dict is not None:
+    if optimizer_state_dict is not None and 'finetune' not in args.r_shaping:
+        # load optimizer if exists, not when finetuning! update momentum no longer useful due to drastic change in env
         agent.optimizer.load_state_dict(optimizer_state_dict)
     
+    if 'reset_actor' in args.r_shaping:
+        agent.actor_critic.reset_actor() # reinitialize the actor critic, useful for finetuning
+    if 'reset_critic' in args.r_shaping:
+        agent.actor_critic.reset_critic() # reinitialize the critic, useful for finetuning
+
     # handling checkpoint loading
     if os.path.isfile(args.training_log):
         # load csv to pd dataframe
