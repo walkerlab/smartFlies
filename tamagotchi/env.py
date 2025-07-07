@@ -1362,6 +1362,9 @@ class PlumeEnvironment_v2(gym.Env):
 
 class PlumeEnvironment_v3(PlumeEnvironment_v2):
     def __init__(self, visual_feedback=False, flip_ventral_optic_flow=False, rotate_by=None, soft_reset=False, **kwargs):
+        '''
+        soft_reset_button: bool or None; button never turns on if None, otherwise it will be set to True when step() fails.
+        '''
         super(PlumeEnvironment_v3, self).__init__(**kwargs)
         self.soft_reset_button = False if soft_reset else None # button to trigger soft reset - set true when failed in step(), unless it's None which never gets turned on
         self.flip_ventral_optic_flow = flip_ventral_optic_flow
@@ -2158,7 +2161,7 @@ class SubprocVecEnv(SubprocVecEnv_):
     
     def sample_wind_direction(self):
         if np.random.random() > 0.3:
-            wind_dir = self.wind_directions
+            wind_dir = self.wind_directions # 70% chance to use the highest ranked wind direction
         else:
             wind_dir = np.random.randint(1, self.wind_directions+1) # +1 because randint is end-exclusive
         
@@ -2217,7 +2220,7 @@ class SubprocVecEnv(SubprocVecEnv_):
         obs, rews, dones, infos = zip(*results)
         for i, d in enumerate(dones): 
             if d:
-                if infos[i]['soft_reset_button'] is False: # is None false? 
+                if not infos[i]['soft_reset_button']: # sample new wind if soft reset button is OFF
                     # log the final observation
                     # infos[i]["terminal_observation"] = obs[i] # wrong place to do this - already happened in worker step and then replaced by reset - the reseted values are not the terminal ones
                     
