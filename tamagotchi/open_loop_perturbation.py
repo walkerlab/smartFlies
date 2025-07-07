@@ -205,9 +205,9 @@ if __name__ == '__main__':
     os.makedirs(args.abs_out_dir, exist_ok=True)
 
     try:
-        actor_critic, ob_rms, optimizer_state_dict = torch.load(args.model_fname, map_location=torch.device(args.device))
+        actor_critic, obs_rms, optimizer_state_dict = torch.load(args.model_fname, map_location=torch.device(args.device))
     except ValueError:
-        actor_critic, ob_rms = torch.load(args.model_fname, map_location=torch.device(args.device))
+        actor_critic, obs_rms = torch.load(args.model_fname, map_location=torch.device(args.device))
         
     
     selected_df = log_analysis.get_selected_df(args.eval_folder, [args.dataset],

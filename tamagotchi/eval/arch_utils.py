@@ -39,14 +39,14 @@ matplotlib.use("Agg")
 def get_J(model_fname):
     # if model_fname ends in start
     if model_fname.endswith('start'): # when saving the init. model, not storing the optimizer state.
-        actor_critic, ob_rms = \
+        actor_critic, obs_rms = \
             torch.load(model_fname, map_location=torch.device('cpu'), weights_only=False)
     elif model_fname.endswith('pt'):
         try:
-            actor_critic, ob_rms, optimizer_state_dict = \
+            actor_critic, obs_rms, optimizer_state_dict = \
                 torch.load(model_fname, map_location=torch.device('cpu'), weights_only=False)
         except ValueError:
-            actor_critic, ob_rms = \
+            actor_critic, obs_rms = \
                 torch.load(model_fname, map_location=torch.device('cpu'), weights_only=False)
             print(f"[NOTE] Model file {model_fname} does not contain optimizer state. Load as the old format.")
     else:
