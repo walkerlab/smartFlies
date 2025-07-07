@@ -54,6 +54,16 @@ def update_by_schedule(envs, schedule_dict, curr_step):
                 else:
                     envs.env_method_at(idx, "update_env_param", {'diff_min': _schedule_dict[curr_step]})
                     print(f"update_env_param 'diff_min': {_schedule_dict[curr_step]} at {curr_step} for remote {idx}")
+            elif '_rotate_by' in k:
+                # k format: '{ds}_rotate_by'
+                ds_name = k.split('_rotate_by')[0]
+                idx = get_index_by_dataset(envs, ds_name)
+                if len(idx) == 0:
+                    print(f"No remote found for {ds_name} rotate_by lesson")
+                else:
+                    envs.env_method_at(idx, "update_env_param", {'rotate_angles': _schedule_dict[curr_step]})
+                    print(f"update_env_param 'rotate_angles': {_schedule_dict[curr_step]} at {curr_step} for remote {idx}")
+                # probably need to reset the environment since rotate_by gets sampled from full range at init
             else:
                 raise NotImplementedError
     return updated # return the course that is updated, if any
@@ -183,6 +193,26 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
                 new_diff_min = args.diff_min[i] + step
                 new_diff_min = min(0.4, new_diff_min)  # ensure it doesn't go below 0.4
                 schedule_dict[lesson_name][lesson_time_idx] = new_diff_min
+    
+    if 'rotate_by' in args.r_shaping:
+        total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0] # over this period of time, grow diff_max
+        num_lessons = 4
+        lesson_time = round(total_lesson_time / num_lessons)
+        for i, dataset in enumerate(available_datasets):
+            lesson_name = f'{dataset}_rotate_by'
+            if lesson_name not in schedule_dict:
+                schedule_dict[lesson_name] = {}
+            for j in range(3):
+                if j == 0:
+                    schedule_dict[lesson_name][lesson_time_idx] = [0, 180]
+                elif j == 1:
+                    schedule_dict[lesson_name][lesson_time_idx] = [90, -90]
+                elif j == 2:
+                    schedule_dict[lesson_name][lesson_time_idx] = [0, 90, 180, -90]
+
+        print(f"Added rotate_by lessons to schedule_dict: {schedule_dict}")
+        # TODO look at what I actually threw in.. so that can add method for updating this!
+        # TODO add method for updating this in update CL function
 
     return schedule_dict, restart_period
 
@@ -584,6 +614,20 @@ def training_loop(agent, envs, args, device, actor_critic,
         if not args.dryrun:
             utils.save_tc_schedule(schedule, num_updates, args.num_processes, args.num_steps, args.save_dir)
 
+    
+    # finetuning
+    # TODO see if works
+    if 'finetune' in args.r_shaping:
+        # Reset observation normalization stats and reward normalization stats
+        envs.reset_obs_norm()
+        envs.reset_ret_norm()    
+        # warmup the environment with random actions
+        # this is to ensure that the observation normalization stats are updated before training
+        obs = envs.reset()
+        for _ in range(10000):
+            action = envs.action_space.sample()  # or use pretrained policy
+            obs, reward, done, info = envs.step(action)
+
     obs = envs.reset()
     rollouts.obs[0].copy_(obs) # https://discuss.pytorch.org/t/which-copy-is-better/56393
     rollouts.to(device)
@@ -594,6 +638,7 @@ def training_loop(agent, envs, args, device, actor_critic,
     if last_chkpt_update:
         # if checkpointing, start updating from the last update
         update_range = range(last_chkpt_update, num_updates)
+
     for j in update_range:
         # decrease learning rate linearly
         if args.use_linear_lr_decay:
@@ -626,7 +671,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                 lesson_fpath = os.path.join(args.save_dir, 'chkpt', args.model_fname.replace(".pt", f'_before_{updated_var}{schedule[updated_var][j]}_update{j}.pt'))
                 torch.save([
                     actor_critic,
-                    getattr(get_vec_normalize(envs), 'ob_rms', None),
+                    getattr(get_vec_normalize(envs), 'obs_rms', None),
                     agent.optimizer.state_dict(),
                 ], lesson_fpath)
                 # also save the VecNormalize state 
@@ -718,7 +763,7 @@ def training_loop(agent, envs, args, device, actor_critic,
 
             torch.save([
                 actor_critic,
-                getattr(get_vec_normalize(envs), 'ob_rms', None),
+                getattr(get_vec_normalize(envs), 'obs_rms', None),
                 agent.optimizer.state_dict(),
             ], args.model_fpath)
             print('Saved', args.model_fpath)
@@ -734,7 +779,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                 fname = f'{args.model_fpath}.best'
                 torch.save([
                     actor_critic,
-                    getattr(get_vec_normalize(envs), 'ob_rms', None)
+                    getattr(get_vec_normalize(envs), 'obs_rms', None)
                 ], fname)
                 print('Saved', fname)
 
