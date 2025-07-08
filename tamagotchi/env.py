@@ -1392,6 +1392,11 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.obs_noise:
             self.obs_noise = np.deg2rad(self.obs_noise)
 
+        self.rewards = {
+            'tick': -10/self.episode_steps_max,
+            'homed': 101.0,
+            }
+
         self.vr_wind = False # for virtual reality wind - list: [wind_x, wind_y]; when set, will set the wind to this value at one step. Needs to be set at every step when using.
     
     def set_dataset(self, dataset):
@@ -1814,16 +1819,18 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # Going OOB should be worse than radial reward shaping
             # OOB Overshooting should be worse!
             oob_penalty = 5*np.linalg.norm(self.agent_location) + self.stray_distance
-            if self.rotate_by == 0:
-                oob_penalty *= 2 if self.agent_location[0] < 0 else oob_penalty
-            elif self.rotate_by == 90:
-                oob_penalty *= 2 if self.agent_location[1] < 0 else oob_penalty
-            elif self.rotate_by == -90:
-                oob_penalty *= 2 if self.agent_location[1] > 0 else oob_penalty
-            elif self.rotate_by == 180:
-                oob_penalty *= 2 if self.agent_location[0] > 0 else oob_penalty
-                
+            
+            if self.rotate_by == 0 and self.agent_location[0] < 0:
+                oob_penalty *= 2
+            elif self.rotate_by == 90 and self.agent_location[1] < 0:
+                oob_penalty *= 2
+            elif self.rotate_by == -90 and self.agent_location[1] > 0:
+                oob_penalty *= 2
+            elif self.rotate_by == 180 and self.agent_location[0] > 0:
+                oob_penalty *= 2
+                            
             reward -= oob_penalty
+            
         # Radial distance decrease at each STEP of episode
         r_radial_step = 0
         if 'step' in self.r_shaping:
