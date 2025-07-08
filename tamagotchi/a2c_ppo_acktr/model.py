@@ -89,6 +89,7 @@ class Policy(nn.Module):
         This is useful for resetting the actor weights after training.
         """
         self.base.reset_actor()
+        print("Actor weights reset.", flush=True)
         
     def reset_critic(self):
         """
@@ -96,6 +97,7 @@ class Policy(nn.Module):
         This is useful for resetting the critic weights after training.
         """
         self.base.reset_critic()
+        print("Critic weights reset.", flush=True)
         
     def print_weights(self, head=""):
         """
