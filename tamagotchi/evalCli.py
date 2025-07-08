@@ -308,7 +308,7 @@ def eval_loop(args, actor_critic, test_sparsity=True):
         # x = np.linspace(0.9, 0.1, 5)
         # y = np.array([0.05, 0.01, 0.005, 0.001, 0.0005])
         # z = np.concatenate((x,y))
-        z = np.linspace(0.7, 0.1, 4)
+        z = np.linspace(0.7, 0.1, 3)
         # for birthx in np.arange(0.9, 0.1, -0.05):
         for birthx in z:
             birthx = round(birthx, 4)
