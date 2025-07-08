@@ -980,13 +980,14 @@ class PlumeEnvironment_v2(gym.Env):
     Z = Z.sample(n=max_samples, replace=False) if Z.shape[0] > max_samples else Z
     return Z
 
+
   def get_stray_distance(self):
     Z = self.get_abunchofpuffs()
     Y = cdist(Z.to_numpy(), np.expand_dims(self.agent_location,axis=0), metric='euclidean')
     try:
         minY = min(Y) 
     except Exception as ex:
-        print(f"[PEv2 get_stray_distance] Exception: {ex}, t:{self.t_val:.2f}, tidx:{self.tidx}({self.tidx_min_episode}...{self.tidx_max_episode}), ep_step:{self.episode_step}, {Z}")  
+        print(f"[PE_v2 get_stray_distance] Exception: {ex}, t:{self.t_val:.2f}, tidx:{self.tidx}({self.tidx_min_episode}...{self.tidx_max_episode}), ep_step:{self.episode_step}, {Z}")  
         minY = np.array([0])      
     return minY[0] # return float not float-array
 
@@ -1379,6 +1380,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.rotate_angles = [0, 90, 180, -90] # PEv3 - rotate the data by this angle (in degrees) before using it. Used for evaluation to see the behavioral impact of rotating the data.
         self.sample_rotate_by()
         self.stray_distance_init = 0 # stray distance at reset
+        self.stray_steps = 0 # how many steps of OOB? env fail at 10!
         print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}")
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
@@ -1389,6 +1391,11 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         # convert obs_noise to radians
         if self.obs_noise:
             self.obs_noise = np.deg2rad(self.obs_noise)
+
+        self.rewards = {
+            'tick': -10/self.episode_steps_max,
+            'homed': 101.0,
+            }
 
         self.vr_wind = False # for virtual reality wind - list: [wind_x, wind_y]; when set, will set the wind to this value at one step. Needs to be set at every step when using.
     
@@ -1425,7 +1432,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.rotate_by is not None:
             tick = np.random.choice(len(self.rotate_angles))
             self.rotate_by = self.rotate_angles[tick]
-            coin_flip = np.random.choice(2)
+            # coin_flip = np.random.choice(2)
             # self.mirror = True if coin_flip == 1 else False # flip the data along the long axis of the plume
             self.mirror = False # always off! 
             if self.verbose: print(f"[DEBUG] PEv3 sample_rotate_by: self.rotate_by is set to {self.rotate_by} degrees, mirroring: {self.mirror}")
@@ -1441,14 +1448,67 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         else:
             return self.data_wind.loc[df_idx,['wind_x', 'wind_y']].tolist() # Safer
     
-    def get_abunchofpuffs(self, max_samples=300):  
+    # def get_abunchofpuffs(self, max_samples=300):  
+    #     if self.rotate_by:
+    #         Z = rotate_puffs_optimized(self.data_puffs.query(f"tidx == {self.tidx}"), self.rotate_by, self.mirror).loc[:,['x','y']]
+    #         if self.verbose: print(f"[DEBUG] PEv3 get_abunchofpuffs: rotating puffs by {self.rotate_by} degrees; mean x, y: {Z['x'].mean():.2f}, {Z['y'].mean():.2f}")
+    #     else:
+    #         Z = self.data_puffs.query(f"tidx == {self.tidx}").loc[:,['x','y']]
+    #     Z = Z.sample(n=max_samples, replace=False) if Z.shape[0] > max_samples else Z
+    #     return Z
+    
+    def get_stray_distance(self):
+        Z = self.get_abunchofpuffs()
+        Y = np.linalg.norm(Z.to_numpy() - self.agent_location, axis=1)
+        try:
+            minY = min(Y) 
+        except Exception as ex:
+            print(f"[PEv2 get_stray_distance] Exception: {ex}, t:{self.t_val:.2f}, tidx:{self.tidx}({self.tidx_min_episode}...{self.tidx_max_episode}), ep_step:{self.episode_step}, {Z}")  
+            minY = 0
+        return minY # return float not float-array
+
+    
+    def get_abunchofpuffs(self, max_samples=300):
+        
+        puffs = self.data_puffs.loc[self.data_puffs.tidx.values == self.tidx][['x', 'y']].copy()  # Get puffs at current tidx
+
         if self.rotate_by:
-            Z = rotate_puffs_optimized(self.data_puffs.query(f"tidx == {self.tidx}"), self.rotate_by, self.mirror).loc[:,['x','y']]
-            if self.verbose: print(f"[DEBUG] PEv3 get_abunchofpuffs: rotating puffs by {self.rotate_by} degrees; mean x, y: {Z['x'].mean():.2f}, {Z['y'].mean():.2f}")
-        else:
-            Z = self.data_puffs.query(f"tidx == {self.tidx}").loc[:,['x','y']]
-        Z = Z.sample(n=max_samples, replace=False) if Z.shape[0] > max_samples else Z
-        return Z
+            x = puffs['x'].values
+            y = puffs['y'].values
+
+            if self.rotate_by == 90:
+                x_new = -y
+                y_new = x
+                if self.mirror:
+                    x_new = -x_new
+            elif self.rotate_by == 180:
+                x_new = -x
+                y_new = -y
+                if self.mirror:
+                    y_new = -y_new
+            elif self.rotate_by == -90:
+                x_new = y
+                y_new = -x
+                if self.mirror:
+                    x_new = -x_new
+            elif self.rotate_by == 0:
+                x_new = x
+                y_new = -y if self.mirror else y
+            else:
+                raise ValueError(f"Unsupported rotation angle: {self.rotate_by}. Supported: [0, 90, 180, -90]")
+
+            puffs['x'] = x_new
+            puffs['y'] = y_new
+
+            if self.verbose:
+                print(f"[DEBUG] Rotated puffs by {self.rotate_by}°; mean x,y: {x_new.mean():.2f}, {y_new.mean():.2f}")
+
+        # Subsample if needed
+        if len(puffs) > max_samples:
+            puffs = puffs.sample(n=max_samples, replace=False)
+
+        return puffs
+
 
     def get_initial_location(self, algo = None):
         loc_xy = None
@@ -1518,21 +1578,29 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # Determine which is x and y
             X_mean, X_var = (long_mean, long_var) if long == 'x' else (wide_mean, wide_var)
             Y_mean, Y_var = (wide_mean, wide_var) if long == 'x' else (long_mean, long_var)
+            cnter = -1
             while True:
                 # Sample location in [x, y] order
+                cnter +=1
+                if cnter:
+                    print('counter=', cnter)
                 loc_xy = np.array([
                     X_mean + varx * X_var * np.random.randn(),  # x
                     Y_mean + varx * Y_var * np.random.randn()   # y
                 ])
-                # check if the long coordinate is within the range
-                if long == 'x' and abs(loc_xy[0]) < abs(Z['x']).max():
-                    # and the long coordinate should be in the same quardrant as the plume
-                    if (np.sign(X_mean) == np.sign(loc_xy[0])):
+                D = np.linalg.norm(Z.to_numpy() - loc_xy, axis=1)
+                # loc should be within plume range and not too far from plume
+                if long == 'x' and abs(loc_xy[0]) < Z['x'].abs().max() and np.sign(X_mean) == np.sign(loc_xy[0]):
+                    if np.min(D) < 1.5: # init stray distance < 75% of the stray max
                         break
-                elif long == 'y' and abs(loc_xy[1]) < abs(Z['y']).max():
-                    # and the long coordinate should be in the same quardrant as the plume
-                    if (np.sign(Y_mean) == np.sign(loc_xy[1])):
+                    else:
+                        varx *= 0.8 # reduce variance to sample closer to plume
+                elif long == 'y' and abs(loc_xy[1]) < abs(Z['y']).max() and np.sign(Y_mean) == np.sign(loc_xy[1]):
+                    if np.min(D) < 1.5: # init stray distance < 75% of the stray max
                         break
+                    else:
+                        varx *= 0.8
+
 
         elif 'fixed' in algo:
             loc_xy = np.array( [self.fixed_x, self.fixed_y] )
@@ -1541,6 +1609,20 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             raise ValueError(f"Unknown algo: {algo} for initial location")
         
         return loc_xy
+    
+    
+    def get_oob(self):
+        # Per step
+        if self.stray_distance > self.stray_max:
+            self.stray_steps += 1
+        else:
+            self.stray_steps = 0  # reset if back within bounds
+
+        is_outofbounds = self.stray_steps > 10 # 10 steps out of bounds
+        # strict bounds - fail immediately if out of bounds
+        # is_outofbounds = self.stray_distance > self.stray_max  # how far agent can be from closest puff-center
+        
+        return is_outofbounds
 
     def sense_environment(self):
         '''
@@ -1737,16 +1819,18 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # Going OOB should be worse than radial reward shaping
             # OOB Overshooting should be worse!
             oob_penalty = 5*np.linalg.norm(self.agent_location) + self.stray_distance
-            if self.rotate_by == 0:
-                oob_penalty *= 2 if self.agent_location[0] < 0 else oob_penalty
-            elif self.rotate_by == 90:
-                oob_penalty *= 2 if self.agent_location[1] < 0 else oob_penalty
-            elif self.rotate_by == -90:
-                oob_penalty *= 2 if self.agent_location[1] > 0 else oob_penalty
-            elif self.rotate_by == 180:
-                oob_penalty *= 2 if self.agent_location[0] > 0 else oob_penalty
-                
+            
+            if self.rotate_by == 0 and self.agent_location[0] < 0:
+                oob_penalty *= 2
+            elif self.rotate_by == 90 and self.agent_location[1] < 0:
+                oob_penalty *= 2
+            elif self.rotate_by == -90 and self.agent_location[1] > 0:
+                oob_penalty *= 2
+            elif self.rotate_by == 180 and self.agent_location[0] > 0:
+                oob_penalty *= 2
+                            
             reward -= oob_penalty
+            
         # Radial distance decrease at each STEP of episode
         r_radial_step = 0
         if 'step' in self.r_shaping:
@@ -2223,22 +2307,22 @@ class SubprocVecEnv(SubprocVecEnv_):
                 if not infos[i]['soft_reset_button']: # sample new wind if soft reset button is OFF
                     # log the final observation
                     # infos[i]["terminal_observation"] = obs[i] # wrong place to do this - already happened in worker step and then replaced by reset - the reseted values are not the terminal ones
-                    
-                    # sample a new wind condition
-                    new_wind_direction = self.sample_wind_direction()
-                    # print('[DEBUG] sampled wind direction:', new_wind_direction)
-                    current_wind_direction = self.ds2wind(self.get_attr('dataset', i)[0])
-                    # print('[DEBUG] current wind direction:', current_wind_direction)
-                    # if wind condtion changed, then swap
-                    if new_wind_direction != current_wind_direction:
-                        # print(f"[DEBUG] new wind dir selected... pre swap {self.get_attr('dataset')}")
-                        # check the remote_directory to swap with an undeployed env with the condition of interest
-                        for remote_idx, status in self.remote_directory.items():
-                            if status['deployed'] == False and status['wind_direction'] == new_wind_direction:
-                                self.swap(i, remote_idx)
-                                # print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
-                                swapped = True
-                                break
+                    if self.wind_directions > 1: # if there are multiple wind directions, then sample a new wind condition
+                        # sample a new wind condition
+                        new_wind_direction = self.sample_wind_direction()
+                        # print('[DEBUG] sampled wind direction:', new_wind_direction)
+                        current_wind_direction = self.ds2wind(self.get_attr('dataset', i)[0])
+                        # print('[DEBUG] current wind direction:', current_wind_direction)
+                        # if wind condtion changed, then swap
+                        if new_wind_direction != current_wind_direction:
+                            # print(f"[DEBUG] new wind dir selected... pre swap {self.get_attr('dataset')}")
+                            # check the remote_directory to swap with an undeployed env with the condition of interest
+                            for remote_idx, status in self.remote_directory.items():
+                                if status['deployed'] == False and status['wind_direction'] == new_wind_direction:
+                                    self.swap(i, remote_idx)
+                                    # print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
+                                    swapped = True
+                                    break
                     
                     # update the newest observation
                     list(obs)[i] = self.reset_deployed_at(i)
@@ -2471,22 +2555,48 @@ class VecPyTorch(VecEnvWrapper):
         obs = torch.from_numpy(obs).float().to(self.device)
         reward = torch.from_numpy(reward).unsqueeze(dim=1).float()
         return obs, reward, done, info
+    
+    def reset_obs_norm(self):
+        if hasattr(self.venv, "reset_obs_norm"):
+            self.venv.reset_obs_norm()
+    
+    def reset_ret_norm(self):
+        if hasattr(self.venv, "reset_ret_norm"):
+            self.venv.reset_ret_norm()
 
-
+from stable_baselines3.common.running_mean_std import RunningMeanStd
 class VecNormalize(VecNormalize_):
     def __init__(self, *args, **kwargs):
         super(VecNormalize, self).__init__(*args, **kwargs)
         self.training = True
     def _obfilt(self, obs, update=True):
-        if self.ob_rms:
+        if self.obs_rms:
             if self.training and update:
-                self.ob_rms.update(obs)
-            obs = np.clip((obs - self.ob_rms.mean) /
-                          np.sqrt(self.ob_rms.var + self.epsilon),
+                self.obs_rms.update(obs)
+            obs = np.clip((obs - self.obs_rms.mean) /
+                          np.sqrt(self.obs_rms.var + self.epsilon),
                           -self.clipob, self.clipob)
             return obs
         else:
             return obs
+        
+    def reset_obs_norm(self):
+        """
+        Reset observation normalization statistics.
+        Pass in a representative observation batch, e.g., envs.reset().
+        """
+        print("Resetting observation normalization statistics")
+        self.obs_rms = RunningMeanStd(shape=self.observation_space.shape)
+        print("self.obs_rms.mean", self.obs_rms.mean, "self.obs_rms.var", self.obs_rms.var)
+
+    def reset_ret_norm(self):
+        """
+        Reset reward normalization statistics.
+        """
+        self.ret_rms = RunningMeanStd(shape=())
+        self.returns = np.zeros(self.num_envs)
+        print("self.ret_rms.mean", self.ret_rms.mean, "self.ret_rms.var", self.ret_rms.var)
+
     def train(self):
         self.training = True
     def eval(self):

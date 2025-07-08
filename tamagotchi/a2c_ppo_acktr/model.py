@@ -82,6 +82,37 @@ class Policy(nn.Module):
         dist_entropy = dist.entropy().mean()
 
         return value, action_log_probs, dist_entropy, rnn_hxs
+    
+    def reset_actor(self):
+        """
+        Reset the actor part of the base network.
+        This is useful for resetting the actor weights after training.
+        """
+        self.base.reset_actor()
+        print("Actor weights reset.", flush=True)
+        
+    def reset_critic(self):
+        """
+        Reset the critic part of the base network.
+        This is useful for resetting the critic weights after training.
+        """
+        self.base.reset_critic()
+        print("Critic weights reset.", flush=True)
+        
+    def print_weights(self, head=""):
+        """
+        Print the actor weights of the actor_critic network.
+        This is useful for debugging and understanding the model.
+        """
+        if head:
+            print(f"{head} Weights:")
+            for k, v in self.actor_critic.state_dict().items():
+                if head in k:
+                    print(f"{k}: {tuple(v)}")
+        else:
+            # Iterate through the state_dict and print only actor weights
+            for k, v in self.actor_critic.state_dict().items():
+                print(f"{k}: {tuple(v)}")
 
 
 class NNBase(nn.Module):
@@ -244,6 +275,30 @@ class MLPBase(NNBase):
         }
 
         return value, hidden_actor, rnn_hxs, activities
+    
+    def reset_actor(self):
+        def init_(m):
+            return init(m, nn.init.orthogonal_, lambda x: nn.init.constant_(x, 0), np.sqrt(2))
+        
+        for layer in self.actor1:
+            if isinstance(layer, nn.Linear):
+                init_(layer)
+        
+        for layer in self.actor:
+            if isinstance(layer, nn.Linear):
+                init_(layer)
+
+    def reset_critic(self):
+        def init_(m):
+            return init(m, nn.init.orthogonal_, lambda x: nn.init.constant_(x, 0), np.sqrt(2))
+        
+        for layer in self.critic1:
+            if isinstance(layer, nn.Linear):
+                init_(layer)
+        
+        for layer in self.critic:
+            if isinstance(layer, nn.Linear):
+                init_(layer)
 
 class Simple_MLPBase(NNBase):
     def __init__(self, num_inputs, recurrent=False, hidden_size=64, rnn_type='GRU'):

@@ -70,10 +70,10 @@ def post_eval(args):
     else:
         print(f"Loading model from {model_fname}")
         try:
-            actor_critic, ob_rms, optimizer_state_dict= \
+            actor_critic, obs_rms, optimizer_state_dict= \
                 torch.load(model_fname, map_location=torch.device('cpu'), weights_only=False)
         except ValueError:
-            actor_critic, ob_rms= \
+            actor_critic, obs_rms= \
                 torch.load(model_fname, map_location=torch.device('cpu'),  weights_only=False)
         net = actor_critic.base.rnn #.weight_hh_l0.detach().numpy()
         J0 = net.weight_hh_l0.detach().numpy()

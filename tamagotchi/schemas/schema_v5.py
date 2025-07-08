@@ -111,8 +111,8 @@ class TrainingConfig(dj.Manual):
             dict_to_insert['seed'] = seed
         
         # dummy outsuffix
-        dict_to_insert['outsuffix'] = ''
-        
+        if 'outsuffix' not in dict_to_insert.keys():
+            dict_to_insert['outsuffix'] = ''
         # Compute hash
         buffer = ""
         for key in self.heading.secondary_attributes:
@@ -120,8 +120,9 @@ class TrainingConfig(dj.Manual):
         dict_to_insert['training_config_hash'] = hashlib.md5(buffer.encode()).hexdigest()
         
         # outsuffix of the form: seed_hash 
-        dict_to_insert['outsuffix'] = "_".join([str(dict_to_insert['seed']), dict_to_insert['training_config_hash']])
-        
+        if dict_to_insert['outsuffix'] == '':
+            # if no outsuffix is provided, create one from seed and hash
+            dict_to_insert['outsuffix'] = "_".join([str(dict_to_insert['seed']), dict_to_insert['training_config_hash']])
         # insert into table
         super().insert1(dict_to_insert)
 
