@@ -274,9 +274,10 @@ class TrajectoryStorage:
     - Only storing locations for environments that will be used
     - Automatically stopping collection once 2 HOME + 2 OOB per expected dataset are found
     """
-    def __init__(self, num_envs, possible_datasets):
+    def __init__(self, num_envs, possible_datasets, possible_outcomes):
         self.num_envs = num_envs
         self.possible_datasets = possible_datasets
+        self.possible_outcomes = possible_outcomes  # Default outcomes
         self.expected_datasets = set()  # Datasets expected in current update
         self.trajectories_per_outcome = 2  # Target number per outcome type (HOME/OOB)
         self.is_full = False  # Flag to indicate if storage is full
@@ -284,21 +285,20 @@ class TrajectoryStorage:
         # Track ongoing trajectories for each env
         self.ongoing_trajectories = [[] for _ in range(num_envs)]
     
-    def set_expected_datasets(self, expected_datasets, outcomes=['HOME', 'OOB', 'OOT']):
+    def set_expected_datasets(self, expected_datasets):
         """Set which datasets to expect during this update"""
         self.expected_datasets = set(expected_datasets)
-        self.possible_outcomes = outcomes
         # Reset storage structure for expected datasets
         self.stored_trajectories = {
-            dataset: {outcome: [] for outcome in outcomes}
+            dataset: {outcome: [] for outcome in self.possible_outcomes}
             for dataset in self.expected_datasets
         }
         self.dataset_counts = {
-            dataset: {outcome: 0 for outcome in outcomes}
+            dataset: {outcome: 0 for outcome in self.possible_outcomes}
             for dataset in self.expected_datasets
         }
         print(f"Expecting datasets: {self.expected_datasets}")
-        print(f"Target: {self.trajectories_per_outcome} {outcomes} per dataset")
+        print(f"Target: {self.trajectories_per_outcome} {self.possible_outcomes} per dataset")
 
     def reset_update(self, expected_datasets=None):
         """Reset counters and storage for new update"""
