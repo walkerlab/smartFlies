@@ -1222,7 +1222,10 @@ class PlumeEnvironment_v2(gym.Env):
     ### ----------------- End conditions / Is the trial over ----------------- ### 
     is_home = np.linalg.norm(self.agent_location) <= self.homed_radius 
     is_outoftime = self.episode_step >= self.episode_steps_max - 1           
-    is_outofbounds = self.get_oob()
+    if 'oobs' in self.r_shaping:
+        is_outofbounds = self.get_oob()
+    else:
+        is_outofbounds = False
     done = bool(is_home or is_outofbounds or is_outoftime)
 
     # Autocurricula
@@ -2278,14 +2281,6 @@ class SubprocVecEnv(SubprocVecEnv_):
     def update_wind_direction(self, new_max_wind_direction: int):
         self.wind_directions = new_max_wind_direction
     
-    def sample_wind_direction(self):
-        if np.random.random() > 0.3:
-            wind_dir = self.wind_directions # 70% chance to use the highest ranked wind direction
-        else:
-            wind_dir = np.random.randint(1, self.wind_directions+1) # +1 because randint is end-exclusive
-        
-        return wind_dir
-    
     def refresh_deployment_status(self):
         # check all processes and update deployment status
         for i, r in enumerate(self.remotes):
@@ -2312,7 +2307,7 @@ class SubprocVecEnv(SubprocVecEnv_):
         for i, name in enumerate(self.unique_datasets):
             if ds == name:
                 return i + 1
-        
+    
     def swap(self, idx: int, idx_replacement_item: int) -> None:
         """
         Swap envs in subprocesses.
@@ -2332,6 +2327,14 @@ class SubprocVecEnv(SubprocVecEnv_):
         # actually won't be a problem since iterates over self.deployed_remotes
         assert len(self.deployed_remotes) == len(set(self.deployed_processes)), "duplicated remotes"
     
+    def sample_wind_direction(self, lower_lim = 1):
+        if np.random.random() > 0.3:
+            wind_dir = self.wind_directions # 70% chance to use the highest ranked wind direction
+        else:
+            wind_dir = np.random.randint(lower_lim, self.wind_directions+1) # +1 because randint is end-exclusive
+        
+        return wind_dir
+
     def step_wait(self) -> VecEnvStepReturn:
         results = [remote.recv() for remote in self.deployed_remotes]
         self.waiting = False
@@ -2344,7 +2347,10 @@ class SubprocVecEnv(SubprocVecEnv_):
                     # infos[i]["terminal_observation"] = obs[i] # wrong place to do this - already happened in worker step and then replaced by reset - the reseted values are not the terminal ones
                     if self.wind_directions > 1: # if there are multiple wind directions, then sample a new wind condition
                         # sample a new wind condition
-                        new_wind_direction = self.sample_wind_direction()
+                        if 'constant' in self.unique_datasets[0]:
+                            new_wind_direction = self.sample_wind_direction(lower_lim=2) # skip constant once new wind has been added! 
+                        else:
+                            new_wind_direction = self.sample_wind_direction()
                         # print('[DEBUG] sampled wind direction:', new_wind_direction)
                         current_wind_direction = self.ds2wind(self.get_attr('dataset', i)[0])
                         # print('[DEBUG] current wind direction:', current_wind_direction)
