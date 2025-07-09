@@ -1222,10 +1222,7 @@ class PlumeEnvironment_v2(gym.Env):
     ### ----------------- End conditions / Is the trial over ----------------- ### 
     is_home = np.linalg.norm(self.agent_location) <= self.homed_radius 
     is_outoftime = self.episode_step >= self.episode_steps_max - 1           
-    if 'oobs' in self.r_shaping:
-        is_outofbounds = self.get_oob()
-    else:
-        is_outofbounds = False
+    is_outofbounds = self.get_oob()
     done = bool(is_home or is_outofbounds or is_outoftime)
 
     # Autocurricula
@@ -1842,7 +1839,10 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         ### ----------------- End conditions / Is the trial over ----------------- ### 
         is_home = np.linalg.norm(self.agent_location) <= self.homed_radius 
         is_outoftime = self.episode_step >= self.episode_steps_max - 1           
-        is_outofbounds = self.get_oob()
+        if 'oobs' in self.r_shaping:
+            is_outofbounds = self.get_oob()
+        else:
+            is_outofbounds = False
         done = bool(is_home or is_outofbounds or is_outoftime)
 
         # If has not ended, make new observations
