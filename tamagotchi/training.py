@@ -604,7 +604,9 @@ def training_loop(agent, envs, args, device, actor_critic,
     best_mean = 0.0
     if 'oob' not in args.r_shaping:
         traj_storage = TrajectoryStorage(num_envs=envs.num_envs, possible_datasets=args.dataset, possible_outcomes=['HOME', 'OOT'])
-    
+    else:
+        traj_storage = TrajectoryStorage(num_envs=envs.num_envs, possible_datasets=args.dataset, possible_outcomes=['HOME', 'OOB', 'OOT'])
+        
     # track stats for logging
     episode_rewards = deque(maxlen=50) 
     episode_plume_densities = deque(maxlen=50)
