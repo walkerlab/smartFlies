@@ -334,9 +334,8 @@ class TrajectoryStorage:
                 # Get dataset and outcome type from episode info
                 dataset = info['dataset']
                 outcome_type = info['done']
-                # if outcome_type == 'OOT':
-                #     self.ongoing_trajectories[i] = []
-                #     continue
+                if outcome_type not in self.possible_outcomes:
+                    continue
                 
                 # Only store if this dataset is expected and we haven't reached limit for this outcome
                 if (dataset in self.expected_datasets and 
@@ -597,7 +596,7 @@ def training_loop(agent, envs, args, device, actor_critic,
         args.num_env_steps) // args.num_steps // args.num_processes # args.num_env_steps 20M for all # args.num_steps=2048 (found in logs) # args.num_processes=4=mini_batch (found in logs)
     
     # See if a chkpt was loaded
-    training_log = training_log if training_log is not None else [] 
+    training_log = training_log if training_log is not None else [] # check pointing if there's any train logs that exist
     last_chkpt_update = len(training_log) # the number of updates already done in case of checkpointing
     eval_log = eval_log if eval_log is not None else []
     # track trajectories for plotting
