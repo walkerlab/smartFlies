@@ -268,11 +268,11 @@ def log_episode(training_log, j, total_num_steps, start, episode_rewards, episod
 class TrajectoryStorage:
     """
     Lightweight trajectory storage that tracks trajectories by dataset type and episode outcome.
-    Collects 2 HOME and 2 OOB trials for each expected dataset.
+    Collects N trials per expected outcome for each expected dataset.
     Optimizes memory usage by:
     - Only tracking trajectories while still collecting (stops when target reached)
     - Only storing locations for environments that will be used
-    - Automatically stopping collection once 2 HOME + 2 OOB per expected dataset are found
+    - Automatically stopping collection once N trials per expected outcome per dataset are found
     """
     def __init__(self, num_envs, possible_datasets, possible_outcomes):
         self.num_envs = num_envs
@@ -324,8 +324,6 @@ class TrajectoryStorage:
                 traj_pt = info['location'].copy()  # Copy to avoid reference issues
                 traj_pt.append(info['odor_obs'])
                 self.ongoing_trajectories[i].append(traj_pt)
-                if len(self.ongoing_trajectories[i]) > 300:
-                    breakpoint()
 
     def check_episode_done(self, infos, done, tracked_ds=''):
         """Check for completed episodes and store if needed. tracked_ds - stop tracking if this dataset is full."""
@@ -367,15 +365,14 @@ class TrajectoryStorage:
                 self.is_storage_full(tracked_ds)
 
                 if self.is_full:
-                    # print(f"[DEBUG] Env {i}: Storage is now full. Stopping tracking.")
+                    print(f"[DEBUG] Env {i}: Storage is now full. Stopping tracking.")
                     self.ongoing_trajectories[i] = None
                 else:
-                    # print(f"[DEBUG] Env {i}: Resetting trajectory buffer for next episode.")
+                    print(f"[DEBUG] Env {i}: Resetting trajectory buffer for next episode.")
                     self.ongoing_trajectories[i] = []
-            # elif d:
-                # print(f"[DEBUG] Env {i}: self.ongoing_trajectories[i] is not None？ {self.ongoing_trajectories[i] is not None}.")
+            elif d and self.ongoing_trajectories[i] is None:
+                print(f"[DEBUG] Env {i}: Episode done but storage full - skipping {info['done']}.")
 
-    
     def get_trajectories(self):
         """Get stored trajectories for current update"""
         return self.stored_trajectories.copy()
@@ -413,13 +410,10 @@ class TrajectoryStorage:
         # Add progress per dataset and outcome type
         for dataset in self.expected_datasets:
             counts = {outcome: self.dataset_counts[dataset][outcome] for outcome in self.possible_outcomes}
-            HOME_collected = counts['HOME']
-            OOB_collected = counts['OOB']
-            OOT_collected = counts['OOT']
-            status[f'{dataset}_HOME_progress'] = f"{HOME_collected}/{self.trajectories_per_outcome}"
-            status[f'{dataset}_OOB_progress'] = f"{OOB_collected}/{self.trajectories_per_outcome}"
-            status[f'{dataset}_OOT_progress'] = f"{OOT_collected}/{self.trajectories_per_outcome}"
-
+            for outcome in self.possible_outcomes:
+                if outcome not in counts:
+                    counts[outcome] = 0
+            status[f'{dataset}_counts'] = counts
         return status
     
     def get_summary_counts(self):
@@ -666,7 +660,7 @@ def training_loop(agent, envs, args, device, actor_critic,
     rollouts.to(device)
     start = time.time()
     
-    plot_every_n_updates = 10
+    plot_every_n_updates = 1
     # at each bout of update
     update_range = range(num_updates)
     if last_chkpt_update:
