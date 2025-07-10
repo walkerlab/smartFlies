@@ -324,38 +324,57 @@ class TrajectoryStorage:
                 traj_pt = info['location'].copy()  # Copy to avoid reference issues
                 traj_pt.append(info['odor_obs'])
                 self.ongoing_trajectories[i].append(traj_pt)
+                if len(self.ongoing_trajectories[i]) > 300:
+                    breakpoint()
 
     def check_episode_done(self, infos, done, tracked_ds=''):
         """Check for completed episodes and store if needed. tracked_ds - stop tracking if this dataset is full."""
         if self.is_full:
+            print("[DEBUG] Storage already full. Skipping episode checks.")
             return
+
         for i, (d, info) in enumerate(zip(done, infos)):
             if d and 'dataset' in info and 'done' in info and self.ongoing_trajectories[i] is not None:
-                # Get dataset and outcome type from episode info
                 dataset = info['dataset']
                 outcome_type = info['done']
+
                 if outcome_type not in self.possible_outcomes:
+                    # print(f"[DEBUG] Env {i}: Skipping unknown outcome: {outcome_type}")
                     continue
-                
-                # Only store if this dataset is expected and we haven't reached limit for this outcome
-                if (dataset in self.expected_datasets and 
-                    self.dataset_counts[dataset][outcome_type] < self.trajectories_per_outcome):
-                    
+
+                if dataset not in self.expected_datasets:
+                    # print(f"[DEBUG] Env {i}: Skipping dataset '{dataset}' (not in expected_datasets)")
+                    continue
+
+                current_count = self.dataset_counts[dataset][outcome_type]
+                if current_count < self.trajectories_per_outcome:
                     self.stored_trajectories[dataset][outcome_type].append({
                         'trajectory': self.ongoing_trajectories[i].copy(),
                         'episode_info': info.copy()
                     })
                     self.dataset_counts[dataset][outcome_type] += 1
+                    # print(f"[DEBUG] Env {i}: Stored trajectory for {dataset} ({outcome_type}) "
+                        # f"[{self.dataset_counts[dataset][outcome_type]}/{self.trajectories_per_outcome}]")
+                else:
+                    # print(f"[DEBUG] Env {i}: Skipped storing trajectory for {dataset} ({outcome_type}) — quota full.")
+                    self.ongoing_trajectories[i] = None
+                    continue  # Don’t start new tracking for over-quota outcome
+
+                # Check if collection is full after this update
                 if isinstance(tracked_ds, int):
-                    tracked_ds = self.possible_datasets[tracked_ds-1] # get the dataset name from the index that is 1-based
+                    tracked_ds = self.possible_datasets[tracked_ds - 1]
+
                 self.is_storage_full(tracked_ds)
-                # Decide whether to continue tracking this environment
+
                 if self.is_full:
-                    # Stop tracking completely
+                    # print(f"[DEBUG] Env {i}: Storage is now full. Stopping tracking.")
                     self.ongoing_trajectories[i] = None
                 else:
-                    # Start tracking new episode
+                    # print(f"[DEBUG] Env {i}: Resetting trajectory buffer for next episode.")
                     self.ongoing_trajectories[i] = []
+            # elif d:
+                # print(f"[DEBUG] Env {i}: self.ongoing_trajectories[i] is not None？ {self.ongoing_trajectories[i] is not None}.")
+
     
     def get_trajectories(self):
         """Get stored trajectories for current update"""
@@ -532,8 +551,6 @@ def plot_trajectories(traj_storage, envs, save_path="/src/tamagotchi/debug_plot.
                 
                 # Add trajectory info as text
                 traj_length = len(trajectory)
-                if traj_length < 10:
-                    breakpoint()
                 ax.text(0.02, 0.98, f'Length: {traj_length}', transform=ax.transAxes,
                        fontsize=8, verticalalignment='top',
                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
@@ -732,7 +749,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                         update_episodes_df = utils.update_eps_info(update_episodes_df, infos, episode_counter)
                     except KeyError:
                         raise KeyError("Logging info not found... check why it's not here when done")
-                            
+                    print(f"Episode {episode_counter} done outcome={infos[i]['done']} steps {step}")
             # If done then clean the history of observations in the recurrent_hidden_states. Done in the MLPBase forward method
             masks = torch.FloatTensor(
                 [[0.0] if done_ else [1.0] for done_ in done])
