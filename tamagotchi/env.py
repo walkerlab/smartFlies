@@ -1614,20 +1614,19 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             long = 'x' if X_span > Y_span else 'y'
             wide = 'y' if long == 'x' else 'x'
 
-            long_pcts = Z[long].abs().quantile([q_curriculum - 0.1, q_curriculum]).to_numpy()
+            long_pcts = Z[long].abs().quantile([q_curriculum - 0.05, q_curriculum]).to_numpy()
             long_mean, long_var = long_pcts[1], long_pcts[1] - long_pcts[0]
             long_mean *= np.sign(Z[long].mean())
 
             lower_limit = 0.05
-            Z_filtered_long = Z.query(f"({long} >= (@long_mean - @long_var)) and ({long} <= (@long_mean + @long_var))")
-
+            Z_filtered_long = Z[(Z[long] >= (long_mean - long_var)) & (Z[long] <= (long_mean + long_var))] # puffs in the long quantile range
             if Z_filtered_long.empty:
                 raise ValueError("No puffs found in the desired long quantile range.")
 
-            wide_pcts = Z_filtered_long[wide].quantile([lower_limit, 0.5]).to_numpy()
+            wide_pcts = Z_filtered_long[wide].quantile([lower_limit, 0.5]).to_numpy() # sample wide quantiles from the puffs at the long quantile range
             wide_mean, wide_var = wide_pcts[1], min(1, wide_pcts[1] - wide_pcts[0])
-
-            Z_final = Z_filtered_long.query(f"({wide} >= (@wide_mean - @wide_var)) and ({wide} <= (@wide_mean + @wide_var))")
+            # first sample by long quantile and then by wide quantile
+            Z_final = Z_filtered_long[(Z_filtered_long[wide] >= (wide_mean - wide_var)) & (Z_filtered_long[wide] <= (wide_mean + wide_var))]
 
             if Z_final.empty:
                 raise ValueError("No puffs found in the refined wide quantile range.")
