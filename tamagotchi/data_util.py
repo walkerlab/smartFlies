@@ -533,27 +533,24 @@ def plot_tc_schedule(schedule, num_updates, num_processes, num_steps):
 
 
 # for logging episode statistics 
-def update_eps_info(update_episodes_df, infos, episode_counter):
+def update_eps_info(update_episodes_df, info, episode_counter):
     # update the episode statistics
-    for i in range(len(infos)):
-        if infos[i]['done']:
-            update_episodes_df = pd.concat([update_episodes_df,pd.DataFrame([
-                {
-                    'episode_id': episode_counter,
-                    'dataset': infos[i]['dataset'],
-                    'outcome': infos[i]['done'],
-                    'reward': infos[i]['episode']['r'],
-                    'plume_density': infos[i]['plume_density'],
-                    'start_tidx': infos[i]['step_offset'],
-                    'end_tidx': infos[i]['tidx'],
-                    'location_initial': infos[i]['location_initial'],
-                    'stray_initial': infos[i]['stray_initial'],
-                    'end_location': infos[i]['location'],
-                    'init_angle': infos[i]['init_angle'],
-                    'rotate_by': infos[i]['rotate_by'],
-                    'mirror': infos[i]['mirror'],
-                }])]
-            )
+    update_episodes_df = pd.concat([update_episodes_df,pd.DataFrame([
+        {
+            'episode_id': episode_counter,
+            'dataset': info['dataset'],
+            'outcome': info['done'],
+            'reward': info['episode']['r'],
+            'plume_density': info['plume_density'],
+            'start_tidx': info['step_offset'],
+            'end_tidx': info['tidx'],
+            'location_initial': info['location_initial'],
+            'stray_initial': info['stray_initial'],
+            'end_location': info['location'],
+            'init_angle': info['init_angle'],
+            'rotate_by': info['rotate_by'],
+            'mirror': info['mirror'],
+        }])])
     return update_episodes_df
 
 
