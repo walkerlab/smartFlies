@@ -746,10 +746,11 @@ def training_loop(agent, envs, args, device, actor_critic,
                         episode_plume_densities.append(infos[i]['plume_density']) # plume_density and num_puffs are expected to be similar across different agents. Tracking to confirm. 
                         episode_puffs.append(infos[i]['num_puffs'])
                         episode_wind_directions.append(envs.ds2wind(infos[i]['dataset'])) # density and dataset are logged to see eps. statistics implemented by the curriculum
-                        update_episodes_df = utils.update_eps_info(update_episodes_df, infos, episode_counter)
+                        update_episodes_df = utils.update_eps_info(update_episodes_df, infos[i], episode_counter)
                     except KeyError:
                         raise KeyError("Logging info not found... check why it's not here when done")
-                    print(f"Episode {episode_counter} done outcome={infos[i]['done']} steps {step}")
+            
+                    # print(f"Episode {episode_counter} done outcome={infos[i]['done']} steps {step}")
             # If done then clean the history of observations in the recurrent_hidden_states. Done in the MLPBase forward method
             masks = torch.FloatTensor(
                 [[0.0] if done_ else [1.0] for done_ in done])
