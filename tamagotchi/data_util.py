@@ -533,7 +533,7 @@ def plot_tc_schedule(schedule, num_updates, num_processes, num_steps):
 
 
 # for logging episode statistics 
-def update_eps_info(update_episodes_df, info, episode_counter):
+def update_eps_info(update_episodes_df, info, episode_counter, update_idx):
     # update the episode statistics
     update_episodes_df = pd.concat([update_episodes_df,pd.DataFrame([
         {
@@ -550,6 +550,7 @@ def update_eps_info(update_episodes_df, info, episode_counter):
             'init_angle': info['init_angle'],
             'rotate_by': info['rotate_by'],
             'mirror': info['mirror'],
+            'update_idx': update_idx,
         }])])
     return update_episodes_df
 
