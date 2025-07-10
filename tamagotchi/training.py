@@ -666,7 +666,7 @@ def training_loop(agent, envs, args, device, actor_critic,
     rollouts.to(device)
     start = time.time()
     
-    plot_every_n_updates = 1
+    plot_every_n_updates = 10
     # at each bout of update
     update_range = range(num_updates)
     if last_chkpt_update:
@@ -716,10 +716,11 @@ def training_loop(agent, envs, args, device, actor_critic,
                 print('Saved', lesson_fpath, vecNormalize_state_fname)
 
         # Initialize df to track episode statistics
-        update_episodes_df = pd.DataFrame(columns=[
-            'episode_id', 'dataset', 'outcome', 'reward', 'plume_density', 
-            'start_tidx', 'end_tidx', 'location_initial', 'init_angle'
-        ]) # track stats of episodes
+        if j % plot_every_n_updates == 0:
+            update_episodes_df = pd.DataFrame(columns=[
+                'episode_id', 'dataset', 'outcome', 'reward', 'plume_density', 
+                'start_tidx', 'end_tidx', 'location_initial', 'init_angle'
+            ]) # track stats of episodes
         episode_counter = 0
         # do this every 10th update
         if j % plot_every_n_updates == 0:
@@ -746,7 +747,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                         episode_plume_densities.append(infos[i]['plume_density']) # plume_density and num_puffs are expected to be similar across different agents. Tracking to confirm. 
                         episode_puffs.append(infos[i]['num_puffs'])
                         episode_wind_directions.append(envs.ds2wind(infos[i]['dataset'])) # density and dataset are logged to see eps. statistics implemented by the curriculum
-                        update_episodes_df = utils.update_eps_info(update_episodes_df, infos[i], episode_counter)
+                        update_episodes_df = utils.update_eps_info(update_episodes_df, infos[i], episode_counter, j)
                     except KeyError:
                         raise KeyError("Logging info not found... check why it's not here when done")
             
@@ -786,7 +787,8 @@ def training_loop(agent, envs, args, device, actor_critic,
                     print(f"Error logging artifact {plt_path}: {e}")
                 
         utils.log_agent_learning(j, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
-        utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
+        if j % plot_every_n_updates == 0:
+            utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
                 
         rollouts.after_update()
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
