@@ -1738,14 +1738,17 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.soft_reset_button = False # reset the button
             return self.soft_reset()
         self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
-        observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
-        if len(observation) == 7 or self.haltere:
-            observation[5:] = 0 # course direction to 0
         if self.haltere:
+            print(f"[DEBUG RESET] Before reset - air_acc: {getattr(self, 'air_acc', 'unset'):.4f}, ang_acc: {getattr(self, 'ang_acc', 'unset'):.4f}")
             self.air_acc = 0.0 # reset acceleration
             self.ang_acc = 0.0 # reset angular acceleration
             self.move_last = 0
             self.turn_last = 0
+            print(f"[DEBUG RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_last: {self.move_last}, turn_last: {self.turn_last}")
+
+        observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
+        if len(observation) == 7 or self.haltere:
+            observation[5:] = 0 # course direction to 0
 
         self.init_angle = self.agent_angle
         return observation
@@ -1789,10 +1792,12 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if len(observation) == 7 or self.haltere:
             observation[5:] = 0 # course direction to 0
         if self.haltere:
+            print(f"[DEBUG SOFT_RESET] Before reset - air_acc: {getattr(self, 'air_acc', 'unset'):.4f}, ang_acc: {getattr(self, 'ang_acc', 'unset'):.4f}")
             self.air_acc = 0.0 # reset acceleration
             self.ang_acc = 0.0 # reset angular acceleration
             self.move_last = 0
             self.turn_last = 0
+            print(f"[DEBUG SOFT_RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_last: {self.move_last}, turn_last: {self.turn_last}")
             
         return observation
     
@@ -1850,8 +1855,21 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.turn_now = turn_action
             self.move_dt = self.move_last - self.move_now 
             self.turn_dt = new_angle_radians - old_angle_radians
-            self.air_acc = self.move_dt * self.move_capacity * self.movex / self.dt # Air Speed Acceleration in m/s^2
-            self.ang_acc = self.turn_dt * self.turn_capacity * self.turnx / self.dt # Angular acceleration in rad/s^2
+            print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: move_last: {self.move_last:.4f}, move_now: {self.move_now:.4f}, move_dt: {self.move_dt:.4f}")
+            print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: old_angle: {old_angle_radians:.4f}, new_angle: {new_angle_radians:.4f}, turn_dt: {self.turn_dt:.4f}")
+            print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: move_capacity: {self.move_capacity:.4f}, movex: {self.movex:.4f}, dt: {self.dt:.4f}")
+            print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: turn_capacity: {self.turn_capacity:.4f}, turnx: {self.turnx:.4f}")
+            
+            # Calculate accelerations with detailed intermediate values
+            air_vel_change = self.move_dt * self.move_capacity * self.movex
+            angular_vel_change = self.turn_dt * self.turn_capacity * self.turnx
+            self.air_acc = air_vel_change / self.dt # Air Speed Acceleration in m/s^2
+            self.ang_acc = angular_vel_change / self.dt # Angular acceleration in rad/s^2
+            
+            print(f"[DEBUG ACCEL INTERMEDIATE] Step {self.episode_step}: air_vel_change: {air_vel_change:.4f} m/s, angular_vel_change: {angular_vel_change:.4f} rad/s")
+            print(f"[DEBUG ACCEL RESULT] Step {self.episode_step}: air_acc: {self.air_acc:.4f} m/s^2, ang_acc: {self.ang_acc:.4f} rad/s^2")
+            print(f"[DEBUG ACCEL VALIDATION] Step {self.episode_step}: |air_acc|: {abs(self.air_acc):.4f}, |ang_acc|: {abs(self.ang_acc):.4f}")
+            
             if self.verbose > 1:
                 print(f"haltere acc: {self.air_acc:.2f}, ang_acc: {self.ang_acc:.2f}, move_dt: {self.move_dt:.2f}, turn_dt: {self.turn_dt:.2f}")
 
@@ -1976,7 +1994,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             'wind_obs': observation[:2],
             'odor_obs': observation[2],
             'allocentric_head_direction': observation[3:5],
-            'egocentric_course_direction': observation[5:7] # within SubprocVecEnv, unnormalized obs. Later nomalized in VecPyTorch
+            'egocentric_course_direction': observation[5:7], # within SubprocVecEnv, unnormalized obs. Later nomalized in VecPyTorch
+            'air_acc': observation[7] if self.haltere else None, # within SubprocVecEnv, unnormalized obs. Later nomalized in VecPyTorch
+            'ang_acc': observation[8] if self.haltere else None # within SubprocVecEnv, unnormalized obs. Later nomalized in VecPyTorch
             }
 
         if done:
@@ -2077,16 +2097,20 @@ def make_vec_envs(env_name,
                 except:
                     print(f"VecNormalize loaded from file - some attributes not available")
             else:
-                if gamma is None:
-                    envs = VecNormalize(envs, ret=False)
+                if 'norm_odor_only' in args:
+                    norm_at = [2] 
                 else:
-                    envs = VecNormalize(envs, gamma=gamma)
+                    norm_at = []
+                if gamma is None:
+                    envs = VecNormalize(envs, ret=False, norm_at=norm_at)
+                else:
+                    envs = VecNormalize(envs, gamma=gamma, norm_at=norm_at) 
         else:
             if gamma is None:
                 envs = VecNormalize(envs, ret=False)
             else:
-                envs = VecNormalize(envs, gamma=gamma) # type(envs.action_space) = <class 'gym.spaces.box.Box'> # gamma, reward discount factor = 0.99 always 
-        
+                envs = VecNormalize(envs, gamma=gamma)
+
     envs = VecPyTorch(envs, device)
 
     if num_frame_stack is not None:
@@ -2644,11 +2668,11 @@ from stable_baselines3.common.running_mean_std import RunningMeanStd
 from copy import deepcopy
 from typing import Dict
 class VecNormalize(VecNormalize_):
-    def __init__(self, norm_at=[],*args, **kwargs):
-        super(VecNormalize, self).__init__(*args, **kwargs)
+    def __init__(self, venv, norm_at=[], *args, **kwargs):
+        super(VecNormalize, self).__init__(venv, *args, **kwargs)
         self.norm_at = norm_at
         self.training = True
-        
+
     def _obfilt(self, obs, update=True):
         # not really used.. 
         print('_ob_filt called', flush=True)
