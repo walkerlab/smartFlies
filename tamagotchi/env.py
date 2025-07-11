@@ -1360,7 +1360,7 @@ class PlumeEnvironment_v2(gym.Env):
     pass
 
 class PlumeEnvironment_v3(PlumeEnvironment_v2):
-    def __init__(self, visual_feedback=False, flip_ventral_optic_flow=False, rotate_by=None, soft_reset=False, **kwargs):
+    def __init__(self, visual_feedback=False, flip_ventral_optic_flow=False, rotate_by=None, soft_reset=False, haltere=False, **kwargs):
         '''
         soft_reset_button: bool or None; button never turns on if None, otherwise it will be set to True when step() fails.
         '''
@@ -1379,10 +1379,15 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.sample_rotate_by()
         self.stray_distance_init = 0 # stray distance at reset
         self.stray_steps = 0 # how many steps of OOB? env fail at 10!
+        self.haltere = haltere # PEv3 - haltere feedback
         print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}")
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                         shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
+            if self.haltere:
+                self.observation_space = spaces.Box(low=-1, high=+1,
+                                            shape=(9,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y, acc., ang. acc.]
+                
         else:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                     shape=(3,), dtype=np.float32) # [(apparent/ambient) wind x, y, odor]
@@ -1659,6 +1664,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
     def sense_environment(self):
         '''
         Return an array with [wind x, y, odor, allocentric head direction x, y, egocentric course direction x, y]
+        if self.haltere, then [wind x, y, odor, allocentric head direction x, y, egocentric course direction x, y, acc. and ang. acc.]
         '''
         if (self.verbose > 1) and (self.episode_step >= self.episode_steps_max): # Debug mode
             pprint(vars(self))
@@ -1718,6 +1724,11 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             observation = np.append(observation, [np.cos(allocentric_head_direction_radian), np.sin(allocentric_head_direction_radian), np.cos(egocentric_course_direction_radian), np.sin(egocentric_course_direction_radian)])
         if self.verbose > 1:
             print('observation', observation)
+            
+        if self.haltere:
+            # Add haltere gyroscopic feedback
+            observation = np.append(observation, [self.air_acc, self.ang_acc])
+        
         return observation
 
     def reset(self):
@@ -1728,8 +1739,14 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             return self.soft_reset()
         self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
         observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
-        if len(observation) == 7:
+        if len(observation) == 7 or self.haltere:
             observation[5:] = 0 # course direction to 0
+        if self.haltere:
+            self.air_acc = 0.0 # reset acceleration
+            self.ang_acc = 0.0 # reset angular acceleration
+            self.move_last = 0
+            self.turn_last = 0
+
         self.init_angle = self.agent_angle
         return observation
 
@@ -1769,9 +1786,13 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         observation = self.sense_environment()
         self.found_plume = True if observation[2] > 0. else False 
 
-        
-        if len(observation) == 7:
+        if len(observation) == 7 or self.haltere:
             observation[5:] = 0 # course direction to 0
+        if self.haltere:
+            self.air_acc = 0.0 # reset acceleration
+            self.ang_acc = 0.0 # reset angular acceleration
+            self.move_last = 0
+            self.turn_last = 0
             
         return observation
     
@@ -1797,8 +1818,12 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.ambient_wind = self.get_current_wind_xy() # will rotate wind by self.rotate_by degrees if set
         if self.episode_step == 1:
             self.stray_distance_init = self.stray_distance_last # stray distance at reset
-            
-        # Handle action 
+        
+        if self.haltere:
+            self.move_last = self.move_now
+            self.turn_last = self.turn_now
+
+        # Handle action
         if self.verbose > 1:
             print("step action:", action, action.shape)
         if self.squash_action: # always true in training and eval. Bkw compt for Sat's older logs in visualization scripts... Not touching this yet.
@@ -1806,6 +1831,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         action = np.clip(action, 0.0, 1.0)
         move_action = action[0] # Move [0, 1], with 0.0 = no movement
         turn_action = action[1] # # Turn [0, 1], with 0.5 = no turn... maybe change to [-1, 1]
+        
         # Action noise (multiplicative)
         move_action *= 1.0 + np.random.uniform(-self.act_noise, +self.act_noise) 
         turn_action *= 1.0 + np.random.uniform(-self.act_noise, +self.act_noise) 
@@ -1818,6 +1844,17 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         # Turn/Update orientation and move to new location 
         old_angle_radians = np.angle(self.agent_angle[0] + 1j*self.agent_angle[1], deg=False)
         new_angle_radians = old_angle_radians + self.turn_capacity*self.turnx*(turn_action - 0.5)*self.dt # in radians; (Turn~[0, 1], with 0.5 = no turn, <0.5 turn cw, >0.5 turn ccw)
+
+        if self.haltere:
+            self.move_now = move_action
+            self.turn_now = turn_action
+            self.move_dt = self.move_last - self.move_now 
+            self.turn_dt = new_angle_radians - old_angle_radians
+            self.air_acc = self.move_dt * self.move_capacity * self.movex / self.dt # Air Speed Acceleration in m/s^2
+            self.ang_acc = self.turn_dt * self.turn_capacity * self.turnx / self.dt # Angular acceleration in rad/s^2
+            if self.verbose > 1:
+                print(f"haltere acc: {self.air_acc:.2f}, ang_acc: {self.ang_acc:.2f}, move_dt: {self.move_dt:.2f}, turn_dt: {self.turn_dt:.2f}")
+
         self.agent_angle = [ np.cos(new_angle_radians), np.sin(new_angle_radians) ]    
         assert np.linalg.norm(self.agent_angle) < 1.1
         # New location = old location + agent movement + wind advection
@@ -2128,6 +2165,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         flip_ventral_optic_flow=args.flip_ventral_optic_flow,
                         rotate_by=args.rotate_by,
                         soft_reset=args.soft_reset,
+                        haltere=args.haltere,
                         )
             else:
                 # bkw compat before cleaning up TC hack. Useful when evalCli
@@ -2606,10 +2644,14 @@ from stable_baselines3.common.running_mean_std import RunningMeanStd
 from copy import deepcopy
 from typing import Dict
 class VecNormalize(VecNormalize_):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, norm_at=[],*args, **kwargs):
         super(VecNormalize, self).__init__(*args, **kwargs)
+        self.norm_at = norm_at
         self.training = True
+        
     def _obfilt(self, obs, update=True):
+        # not really used.. 
+        print('_ob_filt called', flush=True)
         if self.obs_rms:
             if self.training and update:
                 self.obs_rms.update(obs)
@@ -2633,7 +2675,12 @@ class VecNormalize(VecNormalize_):
                 for key in self.norm_obs_keys:
                     obs_[key] = self._normalize_obs(obs[key], self.obs_rms[key]).astype(np.float32)
             else:
-                obs_ = self._normalize_obs(obs, self.obs_rms).astype(np.float32)
+                if len(self.norm_at):
+                    # Normalize only the specified indices
+                    for idx in self.norm_at:
+                        obs_[idx] = self._normalize_obs(obs[idx], self.obs_rms).astype(np.float32)
+                else:
+                    obs_ = self._normalize_obs(obs, self.obs_rms).astype(np.float32)
         return obs_
         
     def reset_obs_norm(self):

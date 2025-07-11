@@ -262,6 +262,13 @@ def main(args=None):
         print(f"No model file found. Starting from scratch. {args.model_fpath}")
         actor_critic = None
         optimizer_state_dict = None
+    
+    if 'haltere' in args.r_shaping:
+        args.haltere = True
+        args.r_shaping.remove('haltere')
+        print("Setting args.haltere = True")
+    else:
+        args.haltere = False
         
     # creates the envs and deploys the first 'num_processes' envs 
     envs = make_vec_envs(
