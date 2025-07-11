@@ -1739,7 +1739,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             return self.soft_reset()
         self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
         if self.haltere:
-            print(f"[DEBUG RESET] Before reset - air_acc: {getattr(self, 'air_acc', 'unset'):.4f}, ang_acc: {getattr(self, 'ang_acc', 'unset'):.4f}")
             self.air_acc = 0.0 # reset acceleration
             self.ang_acc = 0.0 # reset angular acceleration
             self.move_last = 0
@@ -2701,8 +2700,7 @@ class VecNormalize(VecNormalize_):
             else:
                 if len(self.norm_at):
                     # Normalize only the specified indices
-                    for idx in self.norm_at:
-                        obs_[idx] = self._normalize_obs(obs[idx], self.obs_rms).astype(np.float32)
+                    obs_[:,self.norm_at] = self._normalize_obs(obs[:,self.norm_at], self.obs_rms).astype(np.float32)[:, self.norm_at]
                 else:
                     obs_ = self._normalize_obs(obs, self.obs_rms).astype(np.float32)
         return obs_
