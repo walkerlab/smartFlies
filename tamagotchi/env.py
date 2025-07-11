@@ -2603,6 +2603,8 @@ class VecPyTorch(VecEnvWrapper):
             self.venv.reset_ret_norm()
 
 from stable_baselines3.common.running_mean_std import RunningMeanStd
+from copy import deepcopy
+from typing import Dict
 class VecNormalize(VecNormalize_):
     def __init__(self, *args, **kwargs):
         super(VecNormalize, self).__init__(*args, **kwargs)
@@ -2617,6 +2619,22 @@ class VecNormalize(VecNormalize_):
             return obs
         else:
             return obs
+        
+    def normalize_obs(self, obs: Union[np.ndarray, Dict[str, np.ndarray]]) -> Union[np.ndarray, Dict[str, np.ndarray]]:
+        """
+        Normalize observations using this VecNormalize's observations statistics.
+        Calling this method does not update statistics.
+        """
+        # Avoid modifying by reference the original object
+        obs_ = deepcopy(obs)
+        if self.norm_obs:
+            if isinstance(obs, dict) and isinstance(self.obs_rms, dict):
+                # Only normalize the specified keys
+                for key in self.norm_obs_keys:
+                    obs_[key] = self._normalize_obs(obs[key], self.obs_rms[key]).astype(np.float32)
+            else:
+                obs_ = self._normalize_obs(obs, self.obs_rms).astype(np.float32)
+        return obs_
         
     def reset_obs_norm(self):
         """
