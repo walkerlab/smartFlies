@@ -302,6 +302,7 @@ class TrajectoryStorage:
 
     def reset_update(self, expected_datasets=None):
         """Reset counters and storage for new update"""
+        
         if expected_datasets is not None:
             self.set_expected_datasets(expected_datasets)
         else:
@@ -350,12 +351,14 @@ class TrajectoryStorage:
                         'trajectory': self.ongoing_trajectories[i].copy(),
                         'episode_info': info.copy()
                     })
+                    if len(self.ongoing_trajectories[i]) != 299:
+                        print('here')
                     self.dataset_counts[dataset][outcome_type] += 1
                     # print(f"[DEBUG] Env {i}: Stored trajectory for {dataset} ({outcome_type}) "
                         # f"[{self.dataset_counts[dataset][outcome_type]}/{self.trajectories_per_outcome}]")
                 else:
                     # print(f"[DEBUG] Env {i}: Skipped storing trajectory for {dataset} ({outcome_type}) — quota full.")
-                    self.ongoing_trajectories[i] = None
+                    self.ongoing_trajectories[i] = []
                     continue  # Don’t start new tracking for over-quota outcome
 
                 # Check if collection is full after this update
@@ -753,11 +756,14 @@ def training_loop(agent, envs, args, device, actor_critic,
             bad_masks = torch.FloatTensor(
                 [[0.0] if 'bad_transition' in info.keys() else [1.0]
                 for info in infos])
+            if step ==args.num_steps -1:
+                obs = envs.reset()
             rollouts.insert(obs, recurrent_hidden_states, action,
                             action_log_prob, value, reward, masks, bad_masks) # ~0.0006s
         ##############################################################################################################
         # UPDATE AGENT 
         ##############################################################################################################
+        obs, reward, done, infos = envs.step(action) # reset the environment after collecting the trajectories
         with torch.no_grad():
             next_value = actor_critic.get_value(
                 rollouts.obs[-1], rollouts.recurrent_hidden_states[-1],
