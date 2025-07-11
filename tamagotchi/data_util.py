@@ -96,6 +96,10 @@ def rotate_wind_optimized(data_wind, rotation_angle_degrees, mirror):
     pd.DataFrame: Rotated wind dataframe
     """
     
+    if rotation_angle_degrees is None:
+        # No rotation needed
+        return data_wind
+    
     # Copy dataframe to avoid modifying original
     wind_rotated = data_wind.copy()
     
@@ -141,7 +145,7 @@ def rotate_wind_optimized(data_wind, rotation_angle_degrees, mirror):
 def rotate_puffs_optimized(data_puffs, rotation_angle_degrees, mirror):
     """
     Rotate puff locations by specified angle around origin.
-    Optimized for angles: [0, 90, 180, -90] degrees.
+    Optimized for angles: [0, 90, 180, -90] degrees, or None.
     
     Parameters:
     -----------
@@ -157,8 +161,10 @@ def rotate_puffs_optimized(data_puffs, rotation_angle_degrees, mirror):
     """
     
     # Copy dataframe to avoid modifying original
+    if rotation_angle_degrees is None:
+        # No rotation needed
+        return data_puffs
     puffs_rotated = data_puffs.copy()
-    
     if rotation_angle_degrees == 0:
         # No rotation needed
         if mirror:
