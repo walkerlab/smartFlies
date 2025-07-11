@@ -198,7 +198,10 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
                 schedule_dict[lesson_name][lesson_time_idx] = new_diff_min
     
     if 'rotate_by' in args.r_shaping:
-        total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0] # over this period of time, grow diff_max
+        if len(wind_lesson_at) > 1:
+            total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0] # over this period of time, grow diff_max
+        else:
+            total_lesson_time = total_number_periods
         num_lessons = 4
         lesson_time = round(total_lesson_time / num_lessons)
         for i, dataset in enumerate(available_datasets):
