@@ -270,6 +270,11 @@ def main(args=None):
     else:
         args.haltere = False
         
+    if 'norm_odor_only' in args.r_shaping:
+        args.norm_odor_only = True
+        args.r_shaping.remove('norm_odor_only')
+        print("Setting args.norm_odor_only = True")
+        
     # creates the envs and deploys the first 'num_processes' envs 
     envs = make_vec_envs(
         args.env_name,
