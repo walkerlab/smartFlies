@@ -1919,7 +1919,22 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                 oob_penalty *= 2
                             
             reward -= oob_penalty
+        
+        if is_outoftime and 'oot_plus' in self.r_shaping:
+            # not letting oot off easy!
+            oob_penalty = 5*np.linalg.norm(self.agent_location) + self.stray_distance
             
+            if self.rotate_by == 0 and self.agent_location[0] < 0:
+                oob_penalty *= 2
+            elif self.rotate_by == 90 and self.agent_location[1] < 0:
+                oob_penalty *= 2
+            elif self.rotate_by == -90 and self.agent_location[1] > 0:
+                oob_penalty *= 2
+            elif self.rotate_by == 180 and self.agent_location[0] > 0:
+                oob_penalty *= 2
+                            
+            reward -= oob_penalty 
+
         # Radial distance decrease at each STEP of episode
         r_radial_step = 0
         if 'step' in self.r_shaping:
