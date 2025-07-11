@@ -166,7 +166,10 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
     # gradually increase diff_max over 4 lessons
     if 'linear' in args.loc_algo:
         # for each dataset find when their lessons are introduced and when the next one is introduced
-        total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0] # over this period of time, grow diff_max
+        if len(wind_lesson_at) > 1:
+            total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0] # over this period of time, grow diff_max
+        else:
+            total_lesson_time = total_number_periods
         num_lessons = 4
         lesson_time = round(total_lesson_time / num_lessons)
         diff_max_step = (np.array(args.diff_max) - np.array(args.diff_min)) / num_lessons # the step size for the diff_max
@@ -329,7 +332,7 @@ class TrajectoryStorage:
     def check_episode_done(self, infos, done, tracked_ds=''):
         """Check for completed episodes and store if needed. tracked_ds - stop tracking if this dataset is full."""
         if self.is_full:
-            print("[DEBUG] Storage already full. Skipping episode checks.")
+            # print("[DEBUG] Storage already full. Skipping episode checks.")
             return
 
         for i, (d, info) in enumerate(zip(done, infos)):
@@ -351,8 +354,8 @@ class TrajectoryStorage:
                         'trajectory': self.ongoing_trajectories[i].copy(),
                         'episode_info': info.copy()
                     })
-                    if len(self.ongoing_trajectories[i]) != 299:
-                        print('here')
+                    # if len(self.ongoing_trajectories[i]) != 299:
+                        # print('here')
                     self.dataset_counts[dataset][outcome_type] += 1
                     # print(f"[DEBUG] Env {i}: Stored trajectory for {dataset} ({outcome_type}) "
                         # f"[{self.dataset_counts[dataset][outcome_type]}/{self.trajectories_per_outcome}]")
