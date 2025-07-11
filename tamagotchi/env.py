@@ -673,8 +673,6 @@ class PlumeEnvironment(gym.Env):
         'reward': reward,
         'r_radial_step': r_radial_step,
         # 'reward_decay': self.reward_decay,
-        # 'r_radial_ep': radial_distance_reward,
-        # 'r_metabolic': r_metabolic,
         'movex': self.movex,
         'done': done_reason if done else None,
         # 'outcomes': self.outcomes,
@@ -1393,7 +1391,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.obs_noise = np.deg2rad(self.obs_noise)
 
         self.rewards = {
-            'tick': -10/self.episode_steps_max,
+            'tick': -50/self.episode_steps_max, # prev. 5*tick penalty per step; so 5*-10 == 50; 50/299 = 0.17
             'homed': 101.0,
             }
 
@@ -1850,7 +1848,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         ### ----------------- Reward function ----------------- ### 
         reward = self.rewards['homed'] if is_home else self.rewards['tick']
         if observation[2] <= config.env['odor_threshold'] : # if off plume, more tick penalty
-            reward += 5*self.rewards['tick']
+            reward += self.rewards['tick']
         # Reward shaping         
         if is_outofbounds and 'oob' in self.r_shaping:
             # Going OOB should be worse than radial reward shaping
