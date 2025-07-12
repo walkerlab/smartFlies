@@ -201,6 +201,7 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
         if len(wind_lesson_at) > 1:
             total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0] # over this period of time, grow diff_max
         else:
+            ds_start = 0
             total_lesson_time = total_number_periods
         num_lessons = 3
         lesson_time = round(total_lesson_time / num_lessons)
@@ -208,6 +209,7 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
             lesson_name = f'{dataset}_rotate_by'
             if lesson_name not in schedule_dict:
                 schedule_dict[lesson_name] = {}
+                # TODO look at ds_start = wind_lesson_at[i]! whnne there's more than one wind cond. lesson, this will not work!
             for j in range(3):
                 lesson_time_idx = ds_start + j * lesson_time
                 if j == 0:
