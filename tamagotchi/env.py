@@ -1399,7 +1399,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             'tick': -50/self.episode_steps_max, # prev. 5*tick penalty per step; so 5*-10 == 50; 50/299 = 0.17
             'homed': 101.0,
             }
-
+        self.agent_location_norm_min = 100 # for reward shaping - step_plus (only positive rewards if now is closer than ever!)
         self.vr_wind = False # for virtual reality wind - list: [wind_x, wind_y]; when set, will set the wind to this value at one step. Needs to be set at every step when using.
     
     def set_dataset(self, dataset):
@@ -1743,6 +1743,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.ang_acc = 0.0 # reset angular acceleration
             self.move_last = 0
             self.turn_last = 0
+            self.move_now = 0
+            self.turn_now = 0
             print(f"[DEBUG RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_last: {self.move_last}, turn_last: {self.turn_last}")
 
         observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
@@ -1796,6 +1798,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.ang_acc = 0.0 # reset angular acceleration
             self.move_last = 0
             self.turn_last = 0
+            self.move_now = 0
+            self.turn_now = 0
             print(f"[DEBUG SOFT_RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_last: {self.move_last}, turn_last: {self.turn_last}")
             
         return observation
@@ -1848,32 +1852,28 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         # Turn/Update orientation and move to new location 
         old_angle_radians = np.angle(self.agent_angle[0] + 1j*self.agent_angle[1], deg=False)
         new_angle_radians = old_angle_radians + self.turn_capacity*self.turnx*(turn_action - 0.5)*self.dt # in radians; (Turn~[0, 1], with 0.5 = no turn, <0.5 turn cw, >0.5 turn ccw)
-
+        self.turn_dt = new_angle_radians - old_angle_radians
+        self.turn_dt = ((self.turn_dt + np.pi) % (2*np.pi)) - np.pi # normalize to [-pi, pi]
         if self.haltere:
             self.move_now = move_action
             self.turn_now = turn_action
-            self.move_dt = self.move_last - self.move_now 
-            self.turn_dt = new_angle_radians - old_angle_radians
-            print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: move_last: {self.move_last:.4f}, move_now: {self.move_now:.4f}, move_dt: {self.move_dt:.4f}")
-            print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: old_angle: {old_angle_radians:.4f}, new_angle: {new_angle_radians:.4f}, turn_dt: {self.turn_dt:.4f}")
-            print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: move_capacity: {self.move_capacity:.4f}, movex: {self.movex:.4f}, dt: {self.dt:.4f}")
-            print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: turn_capacity: {self.turn_capacity:.4f}, turnx: {self.turnx:.4f}")
+            self.move_dt = self.move_now - self.move_last
+            self.turn_dt = new_angle_radians - old_angle_radians 
+            # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: move_last: {self.move_last:.4f}, move_now: {self.move_now:.4f}, move_dt: {self.move_dt:.4f}\n")
+            # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: old_angle: {old_angle_radians:.4f}, new_angle: {new_angle_radians:.4f}, turn_dt: {self.turn_dt:.4f}\n")
             
-            # Calculate accelerations with detailed intermediate values
             air_vel_change = self.move_dt * self.move_capacity * self.movex
-            angular_vel_change = self.turn_dt * self.turn_capacity * self.turnx
+            angular_vel_change = self.turn_dt
             self.air_acc = air_vel_change / self.dt # Air Speed Acceleration in m/s^2
             self.ang_acc = angular_vel_change / self.dt # Angular acceleration in rad/s^2
             
-            print(f"[DEBUG ACCEL INTERMEDIATE] Step {self.episode_step}: air_vel_change: {air_vel_change:.4f} m/s, angular_vel_change: {angular_vel_change:.4f} rad/s")
-            print(f"[DEBUG ACCEL RESULT] Step {self.episode_step}: air_acc: {self.air_acc:.4f} m/s^2, ang_acc: {self.ang_acc:.4f} rad/s^2")
-            print(f"[DEBUG ACCEL VALIDATION] Step {self.episode_step}: |air_acc|: {abs(self.air_acc):.4f}, |ang_acc|: {abs(self.ang_acc):.4f}")
+            # print(f"[DEBUG ACCEL RESULT] Step {self.episode_step}: air_acc: {self.air_acc:.4f} m/s^2, ang_acc: {self.ang_acc:.4f} rad/s^2\n")
             
             if self.verbose > 1:
-                print(f"haltere acc: {self.air_acc:.2f}, ang_acc: {self.ang_acc:.2f}, move_dt: {self.move_dt:.2f}, turn_dt: {self.turn_dt:.2f}")
+                print(f"haltere acc: {self.air_acc:.2f}, ang_acc: {self.ang_acc:.2f}, move_dt: {self.move_dt:.2f}, turn_dt: {self.turn_dt:.2f}\n")
 
         self.agent_angle = [ np.cos(new_angle_radians), np.sin(new_angle_radians) ]    
-        assert np.linalg.norm(self.agent_angle) < 1.1
+
         # New location = old location + agent movement + wind advection
         agent_move_x = self.agent_angle[0]*self.move_capacity*self.movex*move_action*self.dt
         agent_move_y = self.agent_angle[1]*self.move_capacity*self.movex*move_action*self.dt
@@ -1903,6 +1903,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         reward = self.rewards['homed'] if is_home else self.rewards['tick']
         if observation[2] <= config.env['odor_threshold'] : # if off plume, more tick penalty
             reward += self.rewards['tick']
+            if "tick_plus" in self.r_shaping:
+                reward += self.rewards['tick'] * 10
         # Reward shaping         
         if is_outofbounds and 'oob' in self.r_shaping:
             # Going OOB should be worse than radial reward shaping
@@ -1938,7 +1940,15 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         # Radial distance decrease at each STEP of episode
         r_radial_step = 0
         if 'step' in self.r_shaping:
-            r_radial_step = 5*( np.linalg.norm(self.agent_location_last) - np.linalg.norm(self.agent_location) )
+            radial_dist = np.linalg.norm(self.agent_location)
+            r_radial_step = 5*( np.linalg.norm(self.agent_location_last) - radial_dist)
+            if 'step_plus' in self.r_shaping:
+                # massive scale up of reward for moving closer to the source (when on plume and closer than last time)
+                if r_radial_step > 0 and radial_dist < self.agent_location_norm_min and  observation[2] <= config.env['odor_threshold']: 
+                    # if agent moved closer to the source and on plume, and closer than the last time
+                    r_radial_step *= 10
+                    self.agent_location_norm_min = radial_dist
+            # no step reward if off plume - only hurts for moving away! 
             r_radial_step = min(0, r_radial_step) if observation[2] <= config.env['odor_threshold'] else r_radial_step
             # Multiplier for overshooting source
             if 'overshoot' in self.r_shaping and self.agent_location[0] < 0:
