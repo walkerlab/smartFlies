@@ -1852,13 +1852,12 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         # Turn/Update orientation and move to new location 
         old_angle_radians = np.angle(self.agent_angle[0] + 1j*self.agent_angle[1], deg=False)
         new_angle_radians = old_angle_radians + self.turn_capacity*self.turnx*(turn_action - 0.5)*self.dt # in radians; (Turn~[0, 1], with 0.5 = no turn, <0.5 turn cw, >0.5 turn ccw)
-        self.turn_dt = new_angle_radians - old_angle_radians
-        self.turn_dt = ((self.turn_dt + np.pi) % (2*np.pi)) - np.pi # normalize to [-pi, pi]
         if self.haltere:
             self.move_now = move_action
             self.turn_now = turn_action
             self.move_dt = self.move_now - self.move_last
-            self.turn_dt = new_angle_radians - old_angle_radians 
+            self.turn_dt = new_angle_radians - old_angle_radians
+            self.turn_dt = ((self.turn_dt + np.pi) % (2*np.pi)) - np.pi # normalize to [-pi, pi]
             # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: move_last: {self.move_last:.4f}, move_now: {self.move_now:.4f}, move_dt: {self.move_dt:.4f}\n")
             # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: old_angle: {old_angle_radians:.4f}, new_angle: {new_angle_radians:.4f}, turn_dt: {self.turn_dt:.4f}\n")
             
