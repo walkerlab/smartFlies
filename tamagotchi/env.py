@@ -1380,7 +1380,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.stray_distance_init = 0 # stray distance at reset
         self.stray_steps = 0 # how many steps of OOB? env fail at 10!
         self.haltere = haltere # PEv3 - haltere feedback
-        print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}")
+        print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}, self.mirror: {self.mirror}, haltere: {self.haltere}")
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                         shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
@@ -1741,11 +1741,11 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.haltere:
             self.air_acc = 0.0 # reset acceleration
             self.ang_acc = 0.0 # reset angular acceleration
-            self.move_last = 0
-            self.turn_last = 0
-            self.move_now = 0
-            self.turn_now = 0
-            print(f"[DEBUG RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_last: {self.move_last}, turn_last: {self.turn_last}")
+            self.move_action_last = 0
+            self.turn_action_last = 0
+            self.move_action_now = 0
+            self.turn_action_now = 0
+            # print(f"[DEBUG RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_action_last: {self.move_action_last}, turn_action_last: {self.turn_action_last}")
 
         observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
         if len(observation) == 7 or self.haltere:
@@ -1793,15 +1793,15 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if len(observation) == 7 or self.haltere:
             observation[5:] = 0 # course direction to 0
         if self.haltere:
-            print(f"[DEBUG SOFT_RESET] Before reset - air_acc: {getattr(self, 'air_acc', 'unset'):.4f}, ang_acc: {getattr(self, 'ang_acc', 'unset'):.4f}")
+            # print(f"[DEBUG SOFT_RESET] Before reset - air_acc: {getattr(self, 'air_acc', 'unset'):.4f}, ang_acc: {getattr(self, 'ang_acc', 'unset'):.4f}")
             self.air_acc = 0.0 # reset acceleration
             self.ang_acc = 0.0 # reset angular acceleration
-            self.move_last = 0
-            self.turn_last = 0
-            self.move_now = 0
-            self.turn_now = 0
-            print(f"[DEBUG SOFT_RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_last: {self.move_last}, turn_last: {self.turn_last}")
-            
+            self.move_action_last = 0
+            self.turn_action_last = 0
+            self.move_action_now = 0
+            self.turn_action_now = 0
+            # print(f"[DEBUG SOFT_RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_action_last: {self.move_action_last}, turn_action_last: {self.turn_action_last}")
+
         return observation
     
     def step(self, action):
@@ -1828,8 +1828,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.stray_distance_init = self.stray_distance_last # stray distance at reset
         
         if self.haltere:
-            self.move_last = self.move_now
-            self.turn_last = self.turn_now
+            self.move_action_last = self.move_action_now
+            self.turn_action_last = self.turn_action_now
 
         # Handle action
         if self.verbose > 1:
@@ -1853,12 +1853,12 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         old_angle_radians = np.angle(self.agent_angle[0] + 1j*self.agent_angle[1], deg=False)
         new_angle_radians = old_angle_radians + self.turn_capacity*self.turnx*(turn_action - 0.5)*self.dt # in radians; (Turn~[0, 1], with 0.5 = no turn, <0.5 turn cw, >0.5 turn ccw)
         if self.haltere:
-            self.move_now = move_action
-            self.turn_now = turn_action
-            self.move_dt = self.move_now - self.move_last
+            self.move_action_now = move_action
+            self.turn_action_now = turn_action
+            self.move_dt = self.move_action_now - self.move_action_last
             self.turn_dt = new_angle_radians - old_angle_radians
             self.turn_dt = ((self.turn_dt + np.pi) % (2*np.pi)) - np.pi # normalize to [-pi, pi]
-            # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: move_last: {self.move_last:.4f}, move_now: {self.move_now:.4f}, move_dt: {self.move_dt:.4f}\n")
+            # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: move_action_last: {self.move_action_last:.4f}, move_action_now: {self.move_action_now:.4f}, move_dt: {self.move_dt:.4f}\n")
             # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: old_angle: {old_angle_radians:.4f}, new_angle: {new_angle_radians:.4f}, turn_dt: {self.turn_dt:.4f}\n")
             
             air_vel_change = self.move_dt * self.move_capacity * self.movex
@@ -1885,7 +1885,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         # Air and ground velocity
         self.air_velocity = np.array([agent_move_x, agent_move_y])/self.dt # Rel_wind = Amb_wind - Air_vel
         self.ground_velocity = (np.array(self.agent_location) - self.agent_location_last)/self.dt
-        
+        # print(f"[DEBUG] PEv3 step: air_velocity: {self.air_velocity}, ambient_wind: {self.ambient_wind}, agent_location: {self.agent_location}")
+        # print(f"[DEBUG] PEv3 step: ground_velocity: {self.ground_velocity}")
+
         ### ----------------- End conditions / Is the trial over ----------------- ### 
         is_home = np.linalg.norm(self.agent_location) <= self.homed_radius 
         is_outoftime = self.episode_step >= self.episode_steps_max - 1           
@@ -2724,7 +2726,12 @@ class VecNormalize(VecNormalize_):
             else:
                 if len(self.norm_at):
                     # Normalize only the specified indices
-                    obs_[:,self.norm_at] = self._normalize_obs(obs[:,self.norm_at], self.obs_rms).astype(np.float32)[:, self.norm_at]
+                    if len(obs.shape) == 1:
+                        obs_[self.norm_at] = self._normalize_obs(obs[self.norm_at], self.obs_rms).astype(np.float32)[self.norm_at]
+                    elif len(obs.shape) == 2:
+                        obs_[:,self.norm_at] = self._normalize_obs(obs[:,self.norm_at], self.obs_rms).astype(np.float32)[:, self.norm_at]
+                    else:
+                        raise NotImplementedError("Normalization for obs with shape > 2 is not implemented; first dim is batch if exists and second is obs")
                 else:
                     obs_ = self._normalize_obs(obs, self.obs_rms).astype(np.float32)
         return obs_
