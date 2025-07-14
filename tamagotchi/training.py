@@ -377,10 +377,10 @@ class TrajectoryStorage:
                 self.is_storage_full(tracked_ds)
 
                 if self.is_full:
-                    print(f"[DEBUG] Env {i}: Storage is now full. Stopping tracking.")
+                    # print(f"[DEBUG] Env {i}: Storage is now full. Stopping tracking.")
                     self.ongoing_trajectories[i] = None
                 else:
-                    print(f"[DEBUG] Env {i}: Resetting trajectory buffer for next episode.")
+                    # print(f"[DEBUG] Env {i}: Resetting trajectory buffer for next episode.")
                     self.ongoing_trajectories[i] = []
             elif d and self.ongoing_trajectories[i] is None:
                 print(f"[DEBUG] Env {i}: Episode done but storage full - skipping {info['done']}.")
