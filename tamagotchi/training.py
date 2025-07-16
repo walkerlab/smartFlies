@@ -839,6 +839,7 @@ def training_loop(agent, envs, args, device, actor_critic,
         mlflow.log_artifact(args.model_fpath, artifact_path="weights")
         mlflow.log_artifact(args.training_log, artifact_path="training_logs")
         if args.if_vec_norm:
+            vecNormalize_state_fname = args.model_fpath.replace(".pt", "_vecNormalize.pkl")
             mlflow.log_artifact(vecNormalize_state_fname, artifact_path="weights")
             # save the final training log
         
