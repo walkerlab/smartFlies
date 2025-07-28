@@ -1398,11 +1398,10 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.observation_space = spaces.Box(low=-1, high=+1,
                                     shape=(3,), dtype=np.float32) # [(apparent/ambient) wind x, y, odor]
         self.saccade = saccade # PEv3 - saccade action
-        self.saccade_in_progress = False     # bool: are we mid-saccade?
-        self.saccade_frames_remaining = 0    # int: how many frames left (2 → 1 → 0)
-        self.saccade_total_delta = 0.0       # float: total heading change to execute
-
-        
+        self.saccade_in_progress = False    # bool: are we mid-saccade?
+        self.saccade_frames_remaining = 0   # int: how many frames left (2 → 1 → 0)
+        self.saccade_ang_vel = 0.0          # float: total angle velocity change to execute
+            
         # convert obs_noise to radians
         if self.obs_noise:
             self.obs_noise = np.deg2rad(self.obs_noise)
@@ -1759,9 +1758,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.turn_action_now = 0
             # print(f"[DEBUG RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_action_last: {self.move_action_last}, turn_action_last: {self.turn_action_last}")
         if self.saccade:
-            self.saccade_in_progress = False     # bool: are we mid-saccade?
-            self.saccade_frames_remaining = 0    # int: how many frames left (2 → 1 → 0)
-            self.saccade_total_delta = 0.0       # float: total heading change to execute
+           self.saccade_in_progress = False
+           self.saccade_frames_remaining = 0
+           self.saccade_ang_vel = 0.0
 
         observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
         if len(observation) == 7 or self.haltere:
@@ -1818,9 +1817,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.turn_action_now = 0
             # print(f"[DEBUG SOFT_RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_action_last: {self.move_action_last}, turn_action_last: {self.turn_action_last}")
         if self.saccade:
-            self.saccade_in_progress = False     # bool: are we mid-saccade?
-            self.saccade_frames_remaining = 0    # int: how many frames left (2 → 1 → 0)
-            self.saccade_total_delta = 0.0       # float: total heading change to execute
+           self.saccade_in_progress = False
+           self.saccade_frames_remaining = 0
+           self.saccade_ang_vel = 0.0
             
         return observation
     
@@ -1856,7 +1855,21 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print("step action:", action, action.shape)
         if self.squash_action: # always true in training and eval. Bkw compt for Sat's older logs in visualization scripts... Not touching this yet.
             action = (np.tanh(action) + 1)/2
-        action = np.clip(action, 0.0, 1.0)
+        action = np.clip(action, 0.0, 1.0)      
+        
+        # Ignore incoming action if saccade is in progress
+        if self.saccade and self.saccade_in_progress:
+
+        # Apply the next portion of your saccade: e.g. half of saccade_total_delta on frame 1, the remainder on frame 2.
+
+        # Decrement saccade_frames_remaining.
+            self.saccade_frames_remaining -= 1
+            # If saccade_frames_remaining is zero, set saccade_in_progress to False.
+            if self.saccade_frames_remaining == 0:
+                self.saccade_in_progress = False
+
+        # Skip your normal “detect new saccade vs continuous control” logic, and then continue on to observations/rewards.
+        
         move_action = action[0] # Move [0, 1], with 0.0 = no movement
         turn_action = action[1] # # Turn [0, 1], with 0.5 = no turn... maybe change to [-1, 1]
         
