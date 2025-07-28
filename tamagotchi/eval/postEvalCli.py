@@ -1,3 +1,4 @@
+# exmaple usage: python3 -u /src/tamagotchi/eval/postEvalCli.py --model_dir /src/data/wind_sensing/apparent_wind_visual_feedback/sw_dist_logstep_wind_0.01_train_std_pois_wind/eval/report_arch         --viz_episodes 40 --use_datasets 'constantx5b5_0.5' --out_reldir traj_videos         --viz_random_episodes True
 from __future__ import division
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
