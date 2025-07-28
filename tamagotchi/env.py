@@ -1397,11 +1397,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         else:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                     shape=(3,), dtype=np.float32) # [(apparent/ambient) wind x, y, odor]
+        
         self.saccade = saccade # PEv3 - saccade action
-        self.saccade_in_progress = False    # bool: are we mid-saccade?
-        self.saccade_frames_remaining = 0   # int: how many frames left (2 → 1 → 0)
-        self.saccade_ang_vel = 0.0          # float: total angle velocity change to execute
-            
+
         # convert obs_noise to radians
         if self.obs_noise:
             self.obs_noise = np.deg2rad(self.obs_noise)
@@ -1757,10 +1755,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.move_action_now = 0
             self.turn_action_now = 0
             # print(f"[DEBUG RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_action_last: {self.move_action_last}, turn_action_last: {self.turn_action_last}")
-        if self.saccade:
-           self.saccade_in_progress = False
-           self.saccade_frames_remaining = 0
-           self.saccade_ang_vel = 0.0
 
         observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
         if len(observation) == 7 or self.haltere:
@@ -1816,13 +1810,50 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.move_action_now = 0
             self.turn_action_now = 0
             # print(f"[DEBUG SOFT_RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_action_last: {self.move_action_last}, turn_action_last: {self.turn_action_last}")
-        if self.saccade:
-           self.saccade_in_progress = False
-           self.saccade_frames_remaining = 0
-           self.saccade_ang_vel = 0.0
             
         return observation
     
+    def turn_action_to_turn_amount(self, action, radian=True):
+        """
+        Maps action [0,1] to angular velocity 
+        0.5 = no turn, 80% range for smooth turning, 20% for saccades
+        
+        Args:
+            action: float [0,1], where 0.5 = no turn
+            radian: bool, if True returns rad/s, if False returns deg/s
+            
+        Returns:
+            Angular velocity in rad/s (if radian=True) or deg/s (if radian=False)
+            
+        Limits from Eatai Roth et al (2012):
+        - Smooth turning: ±200 deg/s (±3.491 rad/s)
+        - Saccadic turning: ±1800 deg/s (±31.416 rad/s)
+        """
+        saccade = True
+        if self.saccade:
+            # Calculate angular velocity in radians/second directly
+            if action <= 0.1:  # Saccadic clockwise
+                angular_vel_rad = -31.416 + (action / 0.1) * 27.925  # [-31.416, -3.491] rad/s
+            elif action <= 0.5:  # Smooth clockwise  
+                angular_vel_rad = -3.491 + ((action - 0.1) / 0.4) * 3.491  # [-3.491, 0] rad/s
+                saccade = False  # No saccade, just smooth turn
+            elif action <= 0.9:  # Smooth counter-clockwise
+                angular_vel_rad = ((action - 0.5) / 0.4) * 3.491  # [0, 3.491] rad/s
+                saccade = False  # No saccade, just smooth turn
+            else:  # Saccadic counter-clockwise
+                angular_vel_rad = 3.491 + ((action - 0.9) / 0.1) * 27.925  # [3.491, 31.416] rad/s
+        else:
+            # Simple linear mapping, work directly in radians
+            angular_vel_rad = self.turn_capacity * (action - 0.5)
+            saccade = False  # No saccade, just smooth turn
+        
+        if radian:
+            return angular_vel_rad * self.turnx * self.dt, saccade
+        else:
+            # Convert to degrees only if requested
+            angular_vel_deg = np.rad2deg(angular_vel_rad)
+            return angular_vel_deg * self.turnx * self.dt, saccade
+
     def step(self, action):
         """
         return observation, reward, done, info
@@ -1856,41 +1887,36 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.squash_action: # always true in training and eval. Bkw compt for Sat's older logs in visualization scripts... Not touching this yet.
             action = (np.tanh(action) + 1)/2
         action = np.clip(action, 0.0, 1.0)      
-        
-        # Ignore incoming action if saccade is in progress
-        if self.saccade and self.saccade_in_progress:
 
-        # Apply the next portion of your saccade: e.g. half of saccade_total_delta on frame 1, the remainder on frame 2.
-
-        # Decrement saccade_frames_remaining.
-            self.saccade_frames_remaining -= 1
-            # If saccade_frames_remaining is zero, set saccade_in_progress to False.
-            if self.saccade_frames_remaining == 0:
-                self.saccade_in_progress = False
-
-        # Skip your normal “detect new saccade vs continuous control” logic, and then continue on to observations/rewards.
-        
         move_action = action[0] # Move [0, 1], with 0.0 = no movement
         turn_action = action[1] # # Turn [0, 1], with 0.5 = no turn... maybe change to [-1, 1]
-        
-        # Action noise (multiplicative)
-        move_action *= 1.0 + np.random.uniform(-self.act_noise, +self.act_noise) 
-        turn_action *= 1.0 + np.random.uniform(-self.act_noise, +self.act_noise) 
-        
+
         # Flipping arena? 
         if self.flipping and self.flipx < 0:
             turn_action = 1 - turn_action
+            
 
         # Consequences of Actions
         # Turn/Update orientation and move to new location 
         old_angle_radians = np.angle(self.agent_angle[0] + 1j*self.agent_angle[1], deg=False)
-        new_angle_radians = old_angle_radians + self.turn_capacity*self.turnx*(turn_action - 0.5)*self.dt # in radians; (Turn~[0, 1], with 0.5 = no turn, <0.5 turn cw, >0.5 turn ccw)
+        turn_amount, if_saccade = self.turn_action_to_turn_amount(turn_action, radian=True) # in radians
+        if if_saccade:
+            move_action *= 0.5 # slow movement during saccade
+        # print(f"[DEBUG] PEv3 turn_amount: {np.rad2deg(turn_amount):.4f}, turn_action: {turn_action:.4f}, if_saccade: {if_saccade}, move_action: {move_action:.4f}")
+
+        new_angle_radians = old_angle_radians + turn_amount
+        
         if self.haltere:
             self.move_action_now = move_action
             self.turn_action_now = turn_action
             self.move_dt = self.move_action_now - self.move_action_last
             self.turn_dt = new_angle_radians - old_angle_radians
             self.turn_dt = ((self.turn_dt + np.pi) % (2*np.pi)) - np.pi # normalize to [-pi, pi]
+
+            # self.turn_amount_now = turn_amount
+            # self.saccadic_turn_dt = self.turn_amount_now - self.turn_amount_last # track by amount gives the same value as turn_dt
+            # print(f"[DEBUG ACCEL CALC] saccadic_turn_dt {self.saccadic_turn_dt:.4f} turn_dt: {self.turn_dt:.4f}\n")
+
             # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: move_action_last: {self.move_action_last:.4f}, move_action_now: {self.move_action_now:.4f}, move_dt: {self.move_dt:.4f}\n")
             # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: old_angle: {old_angle_radians:.4f}, new_angle: {new_angle_radians:.4f}, turn_dt: {self.turn_dt:.4f}\n")
             
