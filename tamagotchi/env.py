@@ -1360,7 +1360,13 @@ class PlumeEnvironment_v2(gym.Env):
     pass
 
 class PlumeEnvironment_v3(PlumeEnvironment_v2):
-    def __init__(self, visual_feedback=False, flip_ventral_optic_flow=False, rotate_by=None, soft_reset=False, haltere=False, **kwargs):
+    def __init__(self, visual_feedback=False, 
+                 flip_ventral_optic_flow=False, 
+                 rotate_by=None, 
+                 soft_reset=False, 
+                 haltere=False, 
+                 saccade=False,
+                 **kwargs):
         '''
         soft_reset_button: bool or None; button never turns on if None, otherwise it will be set to True when step() fails.
         '''
@@ -1391,6 +1397,12 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         else:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                     shape=(3,), dtype=np.float32) # [(apparent/ambient) wind x, y, odor]
+        self.saccade = saccade # PEv3 - saccade action
+        self.saccade_in_progress = False     # bool: are we mid-saccade?
+        self.saccade_frames_remaining = 0    # int: how many frames left (2 → 1 → 0)
+        self.saccade_total_delta = 0.0       # float: total heading change to execute
+
+        
         # convert obs_noise to radians
         if self.obs_noise:
             self.obs_noise = np.deg2rad(self.obs_noise)
@@ -1746,6 +1758,10 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.move_action_now = 0
             self.turn_action_now = 0
             # print(f"[DEBUG RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_action_last: {self.move_action_last}, turn_action_last: {self.turn_action_last}")
+        if self.saccade:
+            self.saccade_in_progress = False     # bool: are we mid-saccade?
+            self.saccade_frames_remaining = 0    # int: how many frames left (2 → 1 → 0)
+            self.saccade_total_delta = 0.0       # float: total heading change to execute
 
         observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
         if len(observation) == 7 or self.haltere:
@@ -1801,7 +1817,11 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.move_action_now = 0
             self.turn_action_now = 0
             # print(f"[DEBUG SOFT_RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_action_last: {self.move_action_last}, turn_action_last: {self.turn_action_last}")
-
+        if self.saccade:
+            self.saccade_in_progress = False     # bool: are we mid-saccade?
+            self.saccade_frames_remaining = 0    # int: how many frames left (2 → 1 → 0)
+            self.saccade_total_delta = 0.0       # float: total heading change to execute
+            
         return observation
     
     def step(self, action):
