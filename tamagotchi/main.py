@@ -270,6 +270,13 @@ def main(args=None):
     else:
         args.haltere = False
         
+    if 'saccade' in args.r_shaping:
+        args.saccade = True
+        args.r_shaping.remove('saccade')
+        print("Setting args.saccade = True")
+    else:
+        args.saccade = False
+        
     if 'norm_odor_only' in args.r_shaping:
         args.norm_odor_only = True
         args.r_shaping.remove('norm_odor_only')
