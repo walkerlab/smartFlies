@@ -1594,7 +1594,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             while True:
                 # Sample location in [x, y] order
                 cnter +=1
-                if cnter:
+                if cnter>10:
                     print('counter=', cnter)
                 loc_xy = np.array([
                     X_mean + varx * X_var * np.random.randn(),  # x
@@ -2274,6 +2274,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         rotate_by=args.rotate_by,
                         soft_reset=args.soft_reset,
                         haltere=args.haltere,
+                        saccade=args.saccade,
                         )
             else:
                 # bkw compat before cleaning up TC hack. Useful when evalCli
