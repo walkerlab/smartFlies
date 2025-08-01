@@ -194,6 +194,46 @@ def set_random_seed(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
     ptitle('PPO Seed {}'.format(seed))
+    
+def set_up_staged_training(args):
+    """Set up staged training by modifying the args object.
+    The goal is to check if it's a staged training run and set the appropriate flags and paths.
+    This function checks if the r_shaping contains 'staged' and modifies the args object accordingly. 
+    Args:
+        args (_type_): _description_
+
+    Raises:
+        Exception: _description_
+    """ 
+    if_staged_training = [i for i, item in enumerate(args.r_shaping) if 'staged' in item]
+    if sum(if_staged_training):
+        args.staged_training = True
+        # extract subexperiment name
+        full_str = args.r_shaping[if_staged_training[0]]
+        subexp_name = full_str.split('staged_')[-1]
+        args.staged_subexp_name = subexp_name
+        args.save_dir =  '/'.join([args.save_dir, subexp_name, ""])
+        root_model_fpath = args.model_fpath
+        # handle .pt - insert subexp_name before weights folder of the model_fpath
+        args.model_fpath = args.model_fpath.replace('weights', f'{subexp_name}/weights')
+        # ensure the subexperiment model file exists 
+        if os.path.isfile(args.model_fpath):
+            print("Subexperiment model file exists; This is likely a checkpoint rerun")
+        else:
+            print("Subexperiment model file does not exist; Copying from parent experiment")
+            # copy the model file from parent experiment
+            if os.path.isfile(root_model_fpath):
+                import shutil
+                os.makedirs(os.path.join(args.save_dir, 'weights'), exist_ok=True)
+                shutil.copy(root_model_fpath, args.model_fpath)
+            else:
+                raise Exception(f"Parent model file not found in parent folder. Unexpected for staged training {root_model_fpath} Exiting.")
+        args.training_log = args.training_log.replace('train_logs', f'{subexp_name}/train_logs')
+        args.json_config = args.json_config.replace('/json', f'/{subexp_name}/json')
+        print("Setting args.staged_training = True; resulting save_dir:", args.save_dir)
+    else:
+        args.staged_training = False
+        args.staged_subexp_name = None
 
 def main(args=None):
     if not args:
@@ -231,6 +271,9 @@ def main(args=None):
         print("CUDA is not available. Running on CPU.", flush=True, file=sys.stderr)
         args.cuda = False
 
+    # handle staged training
+    set_up_staged_training(args) 
+     
     if not args.dryrun:
         make_dirs(args)
         # handling checkpoint loading
@@ -359,8 +402,14 @@ def main(args=None):
     
     # Set our tracking server uri for logging
     # Create a new MLflow Experiment
-    experiment_name = os.path.basename((os.path.dirname(args.save_dir))) 
-    run_name = args.outsuffix
+    if args.staged_training:
+        # store under parent dir and name with added suffix
+        experiment_name = os.path.basename(os.path.dirname(os.path.dirname(args.save_dir)))
+        run_name = "_".join([args.outsuffix, args.staged_subexp_name])
+    else:
+        experiment_name = os.path.basename((os.path.dirname(args.save_dir))) 
+        run_name = args.outsuffix
+        
     if args.mlflow:
         mlflow.set_tracking_uri(uri="https://dev0.uwcnc.net/mlflow/")
         mlflow.set_system_metrics_sampling_interval(3600)
