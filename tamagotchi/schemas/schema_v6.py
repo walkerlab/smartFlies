@@ -117,6 +117,8 @@ class TrainingConfig(dj.Manual):
         buffer = ""
         for key in self.heading.secondary_attributes:
             buffer += str(dict_to_insert[key])
+            if key == 'r_shaping':
+                print(f"{key}: {str(dict_to_insert[key])}")
         dict_to_insert['training_config_hash'] = hashlib.md5(buffer.encode()).hexdigest()
         
         # outsuffix of the form: seed_hash 
