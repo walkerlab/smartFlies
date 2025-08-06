@@ -406,6 +406,8 @@ if __name__ == "__main__":
     parser.add_argument('--obs_noise',  type=float, default=0.0)
     parser.add_argument('--apparent_wind', type=bool, default=False)
     parser.add_argument('--visual_feedback', type=bool, default=False)
+    parser.add_argument('--saccade', type=bool, default=False) # need to know from user 
+    parser.add_argument('--haltere', type=bool, default=False) # may be detected from input space
     parser.add_argument('--flip_ventral_optic_flow', type=bool, default=False) # for eval to see the behavioral impact of flipping course direction perception.
     parser.add_argument('--perturb_RNN_by_ortho_set', type=str, default=False, help='a file that stores an orthogonal basis, where the first vector is the wind encoding subspace')
     parser.add_argument('--perturb_RNN_by', type=str, default=False, help='set to "subspace" to perturb hidden states along the wind encoding subspace')
@@ -476,6 +478,12 @@ if __name__ == "__main__":
     # make sure the directory exists
     os.makedirs('/'.join([exp_dir, args.out_dir]), exist_ok=True)
     os.makedirs(args.abs_out_dir, exist_ok=True)
+    
+    # check if args.device is available
+    if args.device.startswith('cuda'):
+        if not torch.cuda.is_available():
+            args.device = 'cpu'
+            print("CUDA is not available, switching to CPU.")
     
     # actor_critic, obs_rms, optimizer_state_dict = torch.load(args.model_fname, map_location=torch.device('cpu'))
     try:
