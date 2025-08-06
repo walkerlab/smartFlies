@@ -561,9 +561,13 @@ def update_eps_info(update_episodes_df, info, episode_counter, update_idx):
     return update_episodes_df
 
 
-def log_agent_learning(j, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, use_mlflow=True):
+def log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, use_mlflow=True):
     if not use_mlflow:
         return
+    mlflow.log_metric("advantages_mean", advantages.mean().item(), step=j)
+    mlflow.log_metric("advantages_std", advantages.std().item(), step=j)
+    mlflow.log_metric("advantages_max", advantages.max().item(), step=j)
+    mlflow.log_metric("advantages_min", advantages.min().item(), step=j)
     mlflow.log_metric("value_loss", value_loss, step=j)
     mlflow.log_metric("action_loss", action_loss, step=j)
     mlflow.log_metric("dist_entropy", dist_entropy, step=j)

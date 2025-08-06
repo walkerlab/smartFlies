@@ -779,7 +779,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                 rollouts.masks[-1]).detach()
         rollouts.compute_returns(next_value, args.use_gae, args.gamma,
                                 args.gae_lambda, args.use_proper_time_limits)
-        value_loss, action_loss, dist_entropy, clip_fraction = agent.update(rollouts)
+        value_loss, action_loss, dist_entropy, clip_fraction, advantages = agent.update(rollouts)
         
         # After update, get stored trajectories
         if j % plot_every_n_updates == 0:
@@ -795,7 +795,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                 except Exception as e:
                     print(f"Error logging artifact {plt_path}: {e}")
                 
-        utils.log_agent_learning(j, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
+        utils.log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
         if j % plot_every_n_updates == 0:
             utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
                 

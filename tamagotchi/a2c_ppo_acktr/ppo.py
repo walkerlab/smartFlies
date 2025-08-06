@@ -101,7 +101,7 @@ class PPO():
         clip_fraction_epoch /= num_updates
 
         if self.track_ppo_fraction:
-            return value_loss_epoch, action_loss_epoch, dist_entropy_epoch, clip_fraction_epoch
+            return value_loss_epoch, action_loss_epoch, dist_entropy_epoch, clip_fraction_epoch, advantages.flatten()
         else:
-            return value_loss_epoch, action_loss_epoch, dist_entropy_epoch
+            return value_loss_epoch, action_loss_epoch, dist_entropy_epoch, advantages.flatten()
 
