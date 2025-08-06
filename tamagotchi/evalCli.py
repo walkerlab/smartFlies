@@ -477,6 +477,12 @@ if __name__ == "__main__":
     os.makedirs('/'.join([exp_dir, args.out_dir]), exist_ok=True)
     os.makedirs(args.abs_out_dir, exist_ok=True)
     
+    # check if args.device is available
+    if args.device.startswith('cuda'):
+        if not torch.cuda.is_available():
+            args.device = 'cpu'
+            print("CUDA is not available, switching to CPU.")
+    
     # actor_critic, obs_rms, optimizer_state_dict = torch.load(args.model_fname, map_location=torch.device('cpu'))
     try:
         actor_critic, obs_rms, optimizer_state_dict = torch.load(args.model_fname, map_location=torch.device(args.device), weights_only=False)
