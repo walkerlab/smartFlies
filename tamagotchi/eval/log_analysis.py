@@ -1062,3 +1062,39 @@ def get_actvity_reordering(ep_activity, do_plot=False):
         plt.colorbar(ms, cax=cax)
 
     return reordering, ep_activityT_reordered
+
+
+# Basic course direction calculation
+def calculate_course_direction(df, group_col=None):
+    """
+    Calculate course direction from position data
+    
+    Parameters:
+    df: DataFrame with 'loc_x', 'loc_y' columns
+    group_col: Column name to group by (e.g., 'ep_idx', 'trajectory_id')
+    """
+    
+    if group_col is not None:
+        # Calculate within each trajectory/episode
+        def calc_direction_group(group):
+            # Calculate differences between consecutive points
+            dx = group['loc_x'].diff()
+            dy = group['loc_y'].diff()
+            
+            # Calculate course direction in radians
+            course_direction = np.arctan2(dy, dx)
+            
+            return course_direction
+        
+        df['course_direction'] = df.groupby(group_col).apply(calc_direction_group).reset_index(level=0, drop=True)
+    
+    else:
+        # Calculate for entire dataframe (assuming single trajectory)
+        dx = df['loc_x'].diff()
+        dy = df['loc_y'].diff()
+        df['course_direction'] = np.arctan2(dy, dx)
+        
+    df['course_direction_x'] = np.cos(df['course_direction'])
+    df['course_direction_y'] = np.sin(df['course_direction'])
+    
+    return df
