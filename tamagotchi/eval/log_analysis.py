@@ -1100,3 +1100,85 @@ def calculate_course_direction(df, group_col=None):
     df['course_direction_y'] = np.sin(df['course_direction'])
     
     return df
+
+
+def classify_experience(group, unique_vals_dict, stratify_by, round_by=2):
+    """
+    Classify experience based on stratification variables
+    Adds a columns experience_group which contains tuples of strings that show how the stratify_by variables change over the trajectory.
+    There's many simple versions of this as methods in vrvr plotting functions. 
+    Here is a version that have more control over how many digits to round by. 
+    This function gets used separately a lot for separating trajectories. Future functions should use this!
+    """
+    experience_parts = []
+    
+    for var in stratify_by:
+        vals = group[var].values
+        unique_vals = unique_vals_dict[var]
+        
+        # Check if the column contains floats
+        is_float_col = pd.api.types.is_float_dtype(group[var])
+        
+        if is_float_col:
+            # Round float values to specified decimal places for comparison
+            vals_rounded = [round(v, round_by) for v in vals]
+            unique_vals_rounded = [round(v, round_by) for v in unique_vals]
+            experience = sorted(set(v for v in unique_vals_rounded if v in vals_rounded))
+        else:
+            experience = sorted(set(v for v in unique_vals if v in vals))
+        
+        if experience:
+            # For single values, just use the value; for multiple, create a transition string
+            if len(experience) == 1:
+                val_str = f"{experience[0]:.{round_by}f}" if is_float_col else str(experience[0])
+                experience_parts.append(f"{var}={val_str}")
+            else:
+                # Find the first and last occurrence to determine transition direction
+                if is_float_col:
+                    first_val = None
+                    last_val = None
+                    
+                    # Find first occurrence of any experience value
+                    for i, v in enumerate(vals_rounded):
+                        if v in experience and first_val is None:
+                            first_val = v
+                            break
+                    
+                    # Find last occurrence of any experience value (different from first)
+                    for i in range(len(vals_rounded) - 1, -1, -1):
+                        if vals_rounded[i] in experience and vals_rounded[i] != first_val:
+                            last_val = vals_rounded[i]
+                            break
+                    
+                    # If no different last value found, use the same value
+                    if last_val is None:
+                        last_val = first_val
+
+                    val_str = f"{first_val:.{round_by}f}→{last_val:.{round_by}f}"
+                else:
+                    first_val = None
+                    last_val = None
+                    
+                    # Find first occurrence of any experience value
+                    for i, v in enumerate(vals):
+                        if v in experience and first_val is None:
+                            first_val = v
+                            break
+                    
+                    # Find last occurrence of any experience value (different from first)
+                    for i in range(len(vals) - 1, -1, -1):
+                        if vals[i] in experience and vals[i] != first_val:
+                            last_val = vals[i]
+                            break
+                    
+                    # If no different last value found, use the same value
+                    if last_val is None:
+                        last_val = first_val
+                        
+                    val_str = f"{first_val}→{last_val}"
+                    
+                experience_parts.append(f"{var}={val_str}")
+        else:
+            experience_parts.append(f"{var}=none")
+    
+    return tuple(experience_parts) if experience_parts else ('no_transition',)
