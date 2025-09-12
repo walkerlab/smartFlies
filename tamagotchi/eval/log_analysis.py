@@ -610,6 +610,11 @@ def get_traj_df_tmp(episode_log,
         traj_df['ego_course_direction_theta'] = egocentric_course_direction_theta
         traj_df['allo_ground_velocity'] = allo_ground_velocity
         traj_df['raw_ego_course_direction'] = [ record[0]['egocentric_course_direction'][0] for record in episode_log['infos']]
+        traj_df['agent_angle_x_obs'] = obs['agent_angle_x']
+        traj_df['agent_angle_y_obs'] = obs['agent_angle_y']
+        traj_df['ego_course_direction_x_obs'] = obs['ego_course_direction_x']
+        traj_df['ego_course_direction_y_obs'] = obs['ego_course_direction_y']
+        
     # get true wind direction from info
     if obs.shape[1] == 7: 
         true_wind_direction_key = 'ambient_wind'
