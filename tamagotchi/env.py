@@ -1955,7 +1955,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         else:
             is_outofbounds = False
         done = bool(is_home or is_outofbounds or is_outoftime)
-
+        if self.vr_wind:
+            done = False # If vr_wind is set, then it's eval condition and we don't want to end the episode.
+            
         # If has not ended, make new observations
         observation = self.sense_environment()
 
@@ -2103,7 +2105,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             observation[1] *= -1.0 # observation: [x, y, o] 
 
         self.episode_reward += reward
-        
+
         if done:
             info['episode'] = {'r': self.episode_reward }
             info['dataset'] = self.dataset
