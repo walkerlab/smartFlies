@@ -583,6 +583,9 @@ def get_traj_df_tmp(episode_log,
     elif obs.shape[1] == 7:
         obs =  obs.iloc[:, -7:] # obs in PEv3 has 7 columns - works as expected # this are normalized observations
         obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y']
+    elif obs.shape[1] == 9:
+        obs = obs.iloc[:, -9:] # haltere 
+        obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y', 'haltere_air_acc', 'haltere_ang_acc']
     
     # write wind observation into df
     traj_df['wind_theta_obs'] = obs.apply(lambda row: vec2rad_norm_by_pi(row['wind_x'], row['wind_y']), axis=1)
@@ -609,7 +612,7 @@ def get_traj_df_tmp(episode_log,
         traj_df['ego_course_direction_theta'] = egocentric_course_direction_theta
         traj_df['allo_ground_velocity'] = allo_ground_velocity
     # get true wind direction from info
-    if obs.shape[1] == 7: 
+    if obs.shape[1] == 7 or obs.shape[1] == 9: 
         true_wind_direction_key = 'ambient_wind'
     else: # for relative wind agents - still consider true wind direction 
         # get true wind info for action dist. around wind changes 
