@@ -1365,7 +1365,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  rotate_by=None, 
                  soft_reset=False, 
                  haltere=False, 
-                 saccade=False,
+                 saccade=False, 
+                 double_drift=False,
                  **kwargs):
         '''
         soft_reset_button: bool or None; button never turns on if None, otherwise it will be set to True when step() fails.
@@ -1386,6 +1387,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.stray_distance_init = 0 # stray distance at reset
         self.stray_steps = 0 # how many steps of OOB? env fail at 10!
         self.haltere = haltere # PEv3 - haltere feedback
+        self.double_drift = double_drift
         print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}, self.mirror: {self.mirror}, haltere: {self.haltere}")
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
@@ -1401,8 +1403,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.saccade = saccade # PEv3 - saccade action
 
         # convert obs_noise to radians
-        if self.obs_noise:
-            self.obs_noise = np.deg2rad(self.obs_noise)
+        # if self.obs_noise:
+            # self.obs_noise = np.deg2rad(self.obs_noise)
 
         self.rewards = {
             'tick': -50/self.episode_steps_max, # prev. 5*tick penalty per step; so 5*-10 == 50; 50/299 = 0.17
@@ -1725,11 +1727,22 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             egocentric_course_direction_radian = allocentric_course_direction_radian - allocentric_head_direction_radian # leftward positive - standard CWW convention
             if self.flip_ventral_optic_flow:
                 egocentric_course_direction_radian = allocentric_head_direction_radian - allocentric_course_direction_radian # rightward positive - for eval to see the behavioral impact of flipping course direction perception.
+            if self.double_drift:
+                # Double the observed drift angle - was not a good test because it changes the actual inference problem.
+                egocentric_course_direction_radian *= 2
+                egocentric_course_direction_radian = np.arctan2(
+                    np.sin(egocentric_course_direction_radian),
+                    np.cos(egocentric_course_direction_radian)
+                )
+                if abs(egocentric_course_direction_radian) > np.pi:
+                    raise ValueError(f"Double drift angle out of range: {np.degrees(egocentric_course_direction_radian):.2f} radian")
             if self.obs_noise:
-                allocentric_head_direction_radian += np.random.normal(0, self.obs_noise)
-                egocentric_course_direction_radian += np.random.normal(0, self.obs_noise)
-                apparent_wind_radian = np.angle(observation[0] + 1j*observation[1], deg=False) + np.random.normal(0, self.obs_noise)
-                observation[:2] = [np.cos(apparent_wind_radian), np.sin(apparent_wind_radian)]
+                # NOTE: don't trust this setup. Tmp solution using VRVR testing
+                # allocentric_head_direction_radian += np.random.normal(0, self.obs_noise)
+                # egocentric_course_direction_radian += np.random.normal(0, self.obs_noise)
+                # apparent_wind_radian = np.angle(observation[0] + 1j*observation[1], deg=False) + np.random.normal(0, self.obs_noise)
+                # observation[:2] = [np.cos(apparent_wind_radian), np.sin(apparent_wind_radian)]
+                observation[0] += np.random.normal(0, self.obs_noise)
             observation = np.append(observation, [np.cos(allocentric_head_direction_radian), np.sin(allocentric_head_direction_radian), np.cos(egocentric_course_direction_radian), np.sin(egocentric_course_direction_radian)])
         if self.verbose > 1:
             print('observation', observation)
