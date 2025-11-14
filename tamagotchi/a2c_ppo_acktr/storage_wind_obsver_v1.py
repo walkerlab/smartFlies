@@ -159,7 +159,9 @@ class RolloutStorage(object):
             masks_batch = []
             old_action_log_probs_batch = []
             adv_targ = []
-
+            # Wind obsver v1 modification: store wind targets
+            wind_targets_batch = []
+            
             for offset in range(num_envs_per_batch):
                 ind = perm[start_ind + offset]
                 obs_batch.append(self.obs[:-1, ind])
@@ -172,6 +174,8 @@ class RolloutStorage(object):
                 old_action_log_probs_batch.append(
                     self.action_log_probs[:, ind])
                 adv_targ.append(advantages[:, ind])
+                wind_targets_batch.append(self.wind_targets[:, ind])  # TODO: make sure wind targets is set up properly
+
 
             T, N = self.num_steps, num_envs_per_batch
             # These are all tensors of size (T, N, -1)
@@ -183,6 +187,8 @@ class RolloutStorage(object):
             old_action_log_probs_batch = torch.stack(
                 old_action_log_probs_batch, 1)
             adv_targ = torch.stack(adv_targ, 1)
+            # wind obsver v1 modification
+            wind_targets_batch = torch.stack(wind_targets_batch, 1)      # (T,N,2)
 
             # States is just a (N, -1) tensor
             recurrent_hidden_states_batch = torch.stack(
@@ -197,6 +203,7 @@ class RolloutStorage(object):
             old_action_log_probs_batch = _flatten_helper(T, N, \
                     old_action_log_probs_batch)
             adv_targ = _flatten_helper(T, N, adv_targ)
+            wind_targets_batch = _flatten_helper(T, N, wind_targets_batch)  # (T*N,2)
 
             yield obs_batch, recurrent_hidden_states_batch, actions_batch, \
-                value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ
+                value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ, wind_targets_batch

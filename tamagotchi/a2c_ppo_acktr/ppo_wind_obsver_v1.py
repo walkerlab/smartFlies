@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+from tamagotchi.a2c_ppo_acktr.utils import wind_nll_loss
+
 
 class PPO():
     def __init__(self,
@@ -17,7 +19,8 @@ class PPO():
                  max_grad_norm=None,
                  use_clipped_value_loss=True,
                  track_ppo_fraction=True,
-                 weight_decay=0):
+                 weight_decay=0,
+                 wind_loss_coef=0.0):
 
         self.actor_critic = actor_critic
 
@@ -33,6 +36,8 @@ class PPO():
 
         self.optimizer = optim.Adam(actor_critic.parameters(), lr=lr, eps=eps, weight_decay=weight_decay)
         self.track_ppo_fraction = track_ppo_fraction    
+        # Wind obsver v1 modification: track wind loss coef
+        self.wind_loss_coef = wind_loss_coef
 
     def update(self, rollouts):
         advantages = rollouts.returns[:-1] - rollouts.value_preds[:-1]
@@ -51,14 +56,14 @@ class PPO():
             else:
                 data_generator = rollouts.feed_forward_generator(
                     advantages, self.num_mini_batch)
-
             for sample in data_generator:
+                # Wind obsver v1 modification: grab wind targets from data generator
                 obs_batch, recurrent_hidden_states_batch, actions_batch, \
                    value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, \
-                        adv_targ = sample
-
+                        adv_targ, wind_targets_batch = sample
+                # Wind obsver v1 modification: grab activities which contain predicted wind mu/logvar
                 # Reshape to do in a single forward pass for all steps
-                values, action_log_probs, dist_entropy, _ = self.actor_critic.evaluate_actions(
+                values, action_log_probs, dist_entropy, rnn_hxs, activities = self.actor_critic.evaluate_actions(
                     obs_batch, recurrent_hidden_states_batch, masks_batch,
                     actions_batch)
 
@@ -81,9 +86,18 @@ class PPO():
                 else:
                     value_loss = 0.5 * (return_batch - values).pow(2).mean()
 
+                # Wind obsver v1 modification: grab wind targets from activities
+                wind_mu     = activities['wind_mu']       # [B,2]
+                wind_logvar = activities['wind_logvar']   # [B,2]
+                # Compute wind NLL loss
+                wind_loss   = wind_nll_loss(wind_mu, wind_logvar, wind_targets_batch)
+                total_loss = (value_loss * self.value_loss_coef
+                              + action_loss
+                              - dist_entropy * self.entropy_coef
+                              + self.wind_loss_coef * wind_loss)
                 self.optimizer.zero_grad()
-                (value_loss * self.value_loss_coef + action_loss -
-                 dist_entropy * self.entropy_coef).backward()
+                total_loss.backward()
+                
                 nn.utils.clip_grad_norm_(self.actor_critic.parameters(),
                                          self.max_grad_norm)
                 self.optimizer.step()
