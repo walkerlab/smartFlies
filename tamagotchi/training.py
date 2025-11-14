@@ -5,7 +5,7 @@ import torch
 import pandas as pd
 import os
 from collections import deque
-from data_util import RolloutStorage
+from tamagotchi.a2c_ppo_acktr.storage import RolloutStorage
 # from tamagotchi.eval import eval_lite
 import data_util as utils
 from env import get_vec_normalize
