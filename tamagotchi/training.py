@@ -610,11 +610,7 @@ def training_loop(agent, envs, args, device, actor_critic,
     ##############################################################################################################
     # setting up
     ##############################################################################################################
-    if not rollouts: 
-        rollouts = RolloutStorage(args.num_steps, args.num_processes,
-                        envs[0].observation_space.shape, 
-                        envs[0].action_space,
-                        actor_critic.recurrent_hidden_state_size)
+
     num_updates = int(
         args.num_env_steps) // args.num_steps // args.num_processes # args.num_env_steps 20M for all # args.num_steps=2048 (found in logs) # args.num_processes=4=mini_batch (found in logs)
     
