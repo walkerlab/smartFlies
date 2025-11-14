@@ -32,6 +32,9 @@ class RolloutStorage(object):
         self.num_steps = num_steps
         self.step = 0
 
+        # Wind obsver v1 modification: store wind targets
+        self.wind_targets = torch.zeros(num_steps, num_processes, 2)
+        
     def to(self, device):
         self.obs = self.obs.to(device)
         self.recurrent_hidden_states = self.recurrent_hidden_states.to(device)
@@ -42,9 +45,11 @@ class RolloutStorage(object):
         self.actions = self.actions.to(device)
         self.masks = self.masks.to(device)
         self.bad_masks = self.bad_masks.to(device)
-
+        # Wind obsver v1 modification: store wind targets
+        self.wind_targets = self.wind_targets.to(device) 
+        
     def insert(self, obs, recurrent_hidden_states, actions, action_log_probs,
-               value_preds, rewards, masks, bad_masks):
+               value_preds, rewards, masks, bad_masks, wind_targets):
         self.obs[self.step + 1].copy_(obs)
         self.recurrent_hidden_states[self.step +
                                      1].copy_(recurrent_hidden_states)
@@ -54,6 +59,8 @@ class RolloutStorage(object):
         self.rewards[self.step].copy_(rewards)
         self.masks[self.step + 1].copy_(masks)
         self.bad_masks[self.step + 1].copy_(bad_masks)
+        # Wind obsver v1 modification: store wind targets
+        self.wind_targets[self.step].copy_(wind_targets)
 
         self.step = (self.step + 1) % self.num_steps
 
@@ -62,6 +69,8 @@ class RolloutStorage(object):
         self.recurrent_hidden_states[0].copy_(self.recurrent_hidden_states[-1])
         self.masks[0].copy_(self.masks[-1])
         self.bad_masks[0].copy_(self.bad_masks[-1])
+        # Wind obsver v1 modification: copy wind targets
+        self.wind_targets[0].copy_(self.wind_targets[-1])
 
     def compute_returns(self,
                         next_value,
@@ -174,7 +183,7 @@ class RolloutStorage(object):
                 old_action_log_probs_batch.append(
                     self.action_log_probs[:, ind])
                 adv_targ.append(advantages[:, ind])
-                wind_targets_batch.append(self.wind_targets[:, ind])  # TODO: make sure wind targets is set up properly
+                wind_targets_batch.append(self.wind_targets[:, ind])
 
 
             T, N = self.num_steps, num_envs_per_batch
