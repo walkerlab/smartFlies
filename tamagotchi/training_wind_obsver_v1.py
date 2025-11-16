@@ -763,8 +763,15 @@ def training_loop(agent, envs, args, device, actor_critic,
                 for info in infos])
             if step ==args.num_steps -1:
                 obs = envs.reset()
-            rollouts.insert(obs, recurrent_hidden_states, action,
-                            action_log_prob, value, reward, masks, bad_masks) # ~0.0006s
+                
+            # wind obsver v1 modification: grab wind target (wind_dirs) from infos 
+            wind_vels = [info['ambient_wind'] for info in infos]
+            wind_dirs = wind_vels / (np.linalg.norm(wind_vels, axis=1, keepdims=True) + 1e-8) # normalize to unit vectors
+            wind_dirs = torch.tensor(wind_dirs, dtype=torch.float32, device=device)
+            # wind obsver v1 modification: insert wind into rollouts
+            rollouts.insert(obs, recurrent_hidden_states, action, action_log_prob,
+                            value, reward, masks, bad_masks,
+                            wind_targets=wind_dirs)
         ##############################################################################################################
         # UPDATE AGENT 
         ##############################################################################################################

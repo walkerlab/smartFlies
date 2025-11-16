@@ -17,10 +17,10 @@ from setproctitle import setproctitle as ptitle
 
 import tamagotchi.data_util as utils
 from env import make_vec_envs, get_vec_normalize
-from tamagotchi.a2c_ppo_acktr.ppo import PPO
-from tamagotchi.a2c_ppo_acktr.model import Policy
-from tamagotchi.a2c_ppo_acktr.storage import RolloutStorage
-from training import training_loop
+from tamagotchi.a2c_ppo_acktr.ppo_wind_obsver_v1 import PPO
+from tamagotchi.a2c_ppo_acktr.model_wind_obsver_v1 import Policy
+from tamagotchi.a2c_ppo_acktr.storage_wind_obsver_v1 import RolloutStorage
+from training_wind_obsver_v1 import training_loop
 import mlflow
 
 def get_args():
