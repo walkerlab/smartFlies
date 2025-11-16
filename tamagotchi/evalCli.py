@@ -232,6 +232,7 @@ def eval_loop(args, actor_critic, test_sparsity=True):
         if not args.no_vec_norm_stats:
             vecNormalize_pkl_file = args.model_fname.replace('.pt', '_vecNormalize.pkl')
             kwargs = {'vecNormalize_pkl_file': vecNormalize_pkl_file, 'eval': True} # init settings file path and mode eval to be true 
+            print(f"Loading vecNormalize stats from {vecNormalize_pkl_file}")
         else:
             kwargs = {}
         #### ------- Nonsparse ------- #### 

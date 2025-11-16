@@ -2240,6 +2240,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         apparent_wind=args.apparent_wind
                         )
                 else:
+                    print(f"[DEBUG] v3; haltere: {args.haltere}, saccade: {args.saccade}, rotate_by: {args.rotate_by}")
                     env = PlumeEnvironment_v3(
                         dataset=args.dataset,
                         birthx=args.birthx, 
