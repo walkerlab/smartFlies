@@ -5,7 +5,7 @@ import torch
 import pandas as pd
 import os
 from collections import deque
-from data_util import RolloutStorage
+from tamagotchi.a2c_ppo_acktr.storage import RolloutStorage
 # from tamagotchi.eval import eval_lite
 import data_util as utils
 from env import get_vec_normalize
@@ -610,11 +610,7 @@ def training_loop(agent, envs, args, device, actor_critic,
     ##############################################################################################################
     # setting up
     ##############################################################################################################
-    if not rollouts: 
-        rollouts = RolloutStorage(args.num_steps, args.num_processes,
-                        envs[0].observation_space.shape, 
-                        envs[0].action_space,
-                        actor_critic.recurrent_hidden_state_size)
+
     num_updates = int(
         args.num_env_steps) // args.num_steps // args.num_processes # args.num_env_steps 20M for all # args.num_steps=2048 (found in logs) # args.num_processes=4=mini_batch (found in logs)
     

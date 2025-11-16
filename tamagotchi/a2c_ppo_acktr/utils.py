@@ -35,3 +35,10 @@ def init(module, weight_init, bias_init, gain=1):
     weight_init(module.weight.data, gain=gain)
     bias_init(module.bias.data)
     return module
+
+# Wind obsver util: wind negative log likelihood loss
+def wind_nll_loss(mu, logvar, target):
+    # mu/logvar: [B,2], target: [B,2]
+    var = logvar.exp()
+    nll = 0.5 * (((target - mu) ** 2) / var + logvar)
+    return nll.mean()

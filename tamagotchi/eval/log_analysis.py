@@ -41,6 +41,14 @@ def vec2rad_norm_by_pi(x, y):
     """
     return np.angle( x + 1j*y, deg=False )/np.pi # note div by np.pi!
 
+def vec2rad(x, y):
+    """
+    # https://physicsclassroom.com/mmedia/vectors/vd.cfm#:~:text=The%20convention%20upon%20which%20we,of%20rotation%20from%20due%20east.
+    Standard CCW notation, centered at 0
+    Returns +pi is +180-deg, and -pi is -180-deg 
+    """
+    return np.angle( x + 1j*y, deg=False )
+
 def rad_over_pi_shift2_01(theta):
     """
     input: between -1 (-180-deg) and +1 (+180 deg)
@@ -418,6 +426,7 @@ def get_traj_df(episode_log,
     traj_df['ego_course_direction_x'] = obs['ego_course_direction_x']
     traj_df['ego_course_direction_y'] = obs['ego_course_direction_y']
     traj_df['ego_course_direction_theta'] = ego_course_direction_theta
+    traj_df['raw_ego_course_direction'] = [ record[0]['egocentric_course_direction'][0] for record in episode_log['infos']]
     # get true wind direction from info
     if obs.shape[1] == 7: 
         true_wind_direction_key = 'ambient_wind'
@@ -583,6 +592,9 @@ def get_traj_df_tmp(episode_log,
     elif obs.shape[1] == 7:
         obs =  obs.iloc[:, -7:] # obs in PEv3 has 7 columns - works as expected # this are normalized observations
         obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y']
+    elif obs.shape[1] == 9:
+        obs = obs.iloc[:, -9:] # haltere 
+        obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y', 'haltere_air_acc', 'haltere_ang_acc']
     
     # write wind observation into df
     traj_df['wind_theta_obs'] = obs.apply(lambda row: vec2rad_norm_by_pi(row['wind_x'], row['wind_y']), axis=1)
@@ -608,8 +620,14 @@ def get_traj_df_tmp(episode_log,
         traj_df['ego_course_direction_y'] = ego_course_direction_y
         traj_df['ego_course_direction_theta'] = egocentric_course_direction_theta
         traj_df['allo_ground_velocity'] = allo_ground_velocity
+        traj_df['raw_ego_course_direction'] = [ record[0]['egocentric_course_direction'][0] for record in episode_log['infos']]
+        traj_df['agent_angle_x_obs'] = obs['agent_angle_x']
+        traj_df['agent_angle_y_obs'] = obs['agent_angle_y']
+        traj_df['ego_course_direction_x_obs'] = obs['ego_course_direction_x']
+        traj_df['ego_course_direction_y_obs'] = obs['ego_course_direction_y']
+        
     # get true wind direction from info
-    if obs.shape[1] == 7: 
+    if obs.shape[1] == 7 or obs.shape[1] == 9: 
         true_wind_direction_key = 'ambient_wind'
     else: # for relative wind agents - still consider true wind direction 
         # get true wind info for action dist. around wind changes 
@@ -1062,3 +1080,121 @@ def get_actvity_reordering(ep_activity, do_plot=False):
         plt.colorbar(ms, cax=cax)
 
     return reordering, ep_activityT_reordered
+
+
+# Basic course direction calculation
+def calculate_course_direction(df, group_col=None):
+    """
+    Calculate course direction from position data
+    
+    Parameters:
+    df: DataFrame with 'loc_x', 'loc_y' columns
+    group_col: Column name to group by (e.g., 'ep_idx', 'trajectory_id')
+    """
+    
+    if group_col is not None:
+        # Calculate within each trajectory/episode
+        def calc_direction_group(group):
+            # Calculate differences between consecutive points
+            dx = group['loc_x'].diff()
+            dy = group['loc_y'].diff()
+            
+            # Calculate course direction in radians
+            course_direction = np.arctan2(dy, dx)
+            
+            return course_direction
+        
+        df['course_direction'] = df.groupby(group_col).apply(calc_direction_group).reset_index(level=0, drop=True)
+    
+    else:
+        # Calculate for entire dataframe (assuming single trajectory)
+        dx = df['loc_x'].diff()
+        dy = df['loc_y'].diff()
+        df['course_direction'] = np.arctan2(dy, dx)
+        
+    df['course_direction_x'] = np.cos(df['course_direction'])
+    df['course_direction_y'] = np.sin(df['course_direction'])
+    
+    return df
+
+
+def classify_experience(group, unique_vals_dict, stratify_by, round_by=2):
+    """
+    Classify experience based on stratification variables
+    Adds a columns experience_group which contains tuples of strings that show how the stratify_by variables change over the trajectory.
+    There's many simple versions of this as methods in vrvr plotting functions. 
+    Here is a version that have more control over how many digits to round by. 
+    This function gets used separately a lot for separating trajectories. Future functions should use this!
+    """
+    experience_parts = []
+    
+    for var in stratify_by:
+        vals = group[var].values
+        unique_vals = unique_vals_dict[var]
+        
+        # Check if the column contains floats
+        is_float_col = pd.api.types.is_float_dtype(group[var])
+        
+        if is_float_col:
+            # Round float values to specified decimal places for comparison
+            vals_rounded = [round(v, round_by) for v in vals]
+            unique_vals_rounded = [round(v, round_by) for v in unique_vals]
+            experience = sorted(set(v for v in unique_vals_rounded if v in vals_rounded))
+        else:
+            experience = sorted(set(v for v in unique_vals if v in vals))
+        
+        if experience:
+            # For single values, just use the value; for multiple, create a transition string
+            if len(experience) == 1:
+                val_str = f"{experience[0]:.{round_by}f}" if is_float_col else str(experience[0])
+                experience_parts.append(f"{var}={val_str}")
+            else:
+                # Find the first and last occurrence to determine transition direction
+                if is_float_col:
+                    first_val = None
+                    last_val = None
+                    
+                    # Find first occurrence of any experience value
+                    for i, v in enumerate(vals_rounded):
+                        if v in experience and first_val is None:
+                            first_val = v
+                            break
+                    
+                    # Find last occurrence of any experience value (different from first)
+                    for i in range(len(vals_rounded) - 1, -1, -1):
+                        if vals_rounded[i] in experience and vals_rounded[i] != first_val:
+                            last_val = vals_rounded[i]
+                            break
+                    
+                    # If no different last value found, use the same value
+                    if last_val is None:
+                        last_val = first_val
+
+                    val_str = f"{first_val:.{round_by}f}→{last_val:.{round_by}f}"
+                else:
+                    first_val = None
+                    last_val = None
+                    
+                    # Find first occurrence of any experience value
+                    for i, v in enumerate(vals):
+                        if v in experience and first_val is None:
+                            first_val = v
+                            break
+                    
+                    # Find last occurrence of any experience value (different from first)
+                    for i in range(len(vals) - 1, -1, -1):
+                        if vals[i] in experience and vals[i] != first_val:
+                            last_val = vals[i]
+                            break
+                    
+                    # If no different last value found, use the same value
+                    if last_val is None:
+                        last_val = first_val
+                        
+                    val_str = f"{first_val}→{last_val}"
+                    
+                experience_parts.append(f"{var}={val_str}")
+        else:
+            experience_parts.append(f"{var}=none")
+    
+    return tuple(experience_parts) if experience_parts else ('no_transition',)
