@@ -37,8 +37,15 @@ def init(module, weight_init, bias_init, gain=1):
     return module
 
 # Wind obsver util: wind negative log likelihood loss
-def wind_nll_loss(mu, logvar, target):
-    # mu/logvar: [B,2], target: [B,2]
+def wind_nll_stats(mu, logvar, target):
+    """
+    mu, logvar, target: [B, 2]
+    Returns:
+      mean_nll: scalar
+      per_sample_nll: [B]
+    """
     var = logvar.exp()
-    nll = 0.5 * (((target - mu) ** 2) / var + logvar)
-    return nll.mean()
+
+    per_sample = 0.5 * ((((target - mu) ** 2) / var) + logvar).sum(-1)  # [B]； (target - mu) ** 2) / var) = MSE / var (inflates error when uncertain); + logvar (penalize uncertainty)
+    mean_nll = per_sample.mean()
+    return mean_nll, per_sample
