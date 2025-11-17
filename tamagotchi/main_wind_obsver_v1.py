@@ -372,7 +372,8 @@ def main(args=None):
         eps=args.eps,
         max_grad_norm=args.max_grad_norm,
         weight_decay=args.weight_decay,
-        track_ppo_fraction=True)
+        track_ppo_fraction=True, 
+        wind_loss_coef=1) # turn on wind loss for wind obsver v1 - otherwise 0!
     
     
     # handling checkpoint loading

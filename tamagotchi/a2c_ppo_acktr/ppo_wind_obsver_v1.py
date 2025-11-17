@@ -19,7 +19,7 @@ class PPO():
                  max_grad_norm=None,
                  use_clipped_value_loss=True,
                  track_ppo_fraction=True,
-                 weight_decay=0,
+                 weight_decay=0, # 1e-4 per default across all as of 11/17/25
                  wind_loss_coef=0.0):
 
         self.actor_critic = actor_critic
