@@ -587,8 +587,19 @@ def log_agent_learning_wind_obsver(j, advantages, value_loss, action_loss, dist_
     mlflow.log_metric("ppo/dist_entropy", dist_entropy, step=j)
     mlflow.log_metric("ppo/clip_fraction", clip_fraction, step=j)
     mlflow.log_metric("ppo/learning_rate", learning_rate, step=j)
-    for key, value in aux_loss_dict.items():
-        mlflow.log_metric(f"ppo/{key}", value, step=j)
+
+    all_wind_nll = aux_loss_dict['wind_nll_all']
+    all_wind_sqerr = aux_loss_dict['wind_sqerr_all']
+    all_wind_logvar = aux_loss_dict['wind_logvar_all']
+    wind_nll_mean = all_wind_nll.mean().item()
+    wind_nll_std  = all_wind_nll.std().item()
+    wind_loss_epoch = aux_loss_dict["wind_loss_epoch"]
+    mlflow.log_metric("ppo/wind_loss_mean", wind_loss_epoch, step=j)
+    mlflow.log_metric("ppo/wind_nll_mean", wind_nll_mean, step=j)
+    mlflow.log_metric("ppo/wind_nll_std",  wind_nll_std, step=j)
+    mlflow.log_metric("ppo/wind_sqerr_mean", all_wind_sqerr.mean().item(), step=j)
+    mlflow.log_metric("ppo/wind_logvar_mean", all_wind_logvar.mean().item(), step=j)
+
     
 
 def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True):
