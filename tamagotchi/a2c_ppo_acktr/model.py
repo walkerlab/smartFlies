@@ -170,7 +170,7 @@ class NNBase(nn.Module):
     def output_size(self):
         return self._hidden_size
 
-    def _forward_rnn(self, x, hxs, masks, input_masks: torch.Tensor | None = None):
+    def _forward_rnn(self, x, hxs, masks, input_masks = None):
         if x.size(0) == hxs.size(0):
             if input_masks is not None:
                 input_masks = input_masks.to(x.device, x.dtype)
@@ -255,7 +255,7 @@ class MLPBase(NNBase):
 
         self.train() # tells your model that you are training the model not eval().
 
-    def forward(self, inputs, rnn_hxs, masks, input_masks: torch.Tensor | None = None):
+    def forward(self, inputs, rnn_hxs, masks, input_masks=None):
         x = inputs
         if self.is_recurrent:
             x, rnn_hxs = self._forward_rnn(x, rnn_hxs, masks, input_masks=input_masks)
