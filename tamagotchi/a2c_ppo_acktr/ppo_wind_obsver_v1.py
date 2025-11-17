@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
-from tamagotchi.a2c_ppo_acktr.utils import wind_nll_loss
+from tamagotchi.a2c_ppo_acktr.utils import wind_nll_stats
 
 
 class PPO():
@@ -48,6 +48,10 @@ class PPO():
         action_loss_epoch = 0
         dist_entropy_epoch = 0
         clip_fraction_epoch = 0
+        wind_loss_epoch = 0   # Wind obsver v1 modification: track wind loss epoch
+        all_wind_nll = []
+        all_wind_sqerr = []      
+        all_wind_logvar = []   
 
         for e in range(self.ppo_epoch):
             if self.actor_critic.is_recurrent:
@@ -90,7 +94,14 @@ class PPO():
                 wind_mu     = activities['wind_mu']       # [B,2]
                 wind_logvar = activities['wind_logvar']   # [B,2]
                 # Compute wind NLL loss
-                wind_loss   = wind_nll_loss(wind_mu, wind_logvar, wind_targets_batch)
+                wind_loss, wind_nll_per = wind_nll_stats(wind_mu, wind_logvar, wind_targets_batch)  # mean + [B]
+                wind_sqerr_per = ((wind_mu - wind_targets_batch) ** 2).sum(-1)   # [B]
+                wind_logvar_per = wind_logvar.mean(-1)  # 每个样本把2维取平均 → [B]
+
+                all_wind_nll.append(wind_nll_per.detach().cpu())
+                all_wind_sqerr.append(wind_sqerr_per.detach().cpu())
+                all_wind_logvar.append(wind_logvar_per.detach().cpu())
+
                 total_loss = (value_loss * self.value_loss_coef
                               + action_loss
                               - dist_entropy * self.entropy_coef
@@ -106,6 +117,7 @@ class PPO():
                 action_loss_epoch += action_loss.item()
                 dist_entropy_epoch += dist_entropy.item()
                 clip_fraction_epoch += clip_fraction.item()
+                wind_loss_epoch += wind_loss.item()   # Wind obsver v1 modification: accumulate wind loss
 
         num_updates = self.ppo_epoch * self.num_mini_batch
 
@@ -113,9 +125,35 @@ class PPO():
         action_loss_epoch /= num_updates
         dist_entropy_epoch /= num_updates
         clip_fraction_epoch /= num_updates
+        wind_loss_epoch /= num_updates    # Wind obsver v1 modification: average wind loss
+        
+        # wind obsver v1 modification: return wind loss
+        if len(all_wind_nll) > 0:
+            all_wind_nll = torch.cat(all_wind_nll, dim=0)          # [N_total]
+            all_wind_sqerr = torch.cat(all_wind_sqerr, dim=0)      # [N_total]
+            all_wind_logvar = torch.cat(all_wind_logvar, dim=0)    # [N_total]
+        else:
+            all_wind_nll = torch.tensor([])
+            all_wind_sqerr = torch.tensor([])
+            all_wind_logvar = torch.tensor([])
+                
+        extras = {
+            "wind_loss_epoch": wind_loss_epoch,
+            "wind_nll_all": all_wind_nll,           # [N_total]
+            "wind_sqerr_all": all_wind_sqerr,       # [N_total]
+            "wind_logvar_all": all_wind_logvar,     # [N_total]
+        }
 
         if self.track_ppo_fraction:
-            return value_loss_epoch, action_loss_epoch, dist_entropy_epoch, clip_fraction_epoch, advantages.flatten()
+            return (value_loss_epoch,
+                    action_loss_epoch,
+                    dist_entropy_epoch,
+                    clip_fraction_epoch,
+                    advantages.flatten(),
+                    extras) # wind obsver v1 modification: return wind loss
         else:
-            return value_loss_epoch, action_loss_epoch, dist_entropy_epoch, advantages.flatten()
-
+            return (value_loss_epoch,
+                    action_loss_epoch,
+                    dist_entropy_epoch,
+                    advantages.flatten(),
+                    extras) # wind obsver v1 modification: return wind loss
