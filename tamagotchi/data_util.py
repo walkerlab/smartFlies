@@ -574,7 +574,22 @@ def log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, cli
     mlflow.log_metric("clip_fraction", clip_fraction, step=j)
     mlflow.log_metric("learning_rate", learning_rate, step=j)
 
-            
+
+def log_agent_learning_wind_obsver(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, aux_loss_dict, use_mlflow=True):
+    if not use_mlflow:
+        return
+    mlflow.log_metric("ppo/advantages_mean", advantages.mean().item(), step=j)
+    mlflow.log_metric("ppo/advantages_std", advantages.std().item(), step=j)
+    mlflow.log_metric("ppo/advantages_max", advantages.max().item(), step=j)
+    mlflow.log_metric("ppo/advantages_min", advantages.min().item(), step=j)
+    mlflow.log_metric("ppo/value_loss", value_loss, step=j)
+    mlflow.log_metric("ppo/action_loss", action_loss, step=j)
+    mlflow.log_metric("ppo/dist_entropy", dist_entropy, step=j)
+    mlflow.log_metric("ppo/clip_fraction", clip_fraction, step=j)
+    mlflow.log_metric("ppo/learning_rate", learning_rate, step=j)
+    for key, value in aux_loss_dict.items():
+        mlflow.log_metric(f"ppo/{key}", value, step=j)
+    
 
 def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True):
     """
