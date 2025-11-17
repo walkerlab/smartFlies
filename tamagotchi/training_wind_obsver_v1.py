@@ -799,7 +799,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                     print(f"Error logging artifact {plt_path}: {e}")
                 
         utils.log_agent_learning_wind_obsver(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], aux_loss_dict=extras, use_mlflow=args.mlflow)
-        if j % plot_every_n_updates == 0:
+        if j % 20 == 0: # wind obsver v1 modification: plot success fractions every 20 updates
             utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
                 
         rollouts.after_update()
