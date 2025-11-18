@@ -617,7 +617,7 @@ def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True):
             mlflow.log_metric(f"{outcome}_num", sum(update_episodes_df['outcome'] == outcome), step=j)
             mlflow.log_metric(f"{outcome}_ratio", sum(update_episodes_df['outcome'] == outcome) / len(update_episodes_df['outcome']), step=j)
             mlflow.log_metric('num_episodes', len(update_episodes_df['outcome']), step=j)
-    log_path = f"{args.save_dir}/tmp/{args.model_fname.replace(".pt", "")}_eps_log_{j}.csv"
+    log_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '')}_eps_log_{j}.csv"
     update_episodes_df.to_csv(log_path, index=False)
     if use_mlflow:
         try:
