@@ -1,6 +1,6 @@
 import glob
 import os
-
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -44,6 +44,7 @@ def wind_nll_stats(mu, logvar, target):
       mean_nll: scalar
       per_sample_nll: [B]
     """
+    logvar = torch.clamp(logvar, min=np.log(0.05**2), max=np.log(2.0**2)) # clamp logvar to avoid numerical issues; extreme uncertainty values can cause the loss to be negative. When minizing loss, the sign should be positive. 
     var = logvar.exp()
 
     per_sample = 0.5 * ((((target - mu) ** 2) / var) + logvar).sum(-1)  # [B]； (target - mu) ** 2) / var) = MSE / var (inflates error when uncertain); + logvar (penalize uncertainty)
