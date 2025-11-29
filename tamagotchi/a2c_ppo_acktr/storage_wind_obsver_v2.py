@@ -8,23 +8,32 @@ def _flatten_helper(T, N, _tensor):
 
 class RolloutStorage(object):
     def __init__(self, num_steps, num_processes, obs_shape, action_space,
-                 recurrent_hidden_state_size):
+                 recurrent_hidden_state_size,
+                 observer_hidden_state_size=None): # Wind obsver v2 modification: added observer_hidden_state_size
         self.obs = torch.zeros(num_steps + 1, num_processes, *obs_shape)
         self.recurrent_hidden_states = torch.zeros(
             num_steps + 1, num_processes, recurrent_hidden_state_size)
+        # Wind obsver v2 modification: added observer_hidden_states
+        if observer_hidden_state_size is not None:
+            self.observer_hidden_states = torch.zeros(
+                num_steps + 1, num_processes, observer_hidden_state_size)
+        else:
+            raise ValueError("Wind obsver 2 modularize wind prediction - observer_hidden_state_size must be provided here.")
         self.rewards = torch.zeros(num_steps, num_processes, 1)
         self.value_preds = torch.zeros(num_steps + 1, num_processes, 1)
         self.returns = torch.zeros(num_steps + 1, num_processes, 1)
         self.action_log_probs = torch.zeros(num_steps, num_processes, 1)
+        
         if action_space.__class__.__name__ == 'Discrete':
             action_shape = 1
         else:
             action_shape = action_space.shape[0]
+            
         self.actions = torch.zeros(num_steps, num_processes, action_shape)
         if action_space.__class__.__name__ == 'Discrete':
             self.actions = self.actions.long()
+        
         self.masks = torch.ones(num_steps + 1, num_processes, 1)
-
         # Masks that indicate whether it's a true terminal state
         # or time limit end state
         self.bad_masks = torch.ones(num_steps + 1, num_processes, 1)
@@ -38,6 +47,8 @@ class RolloutStorage(object):
     def to(self, device):
         self.obs = self.obs.to(device)
         self.recurrent_hidden_states = self.recurrent_hidden_states.to(device)
+        # Wind obsver v2 modification: store wind observer hidden states
+        self.observer_hidden_states = self.observer_hidden_states.to(device)
         self.rewards = self.rewards.to(device)
         self.value_preds = self.value_preds.to(device)
         self.returns = self.returns.to(device)
@@ -49,10 +60,13 @@ class RolloutStorage(object):
         self.wind_targets = self.wind_targets.to(device) 
         
     def insert(self, obs, recurrent_hidden_states, actions, action_log_probs,
-               value_preds, rewards, masks, bad_masks, wind_targets):
+               value_preds, rewards, masks, bad_masks, wind_targets,
+               observer_hidden_states): # Wind obsver v2 modification: added observer_hidden_states
         self.obs[self.step + 1].copy_(obs)
         self.recurrent_hidden_states[self.step +
                                      1].copy_(recurrent_hidden_states)
+        # Wind obsver v2 modification: added observer_hidden_states
+        self.observer_hidden_states[self.step + 1].copy_(observer_hidden_states)
         self.actions[self.step].copy_(actions)
         self.action_log_probs[self.step].copy_(action_log_probs)
         self.value_preds[self.step].copy_(value_preds)
@@ -67,6 +81,8 @@ class RolloutStorage(object):
     def after_update(self):
         self.obs[0].copy_(self.obs[-1])
         self.recurrent_hidden_states[0].copy_(self.recurrent_hidden_states[-1])
+        # Wind obsver v2 modification: copy observer hidden states
+        self.observer_hidden_states[0].copy_(self.observer_hidden_states[-1])
         self.masks[0].copy_(self.masks[-1])
         self.bad_masks[0].copy_(self.bad_masks[-1])
         # Wind obsver v1 modification: copy wind targets
@@ -143,13 +159,17 @@ class RolloutStorage(object):
             masks_batch = self.masks[:-1].view(-1, 1)[indices]
             old_action_log_probs_batch = self.action_log_probs.view(-1,
                                                                     1)[indices]
+            wind_targets_batch = self.wind_targets.view(-1, 2)[indices]  # Wind obsver v1 modification: added wind_targets_batch
+            
             if advantages is None:
                 adv_targ = None
             else:
                 adv_targ = advantages.view(-1, 1)[indices]
 
-            yield obs_batch, recurrent_hidden_states_batch, actions_batch, \
-                value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ
+            yield (obs_batch, recurrent_hidden_states_batch, actions_batch,
+                   value_preds_batch, return_batch, masks_batch,
+                   old_action_log_probs_batch, adv_targ,
+                   wind_targets_batch) # Wind obsver v2 modification: added wind_targets_batch TODO find otu why this was not in v1 and would it have mattered
 
     def recurrent_generator(self, advantages, num_mini_batch):
         num_processes = self.rewards.size(1)
@@ -159,9 +179,11 @@ class RolloutStorage(object):
             "PPO mini batches ({}).".format(num_processes, num_mini_batch))
         num_envs_per_batch = num_processes // num_mini_batch
         perm = torch.randperm(num_processes)
+        
         for start_ind in range(0, num_processes, num_envs_per_batch):
             obs_batch = []
             recurrent_hidden_states_batch = []
+            observer_hidden_states_batch = [] # Wind obsver v2 modification: added observer_hidden_states_batch
             actions_batch = []
             value_preds_batch = []
             return_batch = []
@@ -176,6 +198,8 @@ class RolloutStorage(object):
                 obs_batch.append(self.obs[:-1, ind])
                 recurrent_hidden_states_batch.append(
                     self.recurrent_hidden_states[0:1, ind])
+                observer_hidden_states_batch.append(
+                    self.observer_hidden_states[0:1, ind])  # Wind obsver v2 modification: added observer_hidden_states_batch
                 actions_batch.append(self.actions[:, ind])
                 value_preds_batch.append(self.value_preds[:-1, ind])
                 return_batch.append(self.returns[:-1, ind])
@@ -187,6 +211,7 @@ class RolloutStorage(object):
 
 
             T, N = self.num_steps, num_envs_per_batch
+            
             # These are all tensors of size (T, N, -1)
             obs_batch = torch.stack(obs_batch, 1)
             actions_batch = torch.stack(actions_batch, 1)
@@ -202,7 +227,8 @@ class RolloutStorage(object):
             # States is just a (N, -1) tensor
             recurrent_hidden_states_batch = torch.stack(
                 recurrent_hidden_states_batch, 1).view(N, -1)
-
+            observer_hidden_states_batch = torch.stack(
+                    observer_hidden_states_batch, 1).view(N, -1) # Wind obsver v2 modification: added observer_hidden_states_batch
             # Flatten the (T, N, ...) tensors to (T * N, ...)
             obs_batch = _flatten_helper(T, N, obs_batch)
             actions_batch = _flatten_helper(T, N, actions_batch)
@@ -214,5 +240,13 @@ class RolloutStorage(object):
             adv_targ = _flatten_helper(T, N, adv_targ)
             wind_targets_batch = _flatten_helper(T, N, wind_targets_batch)  # (T*N,2)
 
-            yield obs_batch, recurrent_hidden_states_batch, actions_batch, \
-                value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ, wind_targets_batch
+            yield (obs_batch,
+                   recurrent_hidden_states_batch,
+                   actions_batch,
+                   value_preds_batch,
+                   return_batch,
+                   masks_batch,
+                   old_action_log_probs_batch,
+                   adv_targ,
+                   wind_targets_batch,
+                   observer_hidden_states_batch)
