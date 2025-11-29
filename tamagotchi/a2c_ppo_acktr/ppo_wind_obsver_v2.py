@@ -20,7 +20,8 @@ class PPO():
                  use_clipped_value_loss=True,
                  track_ppo_fraction=True,
                  weight_decay=0, # 1e-4 per default across all as of 11/17/25
-                 wind_loss_coef=0.0):
+                 wind_loss_coef=0.0,
+                 wind_lr=None):  # Wind obsver v2 modification: wind optimizer lr - option to set different from main lr
 
         self.actor_critic = actor_critic
 
@@ -38,20 +39,36 @@ class PPO():
         self.track_ppo_fraction = track_ppo_fraction    
         # Wind obsver v1 modification: track wind loss coef
         self.wind_loss_coef = wind_loss_coef
+        
+        # Wind obsver v2 modification: RL optimizer：只更新 base + dist（policy / value）
+        if wind_lr is None:
+            wind_lr = lr  # 不同也可以，这里先设成一样
 
+        base_params = list(actor_critic.base.parameters())
+        base_params += list(actor_critic.dist.parameters())
+
+        self.optimizer = optim.Adam(
+            base_params, lr=lr, eps=eps, weight_decay=weight_decay
+        )
+
+        # Wind obsver v2 modification: wind optimizer：只更新 observer
+        obs_params = list(actor_critic.observer.parameters())
+        self.wind_optimizer = optim.Adam(
+            obs_params, lr=wind_lr, eps=eps, weight_decay=0.0
+        )
+        
     def update(self, rollouts):
         advantages = rollouts.returns[:-1] - rollouts.value_preds[:-1]
-        advantages = (advantages - advantages.mean()) / (
-            advantages.std() + 1e-5)
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-5)
 
         value_loss_epoch = 0
         action_loss_epoch = 0
         dist_entropy_epoch = 0
         clip_fraction_epoch = 0
-        wind_loss_epoch = 0   # Wind obsver v1 modification: track wind loss epoch
+        wind_loss_epoch = 0
         all_wind_nll = []
-        all_wind_sqerr = []      
-        all_wind_logvar = []   
+        all_wind_sqerr = []
+        all_wind_logvar = []
 
         for e in range(self.ppo_epoch):
             if self.actor_critic.is_recurrent:
@@ -60,16 +77,27 @@ class PPO():
             else:
                 data_generator = rollouts.feed_forward_generator(
                     advantages, self.num_mini_batch)
+
             for sample in data_generator:
-                # Wind obsver v1 modification: grab wind targets from data generator
-                obs_batch, recurrent_hidden_states_batch, actions_batch, \
-                   value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, \
-                        adv_targ, wind_targets_batch = sample
-                # Wind obsver v1 modification: grab activities which contain predicted wind mu/logvar
-                # Reshape to do in a single forward pass for all steps
-                values, action_log_probs, dist_entropy, rnn_hxs, activities = self.actor_critic.evaluate_actions(
-                    obs_batch, recurrent_hidden_states_batch, masks_batch,
-                    actions_batch)
+                # Wind obsver v2 modification: grab wind targets and module-specific inputs from data generator
+                (obs_batch, recurrent_hidden_states_batch, # Base module inputs
+                 actions_batch,
+                 value_preds_batch, return_batch, masks_batch,
+                 old_action_log_probs_batch, adv_targ,
+                 wind_targets_batch,
+                 wind_obs_batch,  # Inputs to the wind observer 
+                 h_obs_batch) = sample  # Wind observer hidden state
+                
+                # Wind obsver v2 modification: separate updates for observer and base module + policy 
+                # ========================
+                # 1) RL update (base only)
+                # ========================
+                values, action_log_probs, dist_entropy, rnn_hxs, _ = \
+                    self.actor_critic.evaluate_actions(
+                        obs_batch,             # Base module inputs
+                        recurrent_hidden_states_batch,
+                        masks_batch,
+                        actions_batch)
 
                 ratio = torch.exp(action_log_probs -
                                   old_action_log_probs_batch)
@@ -90,34 +118,51 @@ class PPO():
                 else:
                     value_loss = 0.5 * (return_batch - values).pow(2).mean()
 
-                # Wind obsver v1 modification: grab wind targets from activities
-                wind_mu     = activities['wind_mu']       # [B,2]
-                wind_logvar = activities['wind_logvar']   # [B,2]
-                # Compute wind NLL loss
-                wind_loss, wind_nll_per = wind_nll_stats(wind_mu, wind_logvar, wind_targets_batch)  # mean + [B]
-                wind_sqerr_per = ((wind_mu - wind_targets_batch) ** 2).sum(-1)   # [B]
-                wind_logvar_per = wind_logvar.mean(-1)  # 每个样本把2维取平均 → [B]
+                # Wind obsver v2 modification: total RL loss (no wind loss here)
+                rl_total_loss = (value_loss * self.value_loss_coef
+                                 + action_loss
+                                 - dist_entropy * self.entropy_coef)
 
-                all_wind_nll.append(wind_nll_per.detach().cpu())
-                all_wind_sqerr.append(wind_sqerr_per.detach().cpu())
-                all_wind_logvar.append(wind_logvar_per.detach().cpu())
-
-                total_loss = (value_loss * self.value_loss_coef
-                              + action_loss
-                              - dist_entropy * self.entropy_coef
-                              + self.wind_loss_coef * wind_loss)
                 self.optimizer.zero_grad()
-                total_loss.backward()
-                
-                nn.utils.clip_grad_norm_(self.actor_critic.parameters(),
-                                         self.max_grad_norm)
+                rl_total_loss.backward()
+                nn.utils.clip_grad_norm_(self.actor_critic.base.parameters(), # TODO: does .base include .dist ?
+                                         self.max_grad_norm) 
                 self.optimizer.step()
 
+                # ================================
+                # 2) wind aux update (observer only)
+                # ================================
+                if self.wind_loss_coef > 0.0:
+                    # wind_obs_batch: wind observer inputs (obs_obs)
+                    # h_obs_batch: corresponding initial hidden state (similar to rnn_hxs)
+                    wind_mu, wind_logvar, _ = self.actor_critic.observer(
+                        wind_obs_batch, h_obs_batch, masks_batch)
+
+                    wind_loss, wind_nll_per = wind_nll_stats(
+                        wind_mu, wind_logvar, wind_targets_batch)
+
+                    wind_sqerr_per = ((wind_mu - wind_targets_batch) ** 2).sum(-1)
+                    wind_logvar_per = wind_logvar.mean(-1)
+
+                    all_wind_nll.append(wind_nll_per.detach().cpu())
+                    all_wind_sqerr.append(wind_sqerr_per.detach().cpu())
+                    all_wind_logvar.append(wind_logvar_per.detach().cpu())
+
+                    scaled_wind_loss = self.wind_loss_coef * wind_loss
+
+                    self.wind_optimizer.zero_grad()
+                    scaled_wind_loss.backward()
+                    nn.utils.clip_grad_norm_(self.actor_critic.observer.parameters(),
+                                             self.max_grad_norm)
+                    self.wind_optimizer.step()
+
+                    wind_loss_epoch += wind_loss.item()  # 累加未缩放或缩放版本都可以，但记得一致
+
+                # ======= 日志累积 RL 指标 =======
                 value_loss_epoch += value_loss.item()
                 action_loss_epoch += action_loss.item()
                 dist_entropy_epoch += dist_entropy.item()
                 clip_fraction_epoch += clip_fraction.item()
-                wind_loss_epoch += wind_loss.item()   # Wind obsver v1 modification: accumulate wind loss
 
         num_updates = self.ppo_epoch * self.num_mini_batch
 
