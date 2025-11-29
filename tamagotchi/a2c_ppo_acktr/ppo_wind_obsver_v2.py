@@ -125,8 +125,8 @@ class PPO():
 
                 self.optimizer.zero_grad()
                 rl_total_loss.backward()
-                nn.utils.clip_grad_norm_(self.actor_critic.base.parameters(), # TODO: does .base include .dist ?
-                                         self.max_grad_norm) 
+                nn.utils.clip_grad_norm_(self.optimizer.param_groups[0]["params"],
+                         self.max_grad_norm)
                 self.optimizer.step()
 
                 # ================================
