@@ -399,7 +399,8 @@ def main(args=None):
     # run training loop
     rollouts = RolloutStorage(args.num_steps, args.num_processes,
                         envs.observation_space.shape, envs.action_space,
-                        actor_critic.recurrent_hidden_state_size)
+                        actor_critic.recurrent_hidden_state_size,
+                        actor_critic.observer_hidden_state_size,)
     
     # Set our tracking server uri for logging
     # Create a new MLflow Experiment
