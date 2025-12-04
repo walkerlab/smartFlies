@@ -2023,10 +2023,13 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                     # if agent moved closer to the source and on plume, and closer than the last time
                     r_radial_step *= 10
                     self.agent_location_norm_min = radial_dist
+            elif 'step_small' in self.r_shaping:
+                r_radial_step = 2*( np.linalg.norm(self.agent_location_last) - radial_dist) # smaller scaling. agents seem to only care to get near the source, not home.
             # no step reward if off plume - only hurts for moving away! 
             r_radial_step = min(0, r_radial_step) if observation[2] <= config.env['odor_threshold'] else r_radial_step
             # Multiplier for overshooting source
             if 'overshoot' in self.r_shaping and self.agent_location[0] < 0:
+                raise NotImplementedError("Overshoot penalty not implemented for rotated plumes yet.")
                 r_radial_step *= 2 # Both encourage and discourage agent more
             # Additive reward for reducing stray distance from plume
             if ('stray' in self.r_shaping) and (self.stray_distance > self.stray_max/3):
