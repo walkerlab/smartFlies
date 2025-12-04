@@ -7,6 +7,13 @@ def _flatten_helper(T, N, _tensor):
 
 
 class RolloutStorage(object):
+    '''
+    Rollout storage for PPO with wind observer v2 modification.
+    Goal: 
+    - storage inputs, states and outputs for base RNN (all obs + predicted wind) - compute gradient for PPO
+    - storage states of wind obsver RNN and wind targets - compute gradient and loss for wind obsver separately
+    - obs will be split into base vs wind obsver in PPO update function
+    '''
     def __init__(self, num_steps, num_processes, obs_shape, action_space,
                  recurrent_hidden_state_size,
                  observer_hidden_state_size=None): # Wind obsver v2 modification: added observer_hidden_state_size
@@ -59,13 +66,13 @@ class RolloutStorage(object):
         # Wind obsver v1 modification: store wind targets
         self.wind_targets = self.wind_targets.to(device) 
         
-    def insert(self, obs, recurrent_hidden_states, actions, action_log_probs,
-               value_preds, rewards, masks, bad_masks, wind_targets,
-               observer_hidden_states): # Wind obsver v2 modification: added observer_hidden_states
+    def insert(self, obs, all_hx, actions, action_log_probs,
+               value_preds, rewards, masks, bad_masks, wind_targets): 
+        # Wind obsver v2 modification: added observer_hidden_states
+        recurrent_hidden_states, observer_hidden_states = all_hx
         self.obs[self.step + 1].copy_(obs)
         self.recurrent_hidden_states[self.step +
                                      1].copy_(recurrent_hidden_states)
-        # Wind obsver v2 modification: added observer_hidden_states
         self.observer_hidden_states[self.step + 1].copy_(observer_hidden_states)
         self.actions[self.step].copy_(actions)
         self.action_log_probs[self.step].copy_(action_log_probs)
@@ -133,6 +140,8 @@ class RolloutStorage(object):
                                advantages,
                                num_mini_batch=None,
                                mini_batch_size=None):
+        # NOTE: used when actor_critic attribute is_recurrent is False. Effectively will not be used ever. 
+        raise NotImplementedError("Feed forward generator not implemented for wind observer v2 modularized PPO.")
         num_steps, num_processes = self.rewards.size()[0:2]
         batch_size = num_processes * num_steps
 
@@ -169,7 +178,7 @@ class RolloutStorage(object):
             yield (obs_batch, recurrent_hidden_states_batch, actions_batch,
                    value_preds_batch, return_batch, masks_batch,
                    old_action_log_probs_batch, adv_targ,
-                   wind_targets_batch) # Wind obsver v2 modification: added wind_targets_batch TODO find otu why this was not in v1 and would it have mattered
+                   wind_targets_batch) 
 
     def recurrent_generator(self, advantages, num_mini_batch):
         num_processes = self.rewards.size(1)
@@ -195,7 +204,7 @@ class RolloutStorage(object):
             
             for offset in range(num_envs_per_batch):
                 ind = perm[start_ind + offset]
-                obs_batch.append(self.obs[:-1, ind])
+                obs_batch.append(self.obs[:-1, ind]) 
                 recurrent_hidden_states_batch.append(
                     self.recurrent_hidden_states[0:1, ind])
                 observer_hidden_states_batch.append(
@@ -242,6 +251,7 @@ class RolloutStorage(object):
 
             yield (obs_batch,
                    recurrent_hidden_states_batch,
+                   observer_hidden_states_batch,
                    actions_batch,
                    value_preds_batch,
                    return_batch,
@@ -249,4 +259,4 @@ class RolloutStorage(object):
                    old_action_log_probs_batch,
                    adv_targ,
                    wind_targets_batch,
-                   observer_hidden_states_batch)
+                   )
