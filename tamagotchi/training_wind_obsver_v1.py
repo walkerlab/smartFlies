@@ -735,7 +735,6 @@ def training_loop(agent, envs, args, device, actor_critic,
                 value, action, action_log_prob, recurrent_hidden_states, activities = actor_critic.act(
                     rollouts.obs[step], 
                     rollouts.recurrent_hidden_states[step],
-                    rollouts.observer_hidden_states[step], # wind obsver v2 modification: pass in wind observer hidden states
                     rollouts.masks[step])
             obs, reward, done, infos = envs.step(action)
             if j % plot_every_n_updates == 0:
@@ -779,7 +778,7 @@ def training_loop(agent, envs, args, device, actor_critic,
         obs, reward, done, infos = envs.step(action) # reset the environment after collecting the trajectories
         with torch.no_grad():
             next_value = actor_critic.get_value(
-                rollouts.obs[-1], rollouts.recurrent_hidden_states[-1], rollouts.observer_hidden_states[-1],
+                rollouts.obs[-1], rollouts.recurrent_hidden_states[-1],
                 rollouts.masks[-1]).detach()
         rollouts.compute_returns(next_value, args.use_gae, args.gamma,
                                 args.gae_lambda, args.use_proper_time_limits)
