@@ -345,6 +345,9 @@ def main(args=None):
         actor_critic = Policy(
             envs.observation_space.shape, 
             envs.action_space,
+            observer_obs_dim = envs.observation_space.shape[0] - 1, # Wind obsver v2 modifitcation: wind_obsver input size - all but odor 
+            base_obs_dim = envs.observation_space.shape[0], #  Wind obsver v2 modifitcatioNn:   base RNN input size - all + wind target (4D) from within Policy class. 
+            # TODO: all these should be resolved in Policy class. Main should tell it which indices to use for base/wind obs. 
             base_kwargs={
                         'recurrent': args.recurrent_policy,
                         'rnn_type': args.rnn_type,
