@@ -11,8 +11,9 @@ class Flatten(nn.Module):
     def forward(self, x):
         return x.view(x.size(0), -1)
     
-class WindObserverRNN(nn.Module):
+class WindObserverModule(nn.Module):
     # Wind obsver v1 modification: new RNN-based wind observer
+    # Wind obsver v2 modification: rename to module since its RNN with heads 
     def __init__(self, obs_dim, hidden_size=32):
         super().__init__()
         self.rnn = nn.RNN(obs_dim, hidden_size)
@@ -24,6 +25,22 @@ class WindObserverRNN(nn.Module):
         return self.rnn.hidden_size
 
     def forward(self, obs_seq, h_obs, masks):
+        # not a _forward_rnn since this is a full module. 
+        """
+        obs_seq: 
+            - [B, obs_dim]               (single step)
+            - or [T*N, obs_dim]          (flattened sequence)
+        h_obs:
+            - if single step: [B, H]
+            - if sequence:    [N, H]     (one hidden per env)
+        masks:
+            - [B, 1]                      in single-step
+            - [T*N, 1]                    in sequence mode
+        returns:
+            wind_mu:     [B, 2] or [T*N, 2]
+            wind_logvar: [B, 2] or [T*N, 2]
+            h_obs:       [B, H] or [N, H] (final hidden)
+        """
         # obs_seq: [T*B, obs_dim] or [B, obs_dim]
         x = obs_seq
         B = h_obs.size(0)
@@ -32,14 +49,65 @@ class WindObserverRNN(nn.Module):
             x, h_obs = self.rnn(x.unsqueeze(0), (h_obs * masks).unsqueeze(0))
             x = x.squeeze(0)
             h_obs = h_obs.squeeze(0)
+            mu = self.head_mu(x)
+            logvar = self.head_logvar(x)
+            return mu, logvar, h_obs
+
         else:
-            # TODO: maybe copy _forward_rnn 里用的 T–N 分块逻辑
-            raise NotImplementedError("batch sequence case")
+            # 这里 B 实际上是 N（env 个数）
+            N = B
+            T = int(x.size(0) / N)
+            # obs_seq: [T*N, obs_dim] -> [T, N, obs_dim]
+            x = x.view(T, N, x.size(1))
 
-        mu = self.head_mu(x)
-        logvar = self.head_logvar(x)
-        return mu, logvar, h_obs
+            # masks: [T*N, 1] -> [T, N]
+            masks = masks.view(T, N)
 
+            # 找哪些 time step 有 done（mask == 0），用于分段跑 RNN
+            has_zeros = ((masks[1:] == 0.0)
+                         .any(dim=-1)
+                         .nonzero()
+                         .squeeze()
+                         .cpu())
+
+            # +1 to correct masks[1:]
+            if has_zeros.dim() == 0:
+                # 单个 index 的情况
+                has_zeros = [has_zeros.item() + 1]
+            else:
+                has_zeros = (has_zeros + 1).numpy().tolist()
+
+            # 把 t=0 和 t=T 塞进去形成区间边界
+            has_zeros = [0] + has_zeros + [T]
+
+            # h_obs: [N, H] -> [1, N, H]
+            h = h_obs.unsqueeze(0)
+            outputs = []
+
+            for i in range(len(has_zeros) - 1):
+                start_idx = has_zeros[i]
+                end_idx = has_zeros[i + 1]
+
+                # masks[start_idx]: [N]
+                # h * masks[...] : 把某些 env 的 hidden 清零（episode reset）
+                rnn_scores, h = self.rnn(
+                    x[start_idx:end_idx],                           # [L, N, obs_dim]
+                    h * masks[start_idx].view(1, -1, 1)            # [1, N, H]
+                )
+                outputs.append(rnn_scores)                         # [L, N, H]
+
+            # 拼回完整序列：x_seq: [T, N, H]
+            x_seq = torch.cat(outputs, dim=0)
+            # 展平成 [T*N, H]
+            x_flat = x_seq.view(T * N, -1)
+            # 最终 hidden: [1, N, H] -> [N, H]
+            h_obs = h.squeeze(0)
+
+            mu = self.head_mu(x_flat)         # [T*N, 2]
+            logvar = self.head_logvar(x_flat) # [T*N, 2]
+            return mu, logvar, h_obs
+        
+        
 class Policy(nn.Module):
     def __init__(self, obs_shape, action_space,
                  observer_obs_dim,
@@ -51,9 +119,9 @@ class Policy(nn.Module):
             base_kwargs = {}
 
         # wind observer
-        self.observer = WindObserverRNN(observer_obs_dim, hidden_size=32)
+        self.observer = WindObserverModule(observer_obs_dim, hidden_size=32)
 
-        # base policy
+        # base network (policy + value + representation)
         WIND_FEATURE_DIM = 4  # wind_mu(2) + wind_logvar(2)
         self.base = MLPBase(base_obs_dim + WIND_FEATURE_DIM, **base_kwargs) 
 
@@ -76,8 +144,6 @@ class Policy(nn.Module):
         else:
             raise NotImplementedError
 
-
-
     @property
     def is_recurrent(self):
         return self.base.is_recurrent
@@ -95,26 +161,43 @@ class Policy(nn.Module):
     def forward(self, inputs, rnn_hxs, masks):
         raise NotImplementedError
 
-    def act(self, inputs, rnn_hxs, masks, deterministic=False):
-        value, actor_features, rnn_hxs, activities = self.base(inputs, rnn_hxs, masks)
-        dist = self.dist(actor_features)
+    @staticmethod
+    def split_observer_base_obs(full_obs: torch.Tensor):
+        # Wind obsver v2 modification: split observer and base observations
+        """
+        Minimal split:
+        - observer sees all inputs except index 2
+        - base sees all original inputs (full_obs)
 
-        if deterministic:
-            action = dist.mode()
-        else:
-            action = dist.sample()
+        full_obs: [B, D]
+        returns:
+            obs_wind_module:  [B, D-1]  (drop dim=2)
+            obs_base: [B, D]    (unchanged)
+        """
+        # Check shape
+        assert full_obs.dim() == 2, f"Expected full_obs shape [B, D], got {full_obs.shape}"
 
-        action_log_probs = dist.log_probs(action)
+        B, D = full_obs.shape
+        assert D > 2, f"Need at least 3 dims to drop index 2, got D={D}"
 
-        return value, action, action_log_probs, rnn_hxs, activities
-    
-    def act(self, full_obs, rnn_hxs, h_obs, masks, deterministic=False):
+        # Take out odor from wind observer inputs
+        # Equivalent to concat([0,1], [3,4,...,D-1])
+        keep_left  = full_obs[:, :2]          # [B, 2]
+        keep_right = full_obs[:, 3:]          # [B, D-3] (if D=3, this is empty)
+        obs_wind_module = torch.cat([keep_left, keep_right], dim=-1)  # [B, D-1]
+
+        obs_base = full_obs  # base sees full input
+
+        return obs_wind_module, obs_base
+        
+    def act(self, full_obs, rnn_hxs, h_wind_module, masks, deterministic=False):
+        # Wind obsver v2 modification: split obs for observer and base; 
         # full_obs: [B, full_dim]
         # 你需要一个函数 split_observer_base_obs()
-        obs_obs, obs_base = split_observer_base_obs(full_obs) # TODO: dummy version for now
+        obs_wind_module, obs_base = self.split_observer_base_obs(full_obs) # TODO: static version for now. Set obs later.
 
         # 1) Wind inputs into observer
-        wind_mu, wind_logvar, h_obs = self.observer(obs_obs, h_obs, masks)
+        wind_mu, wind_logvar, h_wind_module = self.observer(obs_wind_module, h_wind_module, masks)
 
         # 2) General inputs into base, concatenated with wind belief
         base_in = torch.cat([obs_base, wind_mu.detach(), wind_logvar.detach()], dim=-1)
@@ -129,14 +212,29 @@ class Policy(nn.Module):
         activities['wind_mu'] = wind_mu
         activities['wind_logvar'] = wind_logvar
 
-        return value, action, action_log_probs, (rnn_hxs, h_obs), activities
+        return value, action, action_log_probs, (rnn_hxs, h_wind_module), activities
 
-    def get_value(self, inputs, rnn_hxs, masks):
-        value, _, _, _ = self.base(inputs, rnn_hxs, masks)
+    def get_value(self, inputs, rnn_hxs, h_wind_module, masks):
+        '''return the value estimation given inputs and states
+        Ran in training loop for critic loss computation of the last step. We don't store wind predictions there so recompute.
+        '''
+        # full_obs: [B, D]
+        obs_wind_module, obs_base = self.split_observer_base_obs(inputs)
+
+        wind_mu, wind_logvar, h_wind_module = self.observer(obs_wind_module, h_wind_module, masks)
+
+        base_in = torch.cat([obs_base, wind_mu.detach(), wind_logvar.detach()], dim=-1)
+
+        value, _, rnn_hxs, _ = self.base(base_in, rnn_hxs, masks)
         return value
 
-    def evaluate_actions(self, inputs, rnn_hxs, masks, action):
-        value, actor_features, rnn_hxs, activities = self.base(inputs, rnn_hxs, masks)
+    def evaluate_actions(self, base_inputs, rnn_hxs, masks, action):
+        '''Run the base module to evaluate actions (for actor loss) in PPO. Ran wind prediction upstream and the inputs here contain predictions already. 
+        Return action log prob and entropy of actor distribution for PPO update
+        
+        base_inputs: includes base observations and wind predictions 
+        '''
+        value, actor_features, rnn_hxs, activities = self.base(base_inputs, rnn_hxs, masks)
         dist = self.dist(actor_features)
 
         action_log_probs = dist.log_probs(action)
