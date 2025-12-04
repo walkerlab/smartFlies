@@ -20,7 +20,7 @@ from env import make_vec_envs, get_vec_normalize
 from tamagotchi.a2c_ppo_acktr.ppo_wind_obsver_v2 import PPO
 from tamagotchi.a2c_ppo_acktr.model_wind_obsver_v2 import Policy
 from tamagotchi.a2c_ppo_acktr.storage_wind_obsver_v2 import RolloutStorage
-from training_wind_obsver_v1 import training_loop
+from training_wind_obsver_v2 import training_loop
 import mlflow
 
 def get_args():
