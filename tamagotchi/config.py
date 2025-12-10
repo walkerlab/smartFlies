@@ -8,6 +8,7 @@ import socket
 MACHINE = socket.gethostname().lower()
 curr_wd = os.getcwd()
 datadir = '/src/data/published_results/reproduce/'
+datadir = '/src/data/performance_plot_data_code/collection_1/'
 if 'gscratch' in curr_wd:
     datadir = '/gscratch/walkerlab/jqhu/smartFlies/data/published_results/reproduce/'
 # print(f'Using datadir: {datadir}', flush=True)
