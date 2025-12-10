@@ -92,7 +92,9 @@ class DiagGaussian(nn.Module):
 
     def forward(self, x):
         action_mean = self.fc_mean(x)
-
+        # Set trainable_std_dev to False if it does not exist
+        if not hasattr(self, 'trainable_std_dev'):
+            self.trainable_std_dev = False
         if self.trainable_std_dev:
             action_logstd = self.logstd(x)
         else:
