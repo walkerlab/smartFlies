@@ -814,7 +814,7 @@ class PlumeEnvironment_v2(gym.Env):
     self.t_val_min = t_val_min
     self.episode_steps_max = sim_steps_max # Short training episodes to gather rewards
     self.t_val_max = self.t_val_min + self.reset_offset_tmax + 1.0*self.episode_steps_max/self.fps + 1.00
-
+    print(f"[DEBUG] PEv3:dataset {dataset}", flush=True)
     self.set_dataset(dataset)
 
     # Correction for short simulations
