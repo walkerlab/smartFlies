@@ -24,7 +24,22 @@ def load_plume(
 
     # pandas dataframe
     data_puffs = pd.read_pickle(puff_filename)
-    data_wind = pd.read_pickle(wind_filename)
+    try:
+        data_wind = pd.read_pickle(wind_filename)
+    except Exception as e:
+        # Try to load Toha data format where all data is in one file
+        # pandas dataframe - Toha data has plume and wind in one file
+        data = pd.read_pickle(puff_filename)
+        data_puffs = data.copy()
+        # take only puff columns
+        puff_columns = ['puff_number', 'time', 'puff_x', 'puff_y', 'puff_r']
+        data_puffs = data_puffs[puff_columns]
+        # rename columns
+        data_puffs.rename(columns={'puff_x':'x', 'puff_y':'y', 'puff_r':'radius'}, inplace=True)
+        # make the wind df
+        data_wind = data.copy()
+        wind_columns = ['wind_x', 'wind_y', 'time']
+        data_wind = data_wind[wind_columns]
 
     # Load plume/wind data and truncate away upto t_val_min 
     if t_val_min is not None:
@@ -77,7 +92,6 @@ def load_plume(
 
 
     return data_puffs, data_wind
-
 
 def rotate_wind_optimized(data_wind, rotation_angle_degrees, mirror):
     """
