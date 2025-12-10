@@ -1,3 +1,4 @@
+# Version one. Same design of RNN + actor critic, except RNN will also predict wind direction
 import numpy as np
 import torch
 import torch.nn as nn
@@ -75,13 +76,13 @@ class Policy(nn.Module):
         return value
 
     def evaluate_actions(self, inputs, rnn_hxs, masks, action):
-        value, actor_features, rnn_hxs, _ = self.base(inputs, rnn_hxs, masks)
+        value, actor_features, rnn_hxs, activities = self.base(inputs, rnn_hxs, masks)
         dist = self.dist(actor_features)
 
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()
 
-        return value, action_log_probs, dist_entropy, rnn_hxs
+        return value, action_log_probs, dist_entropy, rnn_hxs, activities
     
     def reset_actor(self):
         """
@@ -252,10 +253,15 @@ class MLPBase(NNBase):
             init_(nn.Linear(hidden_size, hidden_size)), nn.Tanh())
 
         self.critic_linear = init_(nn.Linear(hidden_size, 1))
+        
+        # Wind prediction heads
+        self.wind_mu_head = nn.Linear(hidden_size, 2)       # [cosθ, sinθ]
+        self.wind_logvar_head = nn.Linear(hidden_size, 2)   # per-dim log-variance
+
 
         self.train() # tells your model that you are training the model not eval().
-
-    def forward(self, inputs, rnn_hxs, masks, input_masks=None):
+    
+    def forward(self, inputs, rnn_hxs, masks, input_masks = None):
         x = inputs
         if self.is_recurrent:
             x, rnn_hxs = self._forward_rnn(x, rnn_hxs, masks, input_masks=input_masks)
@@ -267,13 +273,20 @@ class MLPBase(NNBase):
 
         value = self.critic_linear(hidden_critic)
         
+        # ➕ wind belief from hidden_actor
+        wind_mu = self.wind_mu_head(hidden_actor)
+        wind_logvar = self.wind_logvar_head(hidden_actor)
+
+        
         activities = {
             'rnn_hxs': rnn_hxs,
             'hx1_actor': hx1_actor,
             'hx1_critic': hx1_critic,
             'hidden_actor': hidden_actor,
             'hidden_critic': hidden_critic,
-            'value': value,
+            'value': value,            
+            'wind_mu': wind_mu,
+            'wind_logvar': wind_logvar,
         }
 
         return value, hidden_actor, rnn_hxs, activities

@@ -735,6 +735,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                 value, action, action_log_prob, recurrent_hidden_states, activities = actor_critic.act(
                     rollouts.obs[step], 
                     rollouts.recurrent_hidden_states[step],
+                    rollouts.observer_hidden_states[step], # wind obsver v2 modification: pass in wind observer hidden states
                     rollouts.masks[step])
             obs, reward, done, infos = envs.step(action)
             if j % plot_every_n_updates == 0:
@@ -763,19 +764,26 @@ def training_loop(agent, envs, args, device, actor_critic,
                 for info in infos])
             if step ==args.num_steps -1:
                 obs = envs.reset()
-            rollouts.insert(obs, recurrent_hidden_states, action,
-                            action_log_prob, value, reward, masks, bad_masks) # ~0.0006s
+                
+            # wind obsver v1 modification: grab wind target (wind_dirs) from infos 
+            wind_vels = [info['ambient_wind'] for info in infos]
+            wind_dirs = wind_vels / (np.linalg.norm(wind_vels, axis=1, keepdims=True) + 1e-8) # normalize to unit vectors
+            wind_dirs = torch.tensor(wind_dirs, dtype=torch.float32, device=device)
+            # wind obsver v1 modification: insert wind into rollouts
+            rollouts.insert(obs, recurrent_hidden_states, action, action_log_prob,
+                            value, reward, masks, bad_masks,
+                            wind_targets=wind_dirs)
         ##############################################################################################################
         # UPDATE AGENT 
         ##############################################################################################################
         obs, reward, done, infos = envs.step(action) # reset the environment after collecting the trajectories
         with torch.no_grad():
             next_value = actor_critic.get_value(
-                rollouts.obs[-1], rollouts.recurrent_hidden_states[-1],
+                rollouts.obs[-1], rollouts.recurrent_hidden_states[-1], rollouts.observer_hidden_states[-1],
                 rollouts.masks[-1]).detach()
         rollouts.compute_returns(next_value, args.use_gae, args.gamma,
                                 args.gae_lambda, args.use_proper_time_limits)
-        value_loss, action_loss, dist_entropy, clip_fraction, advantages = agent.update(rollouts)
+        value_loss, action_loss, dist_entropy, clip_fraction, advantages, extras = agent.update(rollouts) # wind obsver v1 modification: pass in return hash for mlflow logging
         
         # After update, get stored trajectories
         if j % plot_every_n_updates == 0:
@@ -791,8 +799,8 @@ def training_loop(agent, envs, args, device, actor_critic,
                 except Exception as e:
                     print(f"Error logging artifact {plt_path}: {e}")
                 
-        utils.log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
-        if j % plot_every_n_updates == 0:
+        utils.log_agent_learning_wind_obsver(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], aux_loss_dict=extras, use_mlflow=args.mlflow)
+        if j % 20 == 0: # wind obsver v1 modification: plot success fractions every 20 updates
             utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
                 
         rollouts.after_update()
@@ -832,12 +840,12 @@ def training_loop(agent, envs, args, device, actor_critic,
     
     # save the final model to mlflow
     if args.mlflow:
-        mlflow.log_artifact(args.model_fpath, artifact_path="weights")
+        # mlflow.log_artifact(args.model_fpath, artifact_path="weights") # 111725 1mb agent file too big - never used this so turn off
         mlflow.log_artifact(args.training_log, artifact_path="training_logs")
-        if args.if_vec_norm:
-            vecNormalize_state_fname = args.model_fpath.replace(".pt", "_vecNormalize.pkl")
-            mlflow.log_artifact(vecNormalize_state_fname, artifact_path="weights")
-            # save the final training log
+        # if args.if_vec_norm:
+        #     vecNormalize_state_fname = args.model_fpath.replace(".pt", "_vecNormalize.pkl")
+        #     mlflow.log_artifact(vecNormalize_state_fname, artifact_path="weights")
+        #     # save the final training log
         
     return training_log, eval_log
 

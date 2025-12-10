@@ -41,6 +41,14 @@ def vec2rad_norm_by_pi(x, y):
     """
     return np.angle( x + 1j*y, deg=False )/np.pi # note div by np.pi!
 
+def vec2rad(x, y):
+    """
+    # https://physicsclassroom.com/mmedia/vectors/vd.cfm#:~:text=The%20convention%20upon%20which%20we,of%20rotation%20from%20due%20east.
+    Standard CCW notation, centered at 0
+    Returns +pi is +180-deg, and -pi is -180-deg 
+    """
+    return np.angle( x + 1j*y, deg=False )
+
 def rad_over_pi_shift2_01(theta):
     """
     input: between -1 (-180-deg) and +1 (+180 deg)
