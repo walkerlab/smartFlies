@@ -37,15 +37,21 @@ def load_init_conditions(csv_file):
         init_conditions.columns = ['file', 'loc_x', 'loc_y', 'time', 't_move', 'plume_growth_rate', 'plume_density', 'initial_distance', 'plume_shape']
     else:
         init_conditions.columns = ['loc_x', 'loc_y', 'time', 'file']
-    # initialize head direction in radians
-    # init_head_directions = np.linspace(0, 2, 9)[:8]*np.pi # angle - taken from eval_Cli.py
-    init_head_directions = np.arctan2(-init_conditions['loc_y'], -init_conditions['loc_x']) # Initial heading towards the origin (0,0)
-    # build a new column with the distinct values
-    # Repeat the DataFrame for each head direction
-    repeated_df = pd.concat([init_conditions] * len(init_head_directions), ignore_index=True)
-    # Assign the distinct values to the new column
-    repeated_df['angle'] = np.repeat(init_head_directions, len(init_conditions))
-    print(f"[DEBUG] PEv3: repeated_df angles {repeated_df['file'].values}", flush=True)
+    random_HD = False
+    if random_HD:
+        # initialize head direction in radians
+        init_head_directions = np.linspace(0, 2, 9)[:8]*np.pi # angle - taken from eval_Cli.py
+        # build a new column with the distinct values
+        # Repeat the DataFrame for each head direction
+        repeated_df = pd.concat([init_conditions] * len(init_head_directions), ignore_index=True)
+        # Assign the distinct values to the new column
+        repeated_df['angle'] = np.repeat(init_head_directions, len(init_conditions))
+        print(f"[DEBUG] PEv3: repeated_df angles {repeated_df['file'].values}", flush=True)
+    else: # fixed HD towards the origin
+        init_head_directions = np.arctan2(-init_conditions['loc_y'], -init_conditions['loc_x']) # Initial heading towards the origin (0,0)
+        repeated_df = init_conditions.copy()
+        repeated_df['angle'] = init_head_directions.values
+        print(f"[DEBUG] PEv3: fixed_df angles {repeated_df['file'].values}", flush=True)
     # Convert to numpy array
     if repeated_df.shape[1] != 5:
         out_ndarry = repeated_df[['loc_y', 'angle', 'loc_x', 'time', 'file']].to_numpy() # column order follows the prev. convention
@@ -86,7 +92,6 @@ def evaluate_agent(actor_critic, env, args):
             venv.fixed_x = grid[i_episode, 2] # meters
             venv.t_val_min = grid[i_episode, 3] # seconds
             venv.t_val_max = venv.t_val_min + venv.reset_offset_tmax + 1.0*venv.episode_steps_max/venv.fps + 1.00
-            print(f"[DEBUG] PEv3:dataset {grid[i_episode, 4]}",flush=True)
             venv.set_dataset(grid[i_episode, 4]) # read in the dataset file
 
 
@@ -435,7 +440,7 @@ if __name__ == "__main__":
     args.action_feedback = False
     args.walking = False
     args.radiusx = 1.0
-    args.r_shaping = ['step'] # redundant
+    args.r_shaping = ['step'] 
     args.rewardx = 1.0
     args.squash_action = True
 
@@ -445,7 +450,7 @@ if __name__ == "__main__":
     args.flipping = False
     args.odor_scaling = False
     args.qvar = 0.0
-    args.stray_max = 2.0
+    args.stray_max = 50.0 # 121525 - enlarge for toha's large arena - inits up to 27m from nearest - just gonna turn off oob for now (turn on by adding oob to r_shaping)
     args.birthx_max = 1.0
     args.masking = None
     args.stride = 1
