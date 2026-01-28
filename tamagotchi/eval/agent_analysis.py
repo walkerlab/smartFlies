@@ -173,6 +173,9 @@ def visualize_single_episode(data_puffs, data_wind, traj_df,
     if zoom == 4: # constant + larger arena
         ax.set_xlim(-0.5, 10.5)
         ax.set_ylim(-3, +3)
+    if zoom == 'toha': # toha's large arena
+        ax.set_ylim(-1, 40)
+        ax.set_xlim(-4, +4)
     if zoom == -1: # Adaptive -- fine for stills, jerky when used for animations
         ax.set_xlim(-0.5, 10.1)
         y_max = max(data_puffs[data_puffs.time == t_val].y.max(), traj_df.iloc[:,1].max()) + 0.5
@@ -186,9 +189,8 @@ def visualize_single_episode(data_puffs, data_wind, traj_df,
         print(ylims)
         ax.set_ylim(ylims[0], ylims[1])
 
-    if zoom > 0:
-        ax.set_xlabel('Arena length [m]')
-        ax.set_ylabel('Arena width [m]')
+    ax.set_xlabel('Arena length [m]')
+    ax.set_ylabel('Arena width [m]')
     if title_text is not None:
         ax.set_title(title_text)
     if legend:
@@ -240,7 +242,7 @@ def animate_single_episode(
         os.makedirs(f'{outprefix}/tmp/')
         
     t_val_min = None
-    for t_idx in tqdm.tqdm(range(n_tvals)):
+    for t_idx in tqdm.tqdm(range(n_tvals), disable=True): # NOTE: disable tqdm progress bar to reduce log clutter
         traj_df_subset = traj_df.iloc[:t_idx+1,:] # feed trajectory incrementally 
         t_val = t_vals[t_idx]
         if t_val_min is None:
@@ -400,6 +402,7 @@ def visualize_episodes(episode_logs,
         axs.append(ax)
 
         if animate:
+            print("Animating episode:", episode_idx_title)
             animate_single_episode(data_puffs, data_wind, traj_df, 
                 t_vals, t_vals_all, episode_idx_title, outprefix, 
                 fprefix, zoom, colorby=colorby, plotsize=plotsize, legend=legend, invert_colors=invert_colors)

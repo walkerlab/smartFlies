@@ -46,6 +46,7 @@ def post_eval(args):
                                   args.use_datasets, 
                                   n_episodes_home=60, 
                                   n_episodes_other=60,
+                                  oob_only=False,
                                   min_ep_steps=0)
     # Generate common PCA
     h_episodes = []
@@ -113,6 +114,7 @@ def post_eval(args):
             zoom = 4 if ('constant' in dataset) and ('HOME' not in outcome) else zoom 
             # zoom = 0 
             zoom = 3 if args.walking else zoom
+            # zoom = 'toha' # for plotting traj for toha whose arena is big!
             agent_analysis.visualize_episodes(episode_logs=[row['log']], 
                                               traj_df=traj_df,
                                               episode_idxs=[row['idx']],

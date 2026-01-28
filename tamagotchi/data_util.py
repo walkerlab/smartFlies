@@ -88,7 +88,8 @@ def load_plume(
     data_puffs['x_plus_radius'] = data_puffs.x + data_puffs.radius
     data_puffs['y_minus_radius'] = data_puffs.y - data_puffs.radius
     data_puffs['y_plus_radius'] = data_puffs.y + data_puffs.radius
-    data_puffs['concentration'] = (min_radius/data_puffs.radius)**3
+    epsilon = 1e-4
+    data_puffs['concentration'] = (min_radius/(data_puffs.radius + epsilon))**3
 
 
     return data_puffs, data_wind

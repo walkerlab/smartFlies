@@ -448,7 +448,7 @@ if __name__ == "__main__":
     args.action_feedback = False
     args.walking = False
     args.radiusx = 1.0
-    args.r_shaping = ['step'] # redundant
+    args.r_shaping = ['step', 'oob'] # 121625 add oob since termination condition is only activated when this is added.
     args.rewardx = 1.0
     args.squash_action = True
 
