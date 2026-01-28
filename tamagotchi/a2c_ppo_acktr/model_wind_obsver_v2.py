@@ -19,6 +19,7 @@ class WindObserverModule(nn.Module):
         self.rnn = nn.RNN(obs_dim, hidden_size)
         self.head_mu = nn.Linear(hidden_size, 2)
         self.head_logvar = nn.Linear(hidden_size, 2)
+        self.recurrent_hidden_state_size = hidden_size
 
     @property
     def hidden_state_size(self):
@@ -190,27 +191,43 @@ class Policy(nn.Module):
 
         return obs_wind_module, obs_base
         
-    def act(self, full_obs, rnn_hxs, h_wind_module, masks, deterministic=False):
+    def act(self, full_obs, rnn_hxs, h_wind_module, masks, deterministic=False, vr_wind_mod=False):
         # Wind obsver v2 modification: split obs for observer and base; 
         # full_obs: [B, full_dim]
-        # 你需要一个函数 split_observer_base_obs()
-        obs_wind_module, obs_base = self.split_observer_base_obs(full_obs) # TODO: static version for now. Set obs later.
+        if full_obs.shape[-1] == 11: # during vrvr, obs passed in with predtermined wind predictor outputs; split if wind in inputs, no matter if vr_wind_mod
+            vr_wind_mu = full_obs[:, -4:-2]
+            vr_wind_logvar = full_obs[:, -2:]
+            full_obs = full_obs[:, :-4]  # remove wind pred inputs for observer 
 
+        obs_wind_module, obs_base = self.split_observer_base_obs(full_obs) # TODO: static version for now. Set obs later.
+        
         # 1) Wind inputs into observer
         wind_mu, wind_logvar, h_wind_module = self.observer(obs_wind_module, h_wind_module, masks)
 
         # 2) General inputs into base, concatenated with wind belief
-        base_in = torch.cat([obs_base, wind_mu.detach(), wind_logvar.detach()], dim=-1)
-        # ↑ 如果你想让 observer 只走 aux loss，不走 RL 梯度就 detach；否则去掉 detach
+        if full_obs.shape[-1] == 11 and vr_wind_mod:
+            wind_mu = wind_mu.clone()
+            wind_logvar = wind_logvar.clone()
+
+            mu_valid = ~torch.isnan(vr_wind_mu)
+            logvar_valid = ~torch.isnan(vr_wind_logvar)
+
+            wind_mu[mu_valid] = vr_wind_mu[mu_valid]
+            wind_logvar[logvar_valid] = vr_wind_logvar[logvar_valid]
+
+        base_in = torch.cat([obs_base, wind_mu.detach(), wind_logvar.detach()], dim=-1) # 如果你想让 observer 只走 aux loss，不走 RL 梯度就 detach；否则去掉 detach
         value, actor_features, rnn_hxs, activities = self.base(base_in, rnn_hxs, masks)
+        
+        # 3) Store wind predictions in activities for logging
+        activities['wind_mu'] = wind_mu
+        activities['wind_logvar'] = wind_logvar
+        if vr_wind_mod:
+            activities['vr_wind_mu'] = vr_wind_mu
+            activities['vr_wind_logvar'] = vr_wind_logvar
 
         dist = self.dist(actor_features)
         action = dist.mode() if deterministic else dist.sample()
         action_log_probs = dist.log_probs(action)
-
-        # 也可以把 wind 相关信息塞进 activities
-        activities['wind_mu'] = wind_mu
-        activities['wind_logvar'] = wind_logvar
 
         return value, action, action_log_probs, (rnn_hxs, h_wind_module), activities
 
