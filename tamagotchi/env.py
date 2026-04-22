@@ -78,11 +78,9 @@ class PlumeEnvironment(gym.Env):
     obs_noise=0.0, # Multiplicative: Wind & Odor observation noise.
     act_noise=0.0, # Multiplicative: Move & Turn action noise.
     dynamic=False,
-    action_physics='air_vel_angvel', # or 'ground_vel_angvel': agent commands ground velocity instead of air velocity
     seed=137,
     verbose=0):
     super(PlumeEnvironment, self).__init__()
-    self.action_physics = action_physics
 
     assert dynamic is False
     np.random.seed(seed)    
@@ -552,35 +550,18 @@ class PlumeEnvironment(gym.Env):
     new_angle_radians = old_angle_radians + self.turn_capacity*self.turnx*(turn_action - 0.5)*self.dt # in radians
     self.agent_angle = [ np.cos(new_angle_radians), np.sin(new_angle_radians) ]    
     assert np.linalg.norm(self.agent_angle) < 1.1
-
-    if self.action_physics == 'ground_vel_angvel':
-        # Agent directly commands ground-frame velocity in its heading direction.
-        # No wind advection is added: ground velocity is exactly what the agent sets.
-        # Air velocity (what an airspeed sensor would read) = ground_vel - wind_ground,
-        # and is used by sense_environment() via agent_velocity_last.
-        ground_speed = self.move_capacity*self.movex*move_action
-        ground_vel_x = self.agent_angle[0]*ground_speed
-        ground_vel_y = self.agent_angle[1]*ground_speed
-        self.agent_location = [
-            self.agent_location[0] + ground_vel_x*self.dt,
-            self.agent_location[1] + ground_vel_y*self.dt,
-        ]
-        self.agent_velocity_last = np.array([ground_vel_x, ground_vel_y])
-        self.agent_air_velocity_last = self.agent_velocity_last - np.array(self.wind_ground)
-    else:
-        # Original physics: agent commands air velocity in heading direction; wind drifts it.
-        agent_move_x = self.agent_angle[0]*self.move_capacity*self.movex*move_action*self.dt
-        agent_move_y = self.agent_angle[1]*self.move_capacity*self.movex*move_action*self.dt
-        wind_drift_x = self.wind_ground[0]*self.dt
-        wind_drift_y = self.wind_ground[1]*self.dt
-        if self.walking:
-            wind_drift_x = wind_drift_y = 0
-        self.agent_location = [
-          self.agent_location[0] + agent_move_x + wind_drift_x,
-          self.agent_location[1] + agent_move_y + wind_drift_y,
-        ]
-        self.agent_velocity_last = np.array([agent_move_x, agent_move_y])/self.dt # For relative wind calc.
-
+    # New location = old location + agent movement + wind advection
+    agent_move_x = self.agent_angle[0]*self.move_capacity*self.movex*move_action*self.dt
+    agent_move_y = self.agent_angle[1]*self.move_capacity*self.movex*move_action*self.dt
+    wind_drift_x = self.wind_ground[0]*self.dt
+    wind_drift_y = self.wind_ground[1]*self.dt
+    if self.walking:
+        wind_drift_x = wind_drift_y = 0
+    self.agent_location = [
+      self.agent_location[0] + agent_move_x + wind_drift_x,
+      self.agent_location[1] + agent_move_y + wind_drift_y,
+    ]
+    self.agent_velocity_last = np.array([agent_move_x, agent_move_y])/self.dt # For relative wind calc.
     ### ----------------- End conditions / Is the trial over ----------------- ### 
     is_home = np.linalg.norm(self.agent_location) <= self.homed_radius 
     is_outoftime = self.episode_step >= self.episode_steps_max - 1           
@@ -1388,6 +1369,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  haltere=False, 
                  saccade=False, 
                  double_drift=False,
+                 action_physics='air_vel_angvel', # or 'ground_vel_angvel': agent commands ground velocity instead of air velocity
                  **kwargs):
         '''
         soft_reset_button: bool or None; button never turns on if None, otherwise it will be set to True when step() fails.
@@ -1409,7 +1391,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.stray_steps = 0 # how many steps of OOB? env fail at 10!
         self.haltere = haltere # PEv3 - haltere feedback
         self.double_drift = double_drift
-        print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}, self.mirror: {self.mirror}, haltere: {self.haltere}")
+        self.action_physics = action_physics
+        print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}, self.mirror: {self.mirror}, haltere: {self.haltere}, self.action_physics: {self.action_physics}")
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                         shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
@@ -1578,7 +1561,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
 
         elif 'slice' in algo:
             """ 
-            Distance curriculum
+            Distance curriculum - more robust and works with rotate_by 
             Start the agent at a location with random location with mean and var
             decided by distribution/percentile of puffs
             
@@ -1967,17 +1950,36 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.agent_angle = [ np.cos(new_angle_radians), np.sin(new_angle_radians) ]    
 
         # New location = old location + agent movement + wind advection
-        agent_move_x = self.agent_angle[0]*self.move_capacity*self.movex*move_action*self.dt
-        agent_move_y = self.agent_angle[1]*self.move_capacity*self.movex*move_action*self.dt
-        wind_drift_x = self.ambient_wind[0]*self.dt
-        wind_drift_y = self.ambient_wind[1]*self.dt
-        self.agent_location = [
-        self.agent_location[0] + agent_move_x + wind_drift_x,
-        self.agent_location[1] + agent_move_y + wind_drift_y,
-        ]
-        # Air and ground velocity
-        self.air_velocity = np.array([agent_move_x, agent_move_y])/self.dt # Rel_wind = Amb_wind - Air_vel
-        self.ground_velocity = (np.array(self.agent_location) - self.agent_location_last)/self.dt
+
+        if self.action_physics == 'ground_vel_angvel':
+            # Agent directly commands ground-frame velocity in its heading direction.
+            # No wind advection is added: ground velocity is exactly what the agent sets.
+            # Air velocity (what an airspeed sensor would read) = ground_vel - wind_ground,
+            # and is used by sense_environment() via agent_velocity_last.
+            ground_speed = self.move_capacity*self.movex*move_action
+            ground_vel_x = self.agent_angle[0]*ground_speed
+            ground_vel_y = self.agent_angle[1]*ground_speed
+            self.agent_location = [
+                self.agent_location[0] + ground_vel_x*self.dt,
+                self.agent_location[1] + ground_vel_y*self.dt,
+            ]
+            self.ground_velocity = np.array([ground_vel_x, ground_vel_y])
+            self.air_velocity = self.ground_velocity - np.array(self.ambient_wind) # Rel_wind = Amb_wind - Air_vel
+        else:
+            # Original physics: agent commands air velocity in heading direction; wind drifts it.
+            agent_move_x = self.agent_angle[0]*self.move_capacity*self.movex*move_action*self.dt
+            agent_move_y = self.agent_angle[1]*self.move_capacity*self.movex*move_action*self.dt
+            wind_drift_x = self.ambient_wind[0]*self.dt
+            wind_drift_y = self.ambient_wind[1]*self.dt
+            if self.walking:
+                wind_drift_x = wind_drift_y = 0
+            self.agent_location = [
+            self.agent_location[0] + agent_move_x + wind_drift_x,
+            self.agent_location[1] + agent_move_y + wind_drift_y,
+            ]
+            # Air and ground velocity
+            self.air_velocity = np.array([agent_move_x, agent_move_y])/self.dt # Rel_wind = Amb_wind - Air_vel
+            self.ground_velocity = (np.array(self.agent_location) - self.agent_location_last)/self.dt
         # print(f"[DEBUG] PEv3 step: air_velocity: {self.air_velocity}, ambient_wind: {self.ambient_wind}, agent_location: {self.agent_location}")
         # print(f"[DEBUG] PEv3 step: ground_velocity: {self.ground_velocity}")
 
