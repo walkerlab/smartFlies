@@ -74,7 +74,11 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 import sim_utils
 import argparse
 import pandas as pd
-import config
+try:
+    import config
+except ImportError:
+    import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import config #hydra pipeline version
 import numpy as np
 
 # Parse CLI arguments

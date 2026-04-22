@@ -22,7 +22,11 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import os
 import tqdm
-import config
+try:
+    import config
+except ImportError:
+    import sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import config #hydra pipeline version
 np.random.seed(config.seed_global)
 
 
@@ -453,6 +457,72 @@ def get_puffs_df_vector(wind_df, wind_y_var, birth_rate, verbose=True):
             puffs_df[col] = puffs_df[col].astype('float16') # Use lightest floats
     assert n_times_pre == len(puffs_df['time'].unique()) # Make sure compression lossless
     return puffs_df
+
+
+# --- Online plume simulation (numpy, no pandas) ---
+
+_PLUME_MIN_R = np.float32(0.01)
+_PLUME_EPS   = np.float32(1e-4)
+
+def _concentration_at(qx, qy, px, py, pr):
+    """Sum concentration of all puffs whose bounding box contains (qx, qy)."""
+    hit = (px - pr < qx) & (qx < px + pr) & (py - pr < qy) & (qy < py + pr)
+    return float(np.sum((_PLUME_MIN_R / (pr[hit] + _PLUME_EPS)) ** 3))
+
+def init_plume_online():
+    """Return initial puff state: one seed puff at the origin."""
+    return (np.array([0.0], dtype=np.float32),
+            np.array([0.0], dtype=np.float32),
+            np.array([_PLUME_MIN_R], dtype=np.float32))
+
+def step_plume_online(puff_x, puff_y, puff_r, wind_x, wind_y,
+                      dt=0.01, rdot=0.01, birth_rate=1.0, wind_y_var=0.5,
+                      alpha=1.0,
+                      x_min=-2.0, x_max=10.0, y_min=-10.0, y_max=10.0):
+    """
+    Single Euler step for online odor plume simulation.
+
+    Evolves puff positions by wind advection + stochastic y-diffusion, expands
+    radii, prunes out-of-domain puffs, then spawns new puffs at the origin via
+    a Poisson process whose rate is suppressed by current odor density at the
+    origin (alpha=0 recovers fixed-rate spawning).
+
+    Parameters
+    ----------
+    puff_x, puff_y, puff_r : np.ndarray  float32, shape (N,)
+    wind_x, wind_y : float   current wind velocity [m/s]
+    dt             : float   time step [s]
+    rdot           : float   radius growth rate [m/s]
+    birth_rate     : float   baseline Poisson mean for new puffs per step
+    wind_y_var     : float   std dev of per-puff y-noise [m/s]
+    alpha          : float   density-suppression strength; 0 = fixed rate
+    x_min/x_max/y_min/y_max : float  domain bounds [m]
+
+    Returns
+    -------
+    puff_x, puff_y, puff_r : np.ndarray  updated puff state
+    """
+    n = len(puff_x)
+    noise = np.random.normal(0.0, wind_y_var, size=n).astype(np.float32)
+    puff_x = puff_x + np.float32(wind_x * dt)
+    puff_y = puff_y + np.float32(wind_y * dt) + noise * np.float32(dt)
+    puff_r = puff_r + np.float32(rdot * dt)
+
+    mask = (puff_x > x_min) & (puff_x < x_max) & \
+           (puff_y > y_min) & (puff_y < y_max) & \
+           (puff_r > 0.0)
+    puff_x, puff_y, puff_r = puff_x[mask], puff_y[mask], puff_r[mask]
+
+    c_origin = _concentration_at(0.0, 0.0, puff_x, puff_y, puff_r)
+    eff_rate = birth_rate / (1.0 + alpha * c_origin)
+    n_new = np.random.poisson(eff_rate)
+
+    if n_new > 0:
+        puff_x = np.append(puff_x, np.zeros(n_new, dtype=np.float32))
+        puff_y = np.append(puff_y, np.zeros(n_new, dtype=np.float32))
+        puff_r = np.append(puff_r, np.full(n_new, _PLUME_MIN_R, dtype=np.float32))
+
+    return puff_x, puff_y, puff_r
 
 
 # from plume.sim_analysis for plot_puffs_and_wind_vectors
