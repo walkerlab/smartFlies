@@ -1,0 +1,53 @@
+defaults:
+  - config        # inherits base config
+  - _self_
+
+dataset: [constantx5b5]
+# dataset: [constant_mag_narrowx5b5]
+# dataset: [poisson_noisy3x5b5]
+# dataset: [noisy3x5b5]
+
+qvar: [0.5]
+# qvar: [1.5]
+# qvar: [2.0]
+
+diff_max: [0.4]
+# diff_max: [0.8]
+
+diff_min: [0.2]
+# diff_min: [0.7]
+
+num_env_steps: 2500000
+# num_env_steps: 10000000
+
+birthx: 0.01
+flipping: false
+rotate_by: 1
+
+save_dir: /src/data/wind_sensing/apparent_wind_visual_feedback/PE_test/
+log_interval: 1
+
+r_shaping: [step, oob, rotate_by]
+# r_shaping: [step, oob]
+
+seed: 12685
+num_processes: 2
+num_mini_batch: 2
+ppo_epoch: 5
+lr: 3e-4
+
+outsuffix: debugger_test_hydra
+birthx_linear_tc_steps: 7
+dryrun: false
+
+apparent_wind: true
+visual_feedback: true
+if_train_actor_std: true
+stray_max: 2.0
+if_vec_norm: 1
+obs_noise: 0.0
+mlflow: 0
+
+loc_algo: on_plume_linear
+# loc_algo: slice_linear
+# loc_algo: slice

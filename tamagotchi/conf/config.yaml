@@ -1,0 +1,111 @@
+# Hydra config for dronmagotchi. Override from CLI, e.g.:
+#   python -m tamagotchi.main_hydra outsuffix=run01 action_physics=ground_vel_angvel
+# Multirun sweep:
+#   python -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=air_vel_angvel,ground_vel_angvel
+
+defaults:
+  # - override hydra/launcher: submitit_local
+  - _self_
+
+# PPO / optimizer
+algo: ppo
+lr: 0.0003
+eps: 1.0e-05
+alpha: 0.99
+gamma: 0.99
+use_gae: true
+gae_lambda: 0.95
+entropy_coef: 0.005
+value_loss_coef: 0.5
+max_grad_norm: 0.5
+seed: 137            # sampled by the insert layer at launch time
+cuda_deterministic: false
+num_processes: 4
+num_steps: 2048
+ppo_epoch: 10
+num_mini_batch: 4
+clip_param: 0.2
+log_interval: 1
+save_interval: 100
+no_cuda: false
+use_proper_time_limits: false
+recurrent_policy: true
+use_linear_lr_decay: true
+weight_decay: 0.0001
+
+# Env / experiment
+env_name: plume
+log_dir: /src/data/wind_sensing/apparent_wind_visual_feedback/logs/
+
+save_dir: /src/data/wind_sensing/apparent_wind_visual_feedback/multirun_test/
+dynamic: false
+eval_type: skip
+eval_episodes: 20
+eval_interval: null
+rnn_type: VRNN
+hidden_size: 64
+betadist: false
+stacking: 0
+masking: null
+stride: 1
+
+dataset: [constantx5b5]
+num_env_steps: 2500000
+qvar: [1.5]
+birthx: 0.1
+diff_max: [0.8]
+diff_min: [0.5]
+birthx_linear_tc_steps: 6
+
+apparent_wind: true
+apparent_wind_allo: false
+visual_feedback: true
+flip_ventral_optic_flow: false
+rotate_by: 1
+birthx_max: 1.0
+dryrun: false
+curriculum: false
+turnx: 1.0
+movex: 1.0
+auto_movex: false
+auto_reward: false
+loc_algo: on_plume_linear
+time_algo: uniform
+env_dt: 0.04
+outsuffix: ""        # TODO: make this!
+walking: false
+radiusx: 1.0
+diffusion_min: 1.0
+diffusion_max: 1.0
+r_shaping: [step, oob]
+wind_rel: true
+action_feedback: false
+squash_action: true
+flipping: false
+odor_scaling: true
+stray_max: 2.0
+test_episodes: 50
+viz_episodes: 10
+model_fname: ""
+obs_noise: 0.0
+act_noise: 0.0
+if_vec_norm: 1
+if_train_actor_std: false
+
+# Logging (wandb via tamagotchi.wb shim). Name kept for backward compat.
+mlflow: 1
+
+# New: action physics. 'air_vel_angvel' (legacy) or 'ground_vel_angvel'.
+action_physics: air_vel_angvel
+
+hydra:
+  run:
+    dir: ${save_dir}
+  sweep:
+    dir: ${save_dir}
+    subdir: sweep_${hydra.job.num}
+  output_subdir: json
+  # launcher:
+  #   timeout_min: 120
+  #   gpus_per_node: 1  # if using GPUs
+

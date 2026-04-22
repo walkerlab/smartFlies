@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
 import pandas as pd
-import mlflow
+from tamagotchi import wb as mlflow  # wandb shim with mlflow API
 import math
 
 def load_plume(
@@ -636,10 +636,9 @@ def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True):
     update_episodes_df.to_csv(log_path, index=False)
     if use_mlflow:
         try:
-            mlflow.log_artifact(log_path, artifact_path=f"eps_log")
+            mlflow.log_artifact(log_path, artifact_path=f"eps_log", step=j)
         except Exception as e:
             print(f"Error logging artifact {log_path}: {e}")
-        os.remove(log_path)
     
     # Plot plume density histogram for successful episodes
     successful_df = update_episodes_df[update_episodes_df['outcome'] == 'HOME']
@@ -695,10 +694,9 @@ def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True):
         plt.close()  # Close the figure to free memory
         if use_mlflow: 
             try:
-                mlflow.log_artifact(plt_path, artifact_path=f"figs")
+                mlflow.log_artifact(plt_path, artifact_path="figs/density", step=j)
             except Exception as e:
                 print(f"Error logging artifact {plt_path}: {e}")
-            os.remove(plt_path)
         
 
 # from a2c_ppo_acktr/storage.py
