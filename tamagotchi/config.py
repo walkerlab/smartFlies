@@ -8,7 +8,7 @@ import socket
 MACHINE = socket.gethostname().lower()
 curr_wd = os.getcwd()
 datadir = '/src/data/published_results/reproduce/'
-datadir = '/src/data/performance_plot_data_code/collection_1/'
+# datadir = '/src/data/performance_plot_data_code/collection_1/'
 # datadir = '/src/data/performance_plot_data_code/lawrence/' # for running Toha comparison experiments
 if 'gscratch' in curr_wd:
     datadir = '/gscratch/walkerlab/jqhu/smartFlies/data/published_results/reproduce/'
