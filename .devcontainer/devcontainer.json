@@ -29,7 +29,8 @@
 			"eamodio.gitlens",
 			"vscode-icons-team.vscode-icons",
 			"ms-python.black-formatter",
-			"donjayamanne.python-extension-pack"
+			"donjayamanne.python-extension-pack",
+			"anthropic.claude-code"
 		]
 		}
 	}
