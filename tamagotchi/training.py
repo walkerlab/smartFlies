@@ -178,7 +178,7 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
             total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0] # over this period of time, grow diff_max
         else:
             total_lesson_time = total_number_periods
-        num_lessons = 4
+        num_lessons = 6
         lesson_time = round(total_lesson_time / num_lessons)
         diff_max_step = (np.array(args.diff_max) - np.array(args.diff_min)) / num_lessons # the step size for the diff_max
         for i, dataset in enumerate(available_datasets):
@@ -189,7 +189,7 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
             # get the start time of the lesson
             ds_start = wind_lesson_at[i] # start after the i-th wind cond. is introduced
             # add the lesson to the schedule
-            for j in range(4):
+            for j in range(num_lessons):
                 lesson_time_idx = ds_start + j * lesson_time
                 step = (j + 1) * diff_max_step[i]
                 schedule_dict[lesson_name][lesson_time_idx] = args.diff_min[i] + step
@@ -197,7 +197,7 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
             lesson_name = f'{dataset}_diff_min'
             if lesson_name not in schedule_dict:
                 schedule_dict[lesson_name] = {}
-            for j in range(4):
+            for j in range(num_lessons):
                 lesson_time_idx = ds_start + j * lesson_time
                 step = (j + 1) * diff_max_step[i]
                 step = step / 3
@@ -802,10 +802,15 @@ def training_loop(agent, envs, args, device, actor_critic,
                 except Exception as e:
                     print(f"Error logging artifact {plt_path}: {e}")
 
+        total_num_steps = (j + 1) * args.num_processes * args.num_steps
+        if j % args.log_interval == 0 and len(episode_rewards) > 1 and not args.dryrun:
+            training_log = log_episode(training_log, j, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates)
+            # Save training curve
+            pd.DataFrame(training_log).to_csv(args.training_log)
+
         if args.mlflow:
             mlflow.flush(j)
         rollouts.after_update()
-        total_num_steps = (j + 1) * args.num_processes * args.num_steps
         ##############################################################################################################
         # save for every interval-th episode or for the last epoch
         ##############################################################################################################
@@ -834,11 +839,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                 ], fname)
                 print('Saved', fname)
 
-        if j % args.log_interval == 0 and len(episode_rewards) > 1 and not args.dryrun:
-            training_log = log_episode(training_log, j, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates)
-            # Save training curve
-            pd.DataFrame(training_log).to_csv(args.training_log)
-    
+
     # save the final model to mlflow
     if args.mlflow:
         mlflow.log_artifact(args.model_fpath, artifact_path="weights")

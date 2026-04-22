@@ -1369,7 +1369,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  haltere=False, 
                  saccade=False, 
                  double_drift=False,
-                 action_physics='air_vel_angvel', # or 'ground_vel_angvel': agent commands ground velocity instead of air velocity
+                 action_physics=None, # or 'ground_vel_angvel': agent commands ground velocity instead of air velocity
                  **kwargs):
         '''
         soft_reset_button: bool or None; button never turns on if None, otherwise it will be set to True when step() fails.
@@ -1392,7 +1392,12 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.haltere = haltere # PEv3 - haltere feedback
         self.double_drift = double_drift
         self.action_physics = action_physics
-        print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}, self.mirror: {self.mirror}, haltere: {self.haltere}, self.action_physics: {self.action_physics}")
+        print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}, self.mirror: {self.mirror}, haltere: {self.haltere}, self.action_physics: {self.action_physics} {action_physics}")
+        if self.action_physics == 'ground_vel_angvel':
+            # 3-dim action: [vel_x_ego, vel_y_ego, turn], all in [0, 1]
+            # vel_x: forward speed (0=stop, 1=full); vel_y: lateral (0.5=center, 0=full-left, 1=full-right); turn: same as air_vel_angvel
+            self.action_space = spaces.Box(low=0.0, high=1.0, shape=(3,), dtype=np.float32)
+            print(f"[DEBUG] PEv3 using ground velocity action physics; action space shape: {self.action_space.shape}")
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                         shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
@@ -1581,6 +1586,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             long = 'x' if X_span > Y_span else 'y' # the long side of the plume
             wide = 'y' if long == 'x' else 'x' # the wide side of the plume
             
+            # crop off puffs right near the center as to not initialize on the source location!
+            Z = Z[Z[long].abs() > 1]
+            
             long_pcts = Z[long].abs().quantile([q_curriculum-0.1, q_curriculum]).to_numpy()
             long_mean, long_var = long_pcts[1], long_pcts[1] - long_pcts[0]
             # Perserver the sign of the long coordinate
@@ -1606,8 +1614,14 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                     X_mean + varx * X_var * np.random.randn(),  # x
                     Y_mean + varx * Y_var * np.random.randn()   # y
                 ])
+                if np.linalg.norm(loc_xy) < 1: # not too close to the source - push away if too close
+                    # add 1 to the long axis 
+                    if long == 'x':
+                        loc_xy[0] += np.sign(loc_xy[0]) * 1
+                    else:
+                        loc_xy[1] += np.sign(loc_xy[1]) * 1
                 D = np.linalg.norm(Z.to_numpy() - loc_xy, axis=1)
-                # loc should be within plume range and not too far from plume
+                # loc should be within plume range and not too far from plume and not too close to the source
                 if long == 'x' and abs(loc_xy[0]) < Z['x'].abs().max() and np.sign(X_mean) == np.sign(loc_xy[0]):
                     if np.min(D) < 1.5: # init stray distance < 75% of the stray max
                         break
@@ -1631,7 +1645,10 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             Y_span = abs(Z['y'].max() - Z['y'].min())
             long = 'x' if X_span > Y_span else 'y'
             wide = 'y' if long == 'x' else 'x'
-
+            
+            # crop off puffs right near the center as to not initialize on the source location!
+            Z = Z[Z[long].abs() > 1]
+            
             long_pcts = Z[long].abs().quantile([q_curriculum - 0.05, q_curriculum]).to_numpy()
             long_mean, long_var = long_pcts[1], long_pcts[1] - long_pcts[0]
             long_mean *= np.sign(Z[long].mean())
@@ -1704,7 +1721,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         wind_relative_angle_radians = wind_angle_radians - agent_angle_radians 
         wind_observation = [ np.cos(wind_relative_angle_radians), np.sin(wind_relative_angle_radians) ]    
         # Un-normalize wind observation by multiplying by magnitude
-        wind_magnitude = np.linalg.norm(np.array( wind_absolute ))/self.wind_obsx
+        wind_magnitude = np.linalg.norm(np.array( wind_absolute ))/self.wind_obsx # TODO remove wind_obsx
         wind_observation = [ x*wind_magnitude for x in wind_observation ] # convert back to velocity
 
         if self.verbose > 1:
@@ -1903,12 +1920,21 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print("step action:", action, action.shape)
         if self.squash_action: # always true in training and eval. Bkw compt for Sat's older logs in visualization scripts... Not touching this yet.
             action = (np.tanh(action) + 1)/2
-        action = np.clip(action, 0.0, 1.0)      
+        action = np.clip(action, 0.0, 1.0)
 
-        move_action = action[0] # Move [0, 1], with 0.0 = no movement
-        turn_action = action[1] # # Turn [0, 1], with 0.5 = no turn... maybe change to [-1, 1]
+        if self.action_physics == 'ground_vel_angvel':
+            # action[0]: forward [0,1]; action[1]: lateral [0,1] -> [-1,1] (0.5=no lateral); action[2]: turn [0,1]
+            vel_ego = np.array([float(action[0]), float(action[1]) * 2.0 - 1.0])
+            vel_norm = np.linalg.norm(vel_ego)
+            speed = min(vel_norm, 1.0)  # clamp to [0, 1]
+            direction = vel_ego / (vel_norm + 1e-8)
+            move_action = direction * speed
+            turn_action = float(action[2])
+        else:
+            move_action = action[0] # Move [0, 1], with 0.0 = no movement
+            turn_action = action[1] # Turn [0, 1], with 0.5 = no turn
 
-        # Flipping arena? 
+        # Flipping arena?
         if self.flipping and self.flipx < 0:
             turn_action = 1 - turn_action
             
@@ -1952,19 +1978,21 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         # New location = old location + agent movement + wind advection
 
         if self.action_physics == 'ground_vel_angvel':
-            # Agent directly commands ground-frame velocity in its heading direction.
-            # No wind advection is added: ground velocity is exactly what the agent sets.
-            # Air velocity (what an airspeed sensor would read) = ground_vel - wind_ground,
-            # and is used by sense_environment() via agent_velocity_last.
-            ground_speed = self.move_capacity*self.movex*move_action
-            ground_vel_x = self.agent_angle[0]*ground_speed
-            ground_vel_y = self.agent_angle[1]*ground_speed
+            # Agent commands an egocentric 2D ground velocity (decoupled from heading).
+            # move_action = direction * speed, where direction is the unit egocentric vector and
+            # speed = min(||vel_ego||, 1). Ground velocity = rotate(move_action, heading) * move_capacity.
+            # No wind advection; air_velocity = ground_velocity - ambient_wind.
+            ground_speed = self.move_capacity * self.movex
+            cos_h, sin_h = self.agent_angle[0], self.agent_angle[1]
+            # Rotate unit egocentric vector to allocentric frame (ego x=forward, ego y=left CCW)
+            ground_vel_x = (cos_h * move_action[0] - sin_h * move_action[1]) * ground_speed
+            ground_vel_y = (sin_h * move_action[0] + cos_h * move_action[1]) * ground_speed
             self.agent_location = [
-                self.agent_location[0] + ground_vel_x*self.dt,
-                self.agent_location[1] + ground_vel_y*self.dt,
+                self.agent_location[0] + ground_vel_x * self.dt,
+                self.agent_location[1] + ground_vel_y * self.dt,
             ]
             self.ground_velocity = np.array([ground_vel_x, ground_vel_y])
-            self.air_velocity = self.ground_velocity - np.array(self.ambient_wind) # Rel_wind = Amb_wind - Air_vel
+            self.air_velocity = self.ground_velocity - np.array(self.ambient_wind)
         else:
             # Original physics: agent commands air velocity in heading direction; wind drifts it.
             agent_move_x = self.agent_angle[0]*self.move_capacity*self.movex*move_action*self.dt
@@ -2281,7 +2309,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         apparent_wind=args.apparent_wind
                         )
                 else:
-                    print(f"[DEBUG] v3; haltere: {args.haltere}, saccade: {args.saccade}, rotate_by: {args.rotate_by}")
+                    print(f"[DEBUG] v3; haltere: {args.haltere}, saccade: {args.saccade}, rotate_by: {args.rotate_by}, action_physics: {getattr(args, 'action_physics', None)}")
                     env = PlumeEnvironment_v3(
                         dataset=args.dataset,
                         birthx=args.birthx, 
@@ -2317,6 +2345,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         soft_reset=args.soft_reset,
                         haltere=args.haltere,
                         saccade=args.saccade,
+                        action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
                         )
             else:
                 # bkw compat before cleaning up TC hack. Useful when evalCli

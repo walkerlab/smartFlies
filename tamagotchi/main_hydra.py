@@ -41,6 +41,9 @@ def run(cfg: DictConfig) -> None:
 
     if not cfg_dict.get("outsuffix"):
         cfg_dict["outsuffix"] = _auto_outsuffix(cfg_dict)
+    
+    print("Running with config:")
+    print(OmegaConf.to_yaml(cfg))
 
     args = argparse.Namespace(**cfg_dict)
     import torch
