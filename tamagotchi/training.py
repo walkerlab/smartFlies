@@ -7,10 +7,18 @@ import os
 from collections import deque
 from tamagotchi.a2c_ppo_acktr.storage import RolloutStorage
 # from tamagotchi.eval import eval_lite
-import data_util as utils
-from env import get_vec_normalize
+try:
+    import data_util as utils
+except ImportError:
+    import sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import data_util as utils #hydra pipeline version
+try:
+    from env import get_vec_normalize
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from env import get_vec_normalize #hydra pipeline version
 import matplotlib.pyplot as plt
-import mlflow
+from tamagotchi import wb as mlflow  # wandb shim with mlflow API
 
 def get_index_by_dataset(envs, dataset):
     """Get indices of the remotes that loaded the provided dataset."""
@@ -777,24 +785,25 @@ def training_loop(agent, envs, args, device, actor_critic,
                                 args.gae_lambda, args.use_proper_time_limits)
         value_loss, action_loss, dist_entropy, clip_fraction, advantages = agent.update(rollouts)
         
-        # After update, get stored trajectories
+        # After update, generate trajectory plot (deferred logging until after metrics)
         if j % plot_every_n_updates == 0:
         #     update_trajectories = traj_storage.get_trajectories()
         #     status = traj_storage.get_collection_status()
         #     summary = traj_storage.get_summary_counts()
             plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}trajectories_update{j}.png"
             plot_trajectories(traj_storage, envs, save_path=plt_path)
-            if args.mlflow:
-                try:
-                    mlflow.log_artifact(plt_path, artifact_path=f"figs")
-                    os.remove(plt_path)
-                except Exception as e:
-                    print(f"Error logging artifact {plt_path}: {e}")
-                
+
         utils.log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
         if j % plot_every_n_updates == 0:
             utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
-                
+            if args.mlflow:
+                try:
+                    mlflow.log_artifact(plt_path, artifact_path="figs/trajectories", step=j)
+                except Exception as e:
+                    print(f"Error logging artifact {plt_path}: {e}")
+
+        if args.mlflow:
+            mlflow.flush(j)
         rollouts.after_update()
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
         ##############################################################################################################

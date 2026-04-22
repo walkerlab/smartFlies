@@ -143,3 +143,5 @@ datajoint.ipynb
 orca.deb
 tsboard_logs
 tools/*
+*PySR_outputs/*
+wandb/
