@@ -16,12 +16,20 @@ import json
 from setproctitle import setproctitle as ptitle
 
 import tamagotchi.data_util as utils
-from env import make_vec_envs, get_vec_normalize
+try:
+    from env import make_vec_envs, get_vec_normalize
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from env import make_vec_envs, get_vec_normalize #hydra pipeline version
 from tamagotchi.a2c_ppo_acktr.ppo import PPO
 from tamagotchi.a2c_ppo_acktr.model import Policy
 from tamagotchi.a2c_ppo_acktr.storage import RolloutStorage
-from training import training_loop
-import mlflow
+try:
+    from training import training_loop
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from training import training_loop #hydra pipeline version
+from tamagotchi import wb as mlflow  # wandb shim with mlflow API
 
 def get_args():
     parser = argparse.ArgumentParser(description='PPO for Plume')
@@ -132,6 +140,10 @@ def get_args():
     parser.add_argument('--if_vec_norm', type=int, default=1) # whether to normalize the input
     parser.add_argument('--if_train_actor_std', type=bool, default=False) # whether to train the std of the stochastic policy
     parser.add_argument('--mlflow', type=int, default=1) # whether to train the std of the stochastic policy
+    parser.add_argument('--action_physics', type=str, default='air_vel_angvel',
+        choices=['air_vel_angvel', 'ground_vel_angvel'],
+        help="Action space: 'air_vel_angvel' (forward air speed + angular velocity, wind drifts the agent) "
+             "or 'ground_vel_angvel' (forward ground speed + angular velocity, no wind drift)")
     args = parser.parse_args()
     assert len(args.dataset) == len(args.qvar) 
     assert len(args.dataset) == len(args.diff_max) 
@@ -430,6 +442,7 @@ def main(args=None):
             print(f"Starting new run: {run_name}")
 
         # Single block using the appropriate parameters
+        run_params['dir'] = args.save_dir
         with mlflow.start_run(**run_params):
             # Log the hyperparameters dict to mlflow
             mlflow.log_params(vars(args)) 

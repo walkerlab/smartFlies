@@ -1,6 +1,10 @@
 ##### from plume/plume_env.py  ##### from plume/plume_env.py  ##### from plume/plume_env.py
 from data_util import load_plume, get_concentration_at_tidx, rotate_wind, rotate_puffs, rotate_wind_optimized, rotate_puffs_optimized
-import config as config
+try:
+    import config as config
+except ImportError:
+    import sys, os; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import config as config #hydra pipeline version
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 import os
@@ -74,9 +78,11 @@ class PlumeEnvironment(gym.Env):
     obs_noise=0.0, # Multiplicative: Wind & Odor observation noise.
     act_noise=0.0, # Multiplicative: Move & Turn action noise.
     dynamic=False,
+    action_physics='air_vel_angvel', # or 'ground_vel_angvel': agent commands ground velocity instead of air velocity
     seed=137,
     verbose=0):
     super(PlumeEnvironment, self).__init__()
+    self.action_physics = action_physics
 
     assert dynamic is False
     np.random.seed(seed)    
@@ -547,18 +553,33 @@ class PlumeEnvironment(gym.Env):
     self.agent_angle = [ np.cos(new_angle_radians), np.sin(new_angle_radians) ]    
     assert np.linalg.norm(self.agent_angle) < 1.1
 
-    # New location = old location + agent movement + wind advection
-    agent_move_x = self.agent_angle[0]*self.move_capacity*self.movex*move_action*self.dt
-    agent_move_y = self.agent_angle[1]*self.move_capacity*self.movex*move_action*self.dt
-    wind_drift_x = self.wind_ground[0]*self.dt
-    wind_drift_y = self.wind_ground[1]*self.dt
-    if self.walking:
-        wind_drift_x = wind_drift_y = 0
-    self.agent_location = [
-      self.agent_location[0] + agent_move_x + wind_drift_x,
-      self.agent_location[1] + agent_move_y + wind_drift_y,
-    ]
-    self.agent_velocity_last = np.array([agent_move_x, agent_move_y])/self.dt # For relative wind calc.
+    if self.action_physics == 'ground_vel_angvel':
+        # Agent directly commands ground-frame velocity in its heading direction.
+        # No wind advection is added: ground velocity is exactly what the agent sets.
+        # Air velocity (what an airspeed sensor would read) = ground_vel - wind_ground,
+        # and is used by sense_environment() via agent_velocity_last.
+        ground_speed = self.move_capacity*self.movex*move_action
+        ground_vel_x = self.agent_angle[0]*ground_speed
+        ground_vel_y = self.agent_angle[1]*ground_speed
+        self.agent_location = [
+            self.agent_location[0] + ground_vel_x*self.dt,
+            self.agent_location[1] + ground_vel_y*self.dt,
+        ]
+        self.agent_velocity_last = np.array([ground_vel_x, ground_vel_y])
+        self.agent_air_velocity_last = self.agent_velocity_last - np.array(self.wind_ground)
+    else:
+        # Original physics: agent commands air velocity in heading direction; wind drifts it.
+        agent_move_x = self.agent_angle[0]*self.move_capacity*self.movex*move_action*self.dt
+        agent_move_y = self.agent_angle[1]*self.move_capacity*self.movex*move_action*self.dt
+        wind_drift_x = self.wind_ground[0]*self.dt
+        wind_drift_y = self.wind_ground[1]*self.dt
+        if self.walking:
+            wind_drift_x = wind_drift_y = 0
+        self.agent_location = [
+          self.agent_location[0] + agent_move_x + wind_drift_x,
+          self.agent_location[1] + agent_move_y + wind_drift_y,
+        ]
+        self.agent_velocity_last = np.array([agent_move_x, agent_move_y])/self.dt # For relative wind calc.
 
     ### ----------------- End conditions / Is the trial over ----------------- ### 
     is_home = np.linalg.norm(self.agent_location) <= self.homed_radius 
@@ -2322,6 +2343,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                     stray_max=args.stray_max,
                     obs_noise=args.obs_noise,
                     act_noise=args.act_noise,
+                    action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
                     seed=args.seed
                     )
 
