@@ -151,11 +151,7 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
         course_name, scheduled_value = course
         schedule_dict[course_name][when_2_update[i]] = scheduled_value
 
-    # print("[DEBUG] schedule_dict:", schedule_dict)
-
-    # Calculate how often to toggle cosine annealing of the learning rate - interval of curriculum updates
-    total_num_updates = len(course_schedule)  # already computed by your code
-    restart_period = total_number_periods // (total_num_updates + 1)
+    # print("[DEBUG] schedule_dict:", schedule_dict
     
     # add diff_max sub-lessons that is locked to the wind condition lessons
     lesson_times = [] # all lesson times in the schedule
@@ -169,67 +165,94 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
     wind_lesson_at = sorted(list(schedule_dict['wind_cond'].keys()))
 
     available_datasets = args.dataset
-    # get a length of period where loc algo grows 
-    # get diff_min diff_max of datasets which controls the location algorithm
-    # gradually increase diff_max over 4 lessons
-    if 'linear' in args.loc_algo:
-        # for each dataset find when their lessons are introduced and when the next one is introduced
-        if len(wind_lesson_at) > 1:
-            total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0] # over this period of time, grow diff_max
-        else:
-            total_lesson_time = total_number_periods
-        num_lessons = 6
-        lesson_time = round(total_lesson_time / num_lessons)
-        diff_max_step = (np.array(args.diff_max) - np.array(args.diff_min)) / num_lessons # the step size for the diff_max
-        for i, dataset in enumerate(available_datasets):
-            # init lesson for each dataset
-            lesson_name = f'{dataset}_diff_max'
-            if lesson_name not in schedule_dict:
-                schedule_dict[lesson_name] = {}
-            # get the start time of the lesson
-            ds_start = wind_lesson_at[i] # start after the i-th wind cond. is introduced
-            # add the lesson to the schedule
-            for j in range(num_lessons):
-                lesson_time_idx = ds_start + j * lesson_time
-                step = (j + 1) * diff_max_step[i]
-                schedule_dict[lesson_name][lesson_time_idx] = args.diff_min[i] + step
-                # eg: {'poisson_mag_narrow_noisy3x5b5_diff_max': {665: 0.4, 720: 0.5, 775: 0.6000000000000001, 830: 0.7000000000000001}
-            lesson_name = f'{dataset}_diff_min'
-            if lesson_name not in schedule_dict:
-                schedule_dict[lesson_name] = {}
-            for j in range(num_lessons):
-                lesson_time_idx = ds_start + j * lesson_time
-                step = (j + 1) * diff_max_step[i]
-                step = step / 3
-                new_diff_min = args.diff_min[i] + step
-                new_diff_min = min(0.4, new_diff_min)  # ensure it doesn't go below 0.4
-                schedule_dict[lesson_name][lesson_time_idx] = new_diff_min
-    
+
+    # Pre-compute rotate_by stage start times so loc_algo can repeat within each stage
+    rotate_stage_times = None
     if 'rotate_by' in args.r_shaping:
+        rb_num_stages = 4 if 'birthx_cl_last' in args.r_shaping else 3
         if len(wind_lesson_at) > 1:
-            total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0] # over this period of time, grow diff_max
+            rb_stage_start = wind_lesson_at[0]
+            rb_total_time = wind_lesson_at[1] - wind_lesson_at[0]
         else:
-            ds_start = 0
-            total_lesson_time = total_number_periods
-        num_lessons = 3
-        lesson_time = round(total_lesson_time / num_lessons)
+            rb_stage_start = 0
+            rb_total_time = total_number_periods
+        rb_stage_duration = round(rb_total_time / rb_num_stages)
+        rotate_stage_times = [rb_stage_start + k * rb_stage_duration for k in range(rb_num_stages)]
+
+    if 'linear' in args.loc_algo:
+        num_lessons = 6
+        diff_max_step = (np.array(args.diff_max) - np.array(args.diff_min)) / num_lessons
+
+        if rotate_stage_times is not None:
+            # Repeat all loc_algo lessons from scratch within each rotate_by stage
+            lesson_time = round(rb_stage_duration / num_lessons)
+            for i, dataset in enumerate(available_datasets):
+                lesson_name_max = f'{dataset}_diff_max'
+                lesson_name_min = f'{dataset}_diff_min'
+                if lesson_name_max not in schedule_dict:
+                    schedule_dict[lesson_name_max] = {}
+                if lesson_name_min not in schedule_dict:
+                    schedule_dict[lesson_name_min] = {}
+                for stage_start in rotate_stage_times:
+                    for j in range(num_lessons):
+                        t = stage_start + j * lesson_time
+                        step = (j + 1) * diff_max_step[i]
+                        schedule_dict[lesson_name_max][t] = args.diff_min[i] + step
+                        schedule_dict[lesson_name_min][t] = max(0.4, args.diff_min[i] + step / 3)
+        else:
+            # Original logic: anchor to wind_lesson_at[i]
+            if len(wind_lesson_at) > 1:
+                total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0]
+            else:
+                total_lesson_time = total_number_periods
+            lesson_time = round(total_lesson_time / num_lessons)
+            for i, dataset in enumerate(available_datasets):
+                ds_start = wind_lesson_at[i]
+                lesson_name = f'{dataset}_diff_max'
+                if lesson_name not in schedule_dict:
+                    schedule_dict[lesson_name] = {}
+                for j in range(num_lessons):
+                    t = ds_start + j * lesson_time
+                    step = (j + 1) * diff_max_step[i]
+                    schedule_dict[lesson_name][t] = args.diff_min[i] + step
+                    # eg: {'poisson_mag_narrow_noisy3x5b5_diff_max': {665: 0.4, 720: 0.5, 775: 0.6000000000000001, 830: 0.7000000000000001}
+                lesson_name = f'{dataset}_diff_min'
+                if lesson_name not in schedule_dict:
+                    schedule_dict[lesson_name] = {}
+                for j in range(num_lessons):
+                    t = ds_start + j * lesson_time
+                    step = (j + 1) * diff_max_step[i]
+                    schedule_dict[lesson_name][t] = max(0.4, args.diff_min[i] + step / 3)
+
+    if 'rotate_by' in args.r_shaping:
+        angles = [[0, 180], [90, -90], [0, 90, 180, -90]]
         for i, dataset in enumerate(available_datasets):
             lesson_name = f'{dataset}_rotate_by'
             if lesson_name not in schedule_dict:
                 schedule_dict[lesson_name] = {}
-                # TODO look at ds_start = wind_lesson_at[i]! whnne there's more than one wind cond. lesson, this will not work!
-            for j in range(3):
-                lesson_time_idx = ds_start + j * lesson_time
-                if j == 0:
-                    schedule_dict[lesson_name][lesson_time_idx] = [0, 180]
-                elif j == 1:
-                    schedule_dict[lesson_name][lesson_time_idx] = [90, -90]
-                elif j == 2:
-                    schedule_dict[lesson_name][lesson_time_idx] = [0, 90, 180, -90]
-
+            for j, stage_start in enumerate(rotate_stage_times[:3]):  # only 3 rotate_by stages
+                schedule_dict[lesson_name][stage_start] = angles[j]
         print(f"Added rotate_by lessons to schedule_dict: {schedule_dict}")
-        # TODO look at what I actually threw in.. so that can add method for updating this!
-        # TODO add method for updating this in update CL function
+
+    if 'birthx_cl_last' in args.r_shaping:
+        # Reschedule all birthx lessons into the final stage (stage 4)
+        stage4_start = rotate_stage_times[3]
+        stage4_duration = total_number_periods - stage4_start
+        birthx_values = course_dirctory['birthx']['scheduled_value']
+        num_birthx_lessons = len(birthx_values) - 1  # excludes the initial value
+        birthx_lesson_time = round(stage4_duration / num_birthx_lessons)
+        schedule_dict['birthx'] = {0: birthx_values[0]}  # keep initial value
+        for j in range(num_birthx_lessons):
+            t = stage4_start + j * birthx_lesson_time
+            schedule_dict['birthx'][t] = birthx_values[j + 1]
+        print(f"Rescheduled birthx to stage 4 (starts {stage4_start}): {schedule_dict['birthx']}")
+
+    # Calculate how often to toggle cosine annealing of the learning rate - after each rotate_by stage or after each lesson if no rotate_by
+    if 'rotate_by' in args.r_shaping:
+        total_num_updates = len(rotate_stage_times)  
+    else:
+        total_num_updates = len(course_schedule)  
+    restart_period = total_number_periods // (total_num_updates + 1)
 
     return schedule_dict, restart_period
 
@@ -628,10 +651,8 @@ def training_loop(agent, envs, args, device, actor_critic,
     eval_log = eval_log if eval_log is not None else []
     # track trajectories for plotting
     best_mean = 0.0
-    if 'oob' not in args.r_shaping:
-        traj_storage = TrajectoryStorage(num_envs=envs.num_envs, possible_datasets=args.dataset, possible_outcomes=['HOME', 'OOT'])
-    else:
-        traj_storage = TrajectoryStorage(num_envs=envs.num_envs, possible_datasets=args.dataset, possible_outcomes=['HOME', 'OOB', 'OOT'])
+
+    traj_storage = TrajectoryStorage(num_envs=envs.num_envs, possible_datasets=args.dataset, possible_outcomes=['HOME', 'OOB', 'OOT'])
         
     # track stats for logging
     episode_rewards = deque(maxlen=50) 
