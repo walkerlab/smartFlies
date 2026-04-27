@@ -1924,6 +1924,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
 
         if self.action_physics == 'ground_vel_angvel':
             # action[0]: forward [0,1]; action[1]: lateral [0,1] -> [-1,1] (0.5=no lateral); action[2]: turn [0,1]
+            # NOTE: for obs in egocentric frame, Y direction is parallel to HD and X direction is perpendicular.
             vel_ego = np.array([float(action[0]), float(action[1]) * 2.0 - 1.0])
             vel_norm = np.linalg.norm(vel_ego)
             speed = min(vel_norm, 1.0)  # clamp to [0, 1]
@@ -2014,10 +2015,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         ### ----------------- End conditions / Is the trial over ----------------- ### 
         is_home = np.linalg.norm(self.agent_location) <= self.homed_radius 
         is_outoftime = self.episode_step >= self.episode_steps_max - 1           
-        if 'oob' in self.r_shaping:
-            is_outofbounds = self.get_oob()
-        else:
-            is_outofbounds = False
+        is_outofbounds = self.get_oob() # always as a term condition, but may not be a reward 
+        
         done = bool(is_home or is_outofbounds or is_outoftime)
         if self.vr_wind:
             done = False # If vr_wind is set, then it's eval condition and we don't want to end the episode.
@@ -2047,7 +2046,11 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                 oob_penalty *= 2
                             
             reward -= oob_penalty
-        
+
+        if is_outofbounds and 'missed_time_cost' in self.r_shaping:
+            steps_left = self.episode_steps_max - self.episode_step
+            reward += steps_left * self.rewards['tick']
+
         if is_outoftime and 'oot_plus' in self.r_shaping:
             # not letting oot off easy!
             oob_penalty = 5*np.linalg.norm(self.agent_location) + self.stray_distance
@@ -2065,19 +2068,20 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
 
         # Radial distance decrease at each STEP of episode
         r_radial_step = 0
-        if 'step' in self.r_shaping:
+        # check if 'step' is in any substring of items in r_shaping
+        if any('step' in item for item in self.r_shaping):
             radial_dist = np.linalg.norm(self.agent_location)
-            r_radial_step = 5*( np.linalg.norm(self.agent_location_last) - radial_dist)
+            r_radial_step = 5*( np.linalg.norm(self.agent_location_last) - radial_dist) 
             if 'step_plus' in self.r_shaping:
                 # massive scale up of reward for moving closer to the source (when on plume and closer than last time)
-                if r_radial_step > 0 and radial_dist < self.agent_location_norm_min and  observation[2] <= config.env['odor_threshold']: 
+                if r_radial_step > 0 and radial_dist < self.agent_location_norm_min and observation[2] >= config.env['odor_threshold']: 
                     # if agent moved closer to the source and on plume, and closer than the last time
                     r_radial_step *= 10
                     self.agent_location_norm_min = radial_dist
             elif 'step_small' in self.r_shaping:
                 r_radial_step = 2*( np.linalg.norm(self.agent_location_last) - radial_dist) # smaller scaling. agents seem to only care to get near the source, not home.
             # no step reward if off plume - only hurts for moving away! 
-            r_radial_step = min(0, r_radial_step) if observation[2] <= config.env['odor_threshold'] else r_radial_step
+            r_radial_step = min(0, r_radial_step) if observation[2] < config.env['odor_threshold'] else r_radial_step
             # Multiplier for overshooting source
             if 'overshoot' in self.r_shaping and self.agent_location[0] < 0:
                 raise NotImplementedError("Overshoot penalty not implemented for rotated plumes yet.")
@@ -2095,12 +2099,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.stray_distance = self.get_stray_distance()
             end_reward = radial_distance_decrease - self.stray_distance
             reward += end_reward
-
-        r_location = 0 # incorrect, leads to cycling in place
-        if 'loc' in self.r_shaping:
-            r_location = 1/( 1  + np.linalg.norm(np.array(self.agent_location)) )
-            r_location /= (1 + 5*self.stray_distance)
-            reward += r_location 
 
         if 'turn' in self.r_shaping:
             reward -= 0.05*np.abs(2*(turn_action - 0.5))
