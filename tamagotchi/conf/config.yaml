@@ -36,7 +36,7 @@ weight_decay: 0.0001
 # Env / experiment
 env_name: plume
 log_dir: /src/data/wind_sensing/apparent_wind_visual_feedback/logs/
-save_dir: /src/data/wind_sensing/apparent_wind_visual_feedback/ground_vel_control_loc_algo_sweep/
+save_dir: /src/data/wind_sensing/apparent_wind_visual_feedback/slice_linear_birthx_cl_last_cosine_early_stop_time_cost/
 
 dynamic: false
 eval_type: skip
@@ -50,7 +50,7 @@ masking: null
 stride: 1
 
 dataset: [constantx5b5]
-num_env_steps: 2500000
+num_env_steps: 3000000
 qvar: [1.5]
 birthx: 0.1
 diff_max: [0.8]
@@ -77,7 +77,7 @@ walking: false
 radiusx: 1.0
 diffusion_min: 1.0
 diffusion_max: 1.0
-r_shaping: [step, oob, rotate_by]
+r_shaping: [step, oob, rotate_by, birthx_cl_last, cosine]
 wind_rel: true
 action_feedback: false
 squash_action: true
