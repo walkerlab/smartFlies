@@ -1949,31 +1949,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         # print(f"[DEBUG] PEv3 turn_amount: {np.rad2deg(turn_amount):.4f}, turn_action: {turn_action:.4f}, if_saccade: {if_saccade}, move_action: {move_action:.4f}")
 
         new_angle_radians = old_angle_radians + turn_amount
-        
-        if self.haltere:
-            self.move_action_now = move_action
-            self.turn_action_now = turn_action
-            self.move_dt = self.move_action_now - self.move_action_last
-            self.turn_dt = new_angle_radians - old_angle_radians
-            self.turn_dt = ((self.turn_dt + np.pi) % (2*np.pi)) - np.pi # normalize to [-pi, pi]
-
-            # self.turn_amount_now = turn_amount
-            # self.saccadic_turn_dt = self.turn_amount_now - self.turn_amount_last # track by amount gives the same value as turn_dt
-            # print(f"[DEBUG ACCEL CALC] saccadic_turn_dt {self.saccadic_turn_dt:.4f} turn_dt: {self.turn_dt:.4f}\n")
-
-            # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: move_action_last: {self.move_action_last:.4f}, move_action_now: {self.move_action_now:.4f}, move_dt: {self.move_dt:.4f}\n")
-            # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: old_angle: {old_angle_radians:.4f}, new_angle: {new_angle_radians:.4f}, turn_dt: {self.turn_dt:.4f}\n")
-            
-            air_vel_change = self.move_dt * self.move_capacity * self.movex
-            angular_vel_change = self.turn_dt
-            self.air_acc = air_vel_change / self.dt # Air Speed Acceleration in m/s^2
-            self.ang_acc = angular_vel_change / self.dt # Angular acceleration in rad/s^2
-            
-            # print(f"[DEBUG ACCEL RESULT] Step {self.episode_step}: air_acc: {self.air_acc:.4f} m/s^2, ang_acc: {self.ang_acc:.4f} rad/s^2\n")
-            
-            if self.verbose > 1:
-                print(f"haltere acc: {self.air_acc:.2f}, ang_acc: {self.ang_acc:.2f}, move_dt: {self.move_dt:.2f}, turn_dt: {self.turn_dt:.2f}\n")
-
         self.agent_angle = [ np.cos(new_angle_radians), np.sin(new_angle_radians) ]    
 
         # New location = old location + agent movement + wind advection
@@ -2011,6 +1986,30 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.ground_velocity = (np.array(self.agent_location) - self.agent_location_last)/self.dt
         # print(f"[DEBUG] PEv3 step: air_velocity: {self.air_velocity}, ambient_wind: {self.ambient_wind}, agent_location: {self.agent_location}")
         # print(f"[DEBUG] PEv3 step: ground_velocity: {self.ground_velocity}")
+
+        if self.haltere:
+            self.move_action_now = move_action
+            self.turn_action_now = turn_action
+            self.move_dt = self.move_action_now - self.move_action_last
+            self.turn_dt = new_angle_radians - old_angle_radians
+            self.turn_dt = ((self.turn_dt + np.pi) % (2*np.pi)) - np.pi # normalize to [-pi, pi]
+
+            # self.turn_amount_now = turn_amount
+            # self.saccadic_turn_dt = self.turn_amount_now - self.turn_amount_last # track by amount gives the same value as turn_dt
+            # print(f"[DEBUG ACCEL CALC] saccadic_turn_dt {self.saccadic_turn_dt:.4f} turn_dt: {self.turn_dt:.4f}\n")
+
+            # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: move_action_last: {self.move_action_last:.4f}, move_action_now: {self.move_action_now:.4f}, move_dt: {self.move_dt:.4f}\n")
+            # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: old_angle: {old_angle_radians:.4f}, new_angle: {new_angle_radians:.4f}, turn_dt: {self.turn_dt:.4f}\n")
+            
+            air_vel_change = self.move_dt * self.move_capacity * self.movex
+            angular_vel_change = self.turn_dt
+            self.air_acc = air_vel_change / self.dt # Air Speed Acceleration in m/s^2
+            self.ang_acc = angular_vel_change / self.dt # Angular acceleration in rad/s^2
+            
+            # print(f"[DEBUG ACCEL RESULT] Step {self.episode_step}: air_acc: {self.air_acc:.4f} m/s^2, ang_acc: {self.ang_acc:.4f} rad/s^2\n")
+            
+            if self.verbose > 1:
+                print(f"haltere acc: {self.air_acc:.2f}, ang_acc: {self.ang_acc:.2f}, move_dt: {self.move_dt:.2f}, turn_dt: {self.turn_dt:.2f}\n")
 
         ### ----------------- End conditions / Is the trial over ----------------- ### 
         is_home = np.linalg.norm(self.agent_location) <= self.homed_radius 
