@@ -139,11 +139,24 @@ def get_args():
     parser.add_argument('--act_noise', type=float, default=0.0)
     parser.add_argument('--if_vec_norm', type=int, default=1) # whether to normalize the input
     parser.add_argument('--if_train_actor_std', type=bool, default=False) # whether to train the std of the stochastic policy
+    parser.add_argument('--ou_theta', type=float, default=0.15,
+        help='OU mean-reversion rate for temporally correlated action exploration')
+    parser.add_argument('--ou_sigma', type=float, default=0.0,
+        help='initial OU diffusion scale; 0 disables OU when ou_sigma_final is also 0')
+    parser.add_argument('--ou_sigma_final', type=float, default=0.0,
+        help='final OU diffusion scale after linear annealing')
+    parser.add_argument('--ou_anneal_steps', type=int, default=0,
+        help='environment steps over which to linearly anneal OU sigma; 0 disables annealing')
+    parser.add_argument('--ou_dt', type=float, default=None,
+        help='OU integration timestep; defaults to env_dt when unset')
+    parser.add_argument('--ou_eval', type=bool, default=False,
+        help='enable OU noise during evaluation ablations; off by default')
     parser.add_argument('--mlflow', type=int, default=1) # whether to train the std of the stochastic policy
     parser.add_argument('--action_physics', type=str, default='air_vel_angvel',
-        choices=['air_vel_angvel', 'ground_vel_angvel'],
-        help="Action space: 'air_vel_angvel' (forward air speed + angular velocity, wind drifts the agent) "
-             "or 'ground_vel_angvel' (forward ground speed + angular velocity, no wind drift)")
+        choices=['air_vel_angvel', 'ground_vel_angvel', 'force'],
+        help="Action space: 'air_vel_angvel' (forward air speed + angular velocity, wind drifts the agent), "
+             "'ground_vel_angvel' (forward ground speed + angular velocity, no wind drift), "
+             "or 'force' (body-frame thrust + yaw torque, rigid-body dynamics integrated from config.force_physics)")
     args = parser.parse_args()
     assert len(args.dataset) == len(args.qvar) 
     assert len(args.dataset) == len(args.diff_max) 
@@ -372,6 +385,8 @@ def main(args=None):
                 getattr(get_vec_normalize(envs), 'obs_rms', None)
             ], start_fname)
             print('Saved', start_fname)
+    actor_critic.configure_ou(args)
+    actor_critic.to(device)
 
     agent = PPO(
         actor_critic,
@@ -405,6 +420,11 @@ def main(args=None):
         training_log = training_log.to_dict('records')
     else:
         training_log = None
+        if os.path.isfile(args.model_fpath) and getattr(args, 'ou_anneal_steps', 0) > 0:
+            print(
+                "Warning: model checkpoint exists but training log is missing; "
+                "OU sigma annealing will restart from update 0.",
+                flush=True)
         
     eval_log = None
     # run training loop
