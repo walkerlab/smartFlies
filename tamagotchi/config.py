@@ -110,6 +110,26 @@ env = {
 	# 'difficulty': 0.65, # Curriculum difficulty \in [0.0, 1.0]
 }
 
+# Coefficients for PlumeEnvironment_v3 action_physics=='force'.
+# The agent commands thrust/torque (normalized to [-1, 1]) and the env integrates
+# rigid-body dynamics with substeps. SI units; defaults give a ~1 mg fly with
+# boosted thrust reaching ~2 m/s in still air. control_rate is taken from the
+# env's own dt (1/env_dt), and wind is supplied by the plume data (not modeled here).
+force_physics = {
+	# control limits (thrust forces / yaw torque)
+	'T_para_max':   6.0e-5,    # N, parallel (forward/back, body frame)
+	'T_perp_max':   2.0e-5,    # N, perpendicular (lateral, body frame)
+	'tau_max':      3.0e-10,   # N*m, yaw torque (ccw positive)
+	# translation
+	'mass':         1.0e-6,    # kg
+	'drag':         3.0e-5,    # N*s/m, linear drag acting on airspeed
+	# rotation
+	'inertia':      5.0e-13,   # kg*m^2
+	'k_rot':        2.0e-11,   # N*m*s, rotational drag
+	# numerics
+	'physics_substeps': 4,     # zero-order-hold substeps per env step
+}
+
 # for data_utils.plot_artifacts
 mlflow_colors = {
             'constantx5b5': 'blue',
