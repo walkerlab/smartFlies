@@ -43,6 +43,10 @@ class PPO():
         action_loss_epoch = 0
         dist_entropy_epoch = 0
         clip_fraction_epoch = 0
+        checked_ou_log_probs = False
+        ou_configured = getattr(self.actor_critic, 'ou_configured', False)
+        if hasattr(self.actor_critic, 'ou_sigma_current'):
+            print(f"  [OU] sigma={self.actor_critic.ou_sigma_current:.4f}", flush=True)
 
         for e in range(self.ppo_epoch):
             if self.actor_critic.is_recurrent:
@@ -55,12 +59,20 @@ class PPO():
             for sample in data_generator:
                 obs_batch, recurrent_hidden_states_batch, actions_batch, \
                    value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, \
-                        adv_targ = sample
+                        adv_targ, ou_states_batch = sample
 
                 # Reshape to do in a single forward pass for all steps
                 values, action_log_probs, dist_entropy, _ = self.actor_critic.evaluate_actions(
                     obs_batch, recurrent_hidden_states_batch, masks_batch,
-                    actions_batch)
+                    actions_batch, ou_state=ou_states_batch)
+                # Check during development that OU log_probs are consistent with the old_action_log_probs_batch, which are computed in a single thread and stored in the rollouts. If there is a discrepancy, it may indicate an issue with how ou_state is being handled across threads.
+                if ou_configured and not checked_ou_log_probs:
+                    max_log_prob_diff = (action_log_probs - old_action_log_probs_batch).abs().max().item()
+                    print(f"  [OU] log_prob_check max_abs_diff={max_log_prob_diff:.6g}", flush=True)
+                    if max_log_prob_diff > 1e-3:
+                        print(f"  [OU] WARNING: log_prob discrepancy {max_log_prob_diff:.6g} exceeds 1e-3 — "
+                              f"check ou_state threading", flush=True)
+                    checked_ou_log_probs = True
 
                 ratio = torch.exp(action_log_probs -
                                   old_action_log_probs_batch)
@@ -104,4 +116,3 @@ class PPO():
             return value_loss_epoch, action_loss_epoch, dist_entropy_epoch, clip_fraction_epoch, advantages.flatten()
         else:
             return value_loss_epoch, action_loss_epoch, dist_entropy_epoch, advantages.flatten()
-

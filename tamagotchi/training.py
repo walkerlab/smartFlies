@@ -56,12 +56,21 @@ def update_by_schedule(envs, schedule_dict, curr_step):
             elif '_diff_min' in k:
                 # k format: '{ds}_diff_min'
                 ds_name = k.split('_diff_min')[0] # get the dataset name
-                idx = get_index_by_dataset(envs, ds_name) 
+                idx = get_index_by_dataset(envs, ds_name)
                 if len(idx) == 0:
                     print(f"No remote found for {ds_name} lesson")
                 else:
                     envs.env_method_at(idx, "update_env_param", {'diff_min': _schedule_dict[curr_step]})
                     print(f"update_env_param 'diff_min': {_schedule_dict[curr_step]} at {curr_step} for remote {idx}")
+            elif '_now_init_long' in k:
+                # k format: '{ds}_now_init_long'
+                ds_name = k.split('_now_init_long')[0]
+                idx = get_index_by_dataset(envs, ds_name)
+                if len(idx) == 0:
+                    print(f"No remote found for {ds_name} lesson")
+                else:
+                    envs.env_method_at(idx, "update_env_param", {'now_init_long': _schedule_dict[curr_step]})
+                    print(f"update_env_param 'now_init_long': {_schedule_dict[curr_step]} at {curr_step} for remote {idx}")
             elif '_rotate_by' in k:
                 # k format: '{ds}_rotate_by'
                 ds_name = k.split('_rotate_by')[0]
@@ -198,7 +207,7 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
                         t = stage_start + j * lesson_time
                         step = (j + 1) * diff_max_step[i]
                         schedule_dict[lesson_name_max][t] = args.diff_min[i] + step
-                        schedule_dict[lesson_name_min][t] = max(0.4, args.diff_min[i] + step / 3)
+                        schedule_dict[lesson_name_min][t] = args.diff_min[i] + step / 3
         else:
             # Original logic: anchor to wind_lesson_at[i]
             if len(wind_lesson_at) > 1:
@@ -222,7 +231,33 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
                 for j in range(num_lessons):
                     t = ds_start + j * lesson_time
                     step = (j + 1) * diff_max_step[i]
-                    schedule_dict[lesson_name][t] = max(0.4, args.diff_min[i] + step / 3)
+                    schedule_dict[lesson_name][t] = args.diff_min[i] + step / 3
+
+    if 'precise' in args.loc_algo:
+        num_lessons = 6
+        # evenly spaced levels from precise_min to precise_max, one per lesson
+        for i, dataset in enumerate(available_datasets):
+            level_values = np.linspace(args.precise_min[i], args.precise_max[i], num_lessons, endpoint=True)
+            lesson_name = f'{dataset}_now_init_long'
+            if lesson_name not in schedule_dict:
+                schedule_dict[lesson_name] = {}
+
+            if rotate_stage_times is not None:
+                lesson_time = round(rb_stage_duration / num_lessons)
+                for stage_start in rotate_stage_times:
+                    for j, val in enumerate(level_values):
+                        t = stage_start + j * lesson_time
+                        schedule_dict[lesson_name][t] = val
+            else:
+                if len(wind_lesson_at) > 1:
+                    total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0]
+                else:
+                    total_lesson_time = total_number_periods
+                lesson_time = round(total_lesson_time / num_lessons)
+                ds_start = wind_lesson_at[i]
+                for j, val in enumerate(level_values):
+                    t = ds_start + j * lesson_time
+                    schedule_dict[lesson_name][t] = val
 
     if 'rotate_by' in args.r_shaping:
         angles = [[0, 180], [90, -90], [0, 90, 180, -90]]
@@ -671,7 +706,21 @@ def training_loop(agent, envs, args, device, actor_critic,
         if not args.dryrun:
             utils.save_tc_schedule(schedule, num_updates, args.num_processes, args.num_steps, args.save_dir)
 
-    
+    # Build OU per-stage annealing index from the rotate_by schedule, if applicable.
+    # ou_stage_transitions: sorted list of update indices where a rotate_by stage starts.
+    # When non-empty, sigma resets to ou_sigma at each boundary and anneals to ou_sigma_final
+    # by the end of that stage, overriding the flat ou_anneal_steps path.
+    ou_stage_transitions = []
+    if getattr(actor_critic, 'ou_configured', False) and 'rotate_by' in args.r_shaping:
+        ds_key = f'{args.dataset[0]}_rotate_by'
+        if args.birthx_linear_tc_steps >= 0 and ds_key in schedule:
+            ou_stage_transitions = sorted(schedule[ds_key].keys())
+    # Determine which stage we are already in (matters when resuming from a checkpoint).
+    ou_stage_start_j = ou_stage_transitions[0] if ou_stage_transitions else 0
+    for t in ou_stage_transitions:
+        if t <= (last_chkpt_update or 0):
+            ou_stage_start_j = t
+
     # finetuning
     # TODO see if works
     if 'finetune' in args.r_shaping:
@@ -705,6 +754,27 @@ def training_loop(agent, envs, args, device, actor_critic,
         update_range = range(last_chkpt_update, num_updates)
 
     for j in update_range:
+        # TODO collapse this into update by schedule
+        if ou_stage_transitions and args.ou_sigma != args.ou_sigma_final:
+            # 4-step discrete sigma schedule locked to rotate_by curriculum.
+            # Within each stage sigma takes one of 4 evenly-spaced levels
+            # (ou_sigma → ou_sigma_final), switching at equal sub-stage intervals.
+            OU_SUBSTEPS = 4
+            if j in ou_stage_transitions:
+                ou_stage_start_j = j  # boundary hit: reset stage clock
+            if j < ou_stage_transitions[0]:
+                actor_critic.ou_sigma_current = getattr(args, 'ou_sigma', 0.0)
+            else:
+                later = [t for t in ou_stage_transitions if t > ou_stage_start_j]
+                stage_end_j = later[0] if later else num_updates
+                stage_dur = max(1, stage_end_j - ou_stage_start_j)
+                sub_idx = min(OU_SUBSTEPS - 1,
+                              (j - ou_stage_start_j) * OU_SUBSTEPS // stage_dur)
+                actor_critic.ou_sigma_current = args.ou_sigma + (
+                    sub_idx / (OU_SUBSTEPS - 1)) * (args.ou_sigma_final - args.ou_sigma)
+        else:
+            actor_critic.ou_sigma_current = getattr(args, 'ou_sigma', 0.0)
+
         # decrease learning rate linearly
         if args.use_linear_lr_decay:
             if 'cosine' in args.r_shaping: # HACK! 
@@ -761,10 +831,11 @@ def training_loop(agent, envs, args, device, actor_critic,
         ##############################################################################################################
         for step in range(args.num_steps):
             with torch.no_grad():
-                value, action, action_log_prob, recurrent_hidden_states, activities = actor_critic.act(
+                value, action, action_log_prob, recurrent_hidden_states, activities, ou_state = actor_critic.act(
                     rollouts.obs[step], 
                     rollouts.recurrent_hidden_states[step],
-                    rollouts.masks[step])
+                    rollouts.masks[step],
+                    ou_state=rollouts.ou_states[step])
             obs, reward, done, infos = envs.step(action)
             if j % plot_every_n_updates == 0:
                 traj_storage.add_step(infos)
@@ -793,7 +864,8 @@ def training_loop(agent, envs, args, device, actor_critic,
             if step ==args.num_steps -1:
                 obs = envs.reset()
             rollouts.insert(obs, recurrent_hidden_states, action,
-                            action_log_prob, value, reward, masks, bad_masks) # ~0.0006s
+                            action_log_prob, value, reward, masks, bad_masks,
+                            ou_state) # ~0.0006s
         ##############################################################################################################
         # UPDATE AGENT 
         ##############################################################################################################
@@ -871,4 +943,3 @@ def training_loop(agent, envs, args, device, actor_critic,
             # save the final training log
         
     return training_log, eval_log
-

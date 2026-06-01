@@ -751,15 +751,15 @@ class PlumeEnvironment_v2(gym.Env):
     wind_rel=True, # Agent senses relative wind speed (not ground speed) # will be overridden by apparent wind if turned on
     auto_movex=False, # simple autocurricula for movex
     auto_reward=False, # simple autocurricula for reward decay
-    diff_max=0.8, # teacher curriculum; sets the quantile of init x location 
-    diff_min=0.4, # teacher curriculum; sets the quantile of init x location 
+    diff_max=0.8, # teacher curriculum; sets the quantile of init x location
+    diff_min=0.4, # teacher curriculum; sets the quantile of init x location
     r_shaping=['step', 'oob'], # 'step', 'end'
     rewardx=1.0, # scale reward for e.g. A3C
     squash_action=False, # apply tanh and rescale (useful with PPO) i.e. convert action [0,1] to [-1,1] and then rescale to [0,1]
     walking=False,
-    radiusx=1.0, 
-    diffusion_min=1.00, 
-    diffusion_max=1.00, 
+    radiusx=1.0,
+    diffusion_min=1.00,
+    diffusion_max=1.00,
     action_feedback=False,
     flipping=False, # Generalization/reduce training data bias
     odor_scaling=False, # Generalization/reduce training data bias
@@ -846,8 +846,8 @@ class PlumeEnvironment_v2(gym.Env):
     # Generalization & curricula
     self.r_shaping = r_shaping
     # print("Reward Shaping", self.r_shaping)
-    self.flipping = flipping 
-    self.flipx = 1.0 # flip puffs around x-axis? 
+    self.flipping = flipping
+    self.flipx = 1.0 # flip puffs around x-axis?
     self.difficulty = diff_max # Curriculum
     self.diff_max = diff_max # Curriculum
     self.diff_min = diff_min # Curriculum
@@ -1392,12 +1392,22 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.haltere = haltere # PEv3 - haltere feedback
         self.double_drift = double_drift
         self.action_physics = action_physics
+        self.now_init_long = 0.0 # long-axis init coordinate set directly by curriculum
         print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}, self.mirror: {self.mirror}, haltere: {self.haltere}, self.action_physics: {self.action_physics} {action_physics}")
         if self.action_physics == 'ground_vel_angvel':
             # 3-dim action: [vel_x_ego, vel_y_ego, turn], all in [0, 1]
             # vel_x: forward speed (0=stop, 1=full); vel_y: lateral (0.5=center, 0=full-left, 1=full-right); turn: same as air_vel_angvel
             self.action_space = spaces.Box(low=0.0, high=1.0, shape=(3,), dtype=np.float32)
             print(f"[DEBUG] PEv3 using ground velocity action physics; action space shape: {self.action_space.shape}")
+        elif self.action_physics == 'force':
+            # 3-dim action in [0, 1]:
+            #   a[0]: parallel thrust   (0=no thrust, 1=full forward)
+            #   a[1]: perp thrust       (0.5=no lateral, 0=full-left, 1=full-right)
+            #   a[2]: yaw torque        (0.5=no torque, 0=full-CW, 1=full-CCW)
+            self.action_space = spaces.Box(low=0.0, high=1.0, shape=(3,), dtype=np.float32)
+            self.physics_coeff = config.force_physics  # access all coeffs as self.physics_coeff['key']
+            self.ang_vel = 0.0  # angular velocity (rad/s), persists across steps
+            print(f"[DEBUG] PEv3 using force action physics; action space shape: {self.action_space.shape}; coeffs: {self.physics_coeff}")
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                         shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
@@ -1533,7 +1543,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         return puffs
 
 
-    def get_initial_location(self, algo = None):
+    def get_initial_location(self, algo = 'slice'):
         loc_xy = None
         if 'uniform' in algo:
             loc_xy = np.array([
@@ -1671,6 +1681,50 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             loc_xy = np.array([puff_sample['x'], puff_sample['y']])
 
 
+        elif 'precise' in algo:
+            """
+            Precise location curriculum.
+            self.now_init_long is set directly by the curriculum scheduler.
+            Adds ~10% gaussian noise to it for per-episode variation.
+            Samples the wide coordinate based on puff spread at that long slice — wide enough
+            to often initialize the agent off-plume.
+            """
+            Z = self.get_abunchofpuffs()
+
+            X_span = abs(Z['x'].max() - Z['x'].min())
+            Y_span = abs(Z['y'].max() - Z['y'].min())
+            long = 'x' if X_span > Y_span else 'y'
+            wide = 'y' if long == 'x' else 'x'
+
+            # +- ~10% noise to the curriculum-set long coordinate
+            long_coord = self.now_init_long * (1 + 0.1 * np.random.randn())
+            
+            # Align sign with plume direction
+            long_sign = np.sign(Z[long].mean())
+            long_coord = abs(long_coord) * long_sign
+
+            # Find puffs in a band around this long coordinate
+            band = max(0.5, abs(self.now_init_long) * 0.15)
+            Z_band = Z[(Z[long].abs() >= abs(long_coord) - band) & (Z[long].abs() <= abs(long_coord) + band)]
+            if Z_band.empty:
+                Z_band = Z
+
+            # Sample wide coordinate: mean of plume at this slice + large spread to often land off-plume
+            wide_center = Z_band[wide].mean()
+            wide_spread = max(Z_band[wide].std(), 0.5)
+            Z_band_xy = Z_band[['x', 'y']].to_numpy()
+            varx = self.qvar
+            # Ensure init is no too far 
+            while True:
+                wide_coord = wide_center + varx * wide_spread * np.random.randn()
+                if long == 'x':
+                    loc_xy = np.array([long_coord, wide_coord])
+                else:
+                    loc_xy = np.array([wide_coord, long_coord])
+                if np.min(np.linalg.norm(Z_band_xy - loc_xy, axis=1)) < 1.0:
+                    break
+                varx *= 0.8  # pull toward plume center until close enough
+
         elif 'fixed' in algo:
             loc_xy = np.array( [self.fixed_x, self.fixed_y] )
 
@@ -1789,6 +1843,12 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.move_action_now = 0
             self.turn_action_now = 0
             # print(f"[DEBUG RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_action_last: {self.move_action_last}, turn_action_last: {self.turn_action_last}")
+
+        if self.action_physics == 'force':
+            # Zero out the integrator state at the start of each episode.
+            self.ang_vel = 0.0
+            self.ground_velocity = np.array([0.0, 0.0])
+            self.air_velocity = np.array([0.0, 0.0])
 
         observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
         if len(observation) == 7 or self.haltere:
@@ -1941,53 +2001,84 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             
 
         # Consequences of Actions
-        # Turn/Update orientation and move to new location 
         old_angle_radians = np.angle(self.agent_angle[0] + 1j*self.agent_angle[1], deg=False)
-        turn_amount, if_saccade = self.turn_action_to_turn_amount(turn_action, radian=True) # in radians
-        if if_saccade:
-            move_action *= 0.5 # slow movement during saccade
-        # print(f"[DEBUG] PEv3 turn_amount: {np.rad2deg(turn_amount):.4f}, turn_action: {turn_action:.4f}, if_saccade: {if_saccade}, move_action: {move_action:.4f}")
-
-        new_angle_radians = old_angle_radians + turn_amount
-        self.agent_angle = [ np.cos(new_angle_radians), np.sin(new_angle_radians) ]    
-
-        # New location = old location + agent movement + wind advection
-
-        if self.action_physics == 'ground_vel_angvel':
-            # Agent commands an egocentric 2D ground velocity (decoupled from heading).
-            # move_action = direction * speed, where direction is the unit egocentric vector and
-            # speed = min(||vel_ego||, 1). Ground velocity = rotate(move_action, heading) * move_capacity.
-            # No wind advection; air_velocity = ground_velocity - ambient_wind.
-            ground_speed = self.move_capacity * self.movex
-            cos_h, sin_h = self.agent_angle[0], self.agent_angle[1]
-            # Rotate unit egocentric vector to allocentric frame (ego x=forward, ego y=left CCW)
-            ground_vel_x = (cos_h * move_action[0] - sin_h * move_action[1]) * ground_speed
-            ground_vel_y = (sin_h * move_action[0] + cos_h * move_action[1]) * ground_speed
-            self.agent_location = [
-                self.agent_location[0] + ground_vel_x * self.dt,
-                self.agent_location[1] + ground_vel_y * self.dt,
-            ]
-            self.ground_velocity = np.array([ground_vel_x, ground_vel_y])
-            self.air_velocity = self.ground_velocity - np.array(self.ambient_wind)
+        if self.action_physics == 'force':
+            # Agent commands body-frame thrust [T_par, T_per] + yaw torque (tau). The env
+            # integrates rigid-body dynamics (semi-implicit Euler, zero-order hold) over
+            # physics_substeps, with linear drag on the airspeed (ground velocity - wind).
+            # Coefficients stored in self.physics_coeff (loaded from config.force_physics at init).
+            pc = self.physics_coeff
+            T_par = float(action[0]) * pc['T_para_max']                       # [0,1] -> [0, T_para_max]
+            T_per = (float(action[1]) - 0.5) * 2.0 * pc['T_perp_max']         # [0,1] -> [-T_perp_max, T_perp_max]
+            tau   = (float(action[2]) - 0.5) * 2.0 * pc['tau_max']            # [0,1] -> [-tau_max, tau_max]
+            pos = np.array(self.agent_location, dtype=np.float64)
+            vel = np.asarray(self.ground_velocity, dtype=np.float64).copy()  # world frame
+            sub_dt = self.dt / pc['physics_substeps']
+            curr_ang_vel = self.ang_vel
+            for _ in range(pc['physics_substeps']):
+                c, s = np.cos(old_angle_radians), np.sin(old_angle_radians)
+                # body->world rotation of thrust
+                T_world = np.array([c * T_par - s * T_per,
+                                    s * T_par + c * T_per])
+                v_air = vel - self.ambient_wind
+                # translation: semi-implicit Euler with linear drag on airspeed
+                vel = vel + (T_world - pc['drag'] * v_air) / pc['mass'] * sub_dt
+                pos = pos + vel * sub_dt   # uses the *updated* velocity
+                # rotation: same scheme
+                curr_ang_vel = curr_ang_vel + (tau - pc['k_rot'] * curr_ang_vel) / pc['inertia'] * sub_dt
+                old_angle_radians = old_angle_radians + curr_ang_vel * sub_dt
+            self.agent_angle = [ np.cos(old_angle_radians), np.sin(old_angle_radians) ] # updated angle which is new!
+            self.ang_vel = curr_ang_vel
+            self.agent_location = pos.tolist()
+            self.ground_velocity = vel
+            self.air_velocity = vel - self.ambient_wind  # Rel_wind = Amb_wind - Air_vel
         else:
-            # Original physics: agent commands air velocity in heading direction; wind drifts it.
-            agent_move_x = self.agent_angle[0]*self.move_capacity*self.movex*move_action*self.dt
-            agent_move_y = self.agent_angle[1]*self.move_capacity*self.movex*move_action*self.dt
-            wind_drift_x = self.ambient_wind[0]*self.dt
-            wind_drift_y = self.ambient_wind[1]*self.dt
-            if self.walking:
-                wind_drift_x = wind_drift_y = 0
-            self.agent_location = [
-            self.agent_location[0] + agent_move_x + wind_drift_x,
-            self.agent_location[1] + agent_move_y + wind_drift_y,
-            ]
-            # Air and ground velocity
-            self.air_velocity = np.array([agent_move_x, agent_move_y])/self.dt # Rel_wind = Amb_wind - Air_vel
-            self.ground_velocity = (np.array(self.agent_location) - self.agent_location_last)/self.dt
+            # Turn/Update orientation and move to new location
+            turn_amount, if_saccade = self.turn_action_to_turn_amount(turn_action, radian=True) # in radians
+            if if_saccade:
+                move_action *= 0.5 # slow movement during saccade
+            # print(f"[DEBUG] PEv3 turn_amount: {np.rad2deg(turn_amount):.4f}, turn_action: {turn_action:.4f}, if_saccade: {if_saccade}, move_action: {move_action:.4f}")
+
+            new_angle_radians = old_angle_radians + turn_amount
+            self.agent_angle = [ np.cos(new_angle_radians), np.sin(new_angle_radians) ]
+
+            # New location = old location + agent movement + wind advection
+
+            if self.action_physics == 'ground_vel_angvel':
+                # Agent commands an egocentric 2D ground velocity (decoupled from heading).
+                # move_action = direction * speed, where direction is the unit egocentric vector and
+                # speed = min(||vel_ego||, 1). Ground velocity = rotate(move_action, heading) * move_capacity.
+                # No wind advection; air_velocity = ground_velocity - ambient_wind.
+                ground_speed = self.move_capacity * self.movex
+                cos_h, sin_h = self.agent_angle[0], self.agent_angle[1]
+                # Rotate unit egocentric vector to allocentric frame (ego x=forward, ego y=left CCW)
+                ground_vel_x = (cos_h * move_action[0] - sin_h * move_action[1]) * ground_speed
+                ground_vel_y = (sin_h * move_action[0] + cos_h * move_action[1]) * ground_speed
+                self.agent_location = [
+                    self.agent_location[0] + ground_vel_x * self.dt,
+                    self.agent_location[1] + ground_vel_y * self.dt,
+                ]
+                self.ground_velocity = np.array([ground_vel_x, ground_vel_y])
+                self.air_velocity = self.ground_velocity - np.array(self.ambient_wind)
+            else:
+                # Original physics: agent commands air velocity in heading direction; wind drifts it.
+                agent_move_x = self.agent_angle[0]*self.move_capacity*self.movex*move_action*self.dt
+                agent_move_y = self.agent_angle[1]*self.move_capacity*self.movex*move_action*self.dt
+                wind_drift_x = self.ambient_wind[0]*self.dt
+                wind_drift_y = self.ambient_wind[1]*self.dt
+                if self.walking:
+                    wind_drift_x = wind_drift_y = 0
+                self.agent_location = [
+                self.agent_location[0] + agent_move_x + wind_drift_x,
+                self.agent_location[1] + agent_move_y + wind_drift_y,
+                ]
+                # Air and ground velocity
+                self.air_velocity = np.array([agent_move_x, agent_move_y])/self.dt # Rel_wind = Amb_wind - Air_vel
+                self.ground_velocity = (np.array(self.agent_location) - self.agent_location_last)/self.dt
         # print(f"[DEBUG] PEv3 step: air_velocity: {self.air_velocity}, ambient_wind: {self.ambient_wind}, agent_location: {self.agent_location}")
         # print(f"[DEBUG] PEv3 step: ground_velocity: {self.ground_velocity}")
 
-        if self.haltere:
+        if self.haltere and self.action_physics != 'force': # For now, only calculate haltere feedback with non-force physics for simplicity. Can add later if needed.
             self.move_action_now = move_action
             self.turn_action_now = turn_action
             self.move_dt = self.move_action_now - self.move_action_last
@@ -2099,10 +2190,10 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             end_reward = radial_distance_decrease - self.stray_distance
             reward += end_reward
 
-        if 'turn' in self.r_shaping:
+        if 'turn' in self.r_shaping and self.action_physics != 'force':
             reward -= 0.05*np.abs(2*(turn_action - 0.5))
 
-        if 'move' in self.r_shaping:
+        if 'move' in self.r_shaping and self.action_physics != 'force':
             reward -= 0.05*np.abs(move_action)
 
         if 'found' in self.r_shaping:
@@ -2309,7 +2400,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                     print(f"[DEBUG] v3; haltere: {args.haltere}, saccade: {args.saccade}, rotate_by: {args.rotate_by}, action_physics: {getattr(args, 'action_physics', None)}")
                     env = PlumeEnvironment_v3(
                         dataset=args.dataset,
-                        birthx=args.birthx, 
+                        birthx=args.birthx,
                         qvar=args.qvar,
                         diff_max=args.diff_max,
                         diff_min=args.diff_min,
