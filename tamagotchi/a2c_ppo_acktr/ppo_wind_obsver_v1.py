@@ -50,8 +50,12 @@ class PPO():
         clip_fraction_epoch = 0
         wind_loss_epoch = 0   # Wind obsver v1 modification: track wind loss epoch
         all_wind_nll = []
-        all_wind_sqerr = []      
-        all_wind_logvar = []   
+        all_wind_sqerr = []
+        all_wind_logvar = []
+        checked_ou_log_probs = False
+        ou_configured = getattr(self.actor_critic, 'ou_configured', False)
+        if hasattr(self.actor_critic, 'ou_sigma_current'):
+            print(f"  [OU] sigma={self.actor_critic.ou_sigma_current:.4f}", flush=True)
 
         for e in range(self.ppo_epoch):
             if self.actor_critic.is_recurrent:
@@ -64,12 +68,20 @@ class PPO():
                 # Wind obsver v1 modification: grab wind targets from data generator
                 obs_batch, recurrent_hidden_states_batch, actions_batch, \
                    value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, \
-                        adv_targ, wind_targets_batch = sample
+                        adv_targ, wind_targets_batch, ou_states_batch = sample
                 # Wind obsver v1 modification: grab activities which contain predicted wind mu/logvar
                 # Reshape to do in a single forward pass for all steps
                 values, action_log_probs, dist_entropy, rnn_hxs, activities = self.actor_critic.evaluate_actions(
                     obs_batch, recurrent_hidden_states_batch, masks_batch,
-                    actions_batch)
+                    actions_batch, ou_state=ou_states_batch)
+
+                if ou_configured and not checked_ou_log_probs:
+                    max_log_prob_diff = (action_log_probs - old_action_log_probs_batch).abs().max().item()
+                    print(f"  [OU] log_prob_check max_abs_diff={max_log_prob_diff:.6g}", flush=True)
+                    if max_log_prob_diff > 1e-3:
+                        print(f"  [OU] WARNING: log_prob discrepancy {max_log_prob_diff:.6g} exceeds 1e-3 — "
+                              f"check ou_state threading", flush=True)
+                    checked_ou_log_probs = True
 
                 ratio = torch.exp(action_log_probs -
                                   old_action_log_probs_batch)

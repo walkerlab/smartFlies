@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from tamagotchi.a2c_ppo_acktr.gnODE import GNODE
-from tamagotchi.a2c_ppo_acktr.distributions import Bernoulli, Categorical, DiagGaussian, BetaCustom
+from tamagotchi.a2c_ppo_acktr.distributions import Bernoulli, Categorical, DiagGaussian, BetaCustom, FixedNormal
 from tamagotchi.a2c_ppo_acktr.utils import init
 
 
@@ -24,25 +24,34 @@ class Policy(nn.Module):
                 raise NotImplementedError
 
         self.base = base(obs_shape[0], **base_kwargs)
+        self.ou_action_dim = 1
+        self.ou_supported = False
+        self._ou_warned_unsupported = False
 
         if action_space.__class__.__name__ == "Discrete":
             num_outputs = action_space.n
             self.dist = Categorical(self.base.output_size, num_outputs)
         elif action_space.__class__.__name__ == "Box":
             num_outputs = action_space.shape[0]
+            self.ou_action_dim = num_outputs
             self.dist = DiagGaussian(self.base.output_size, num_outputs)
-            if args is not None: 
+            self.ou_supported = True
+            if args is not None:
                 if args.if_train_actor_std:
                     print("Using DiagGaussian with trainable std!")
                     self.dist = DiagGaussian(self.base.output_size, num_outputs, trainable_std_dev=args.if_train_actor_std)
                 if args.betadist:
                     print("Using BetaCustom distribution!")
                     self.dist = BetaCustom(self.base.output_size, num_outputs)
+                    self.ou_supported = False
         elif action_space.__class__.__name__ == "MultiBinary":
             num_outputs = action_space.shape[0]
+            self.ou_action_dim = num_outputs
             self.dist = Bernoulli(self.base.output_size, num_outputs)
         else:
             raise NotImplementedError
+
+        self.configure_ou(args)
 
 
 
@@ -55,12 +64,61 @@ class Policy(nn.Module):
         """Size of rnn_hx."""
         return self.base.recurrent_hidden_state_size
 
+    def configure_ou(self, args=None):
+        if not hasattr(self, 'ou_action_dim'):
+            if hasattr(self.dist, 'fc_mean'):
+                self.ou_action_dim = self.dist.fc_mean.out_features
+            elif hasattr(self.dist, 'alpha') and len(self.dist.alpha) > 0:
+                self.ou_action_dim = self.dist.alpha[0].out_features
+            else:
+                self.ou_action_dim = 1
+        if not hasattr(self, 'ou_supported'):
+            self.ou_supported = isinstance(self.dist, DiagGaussian)
+        if not hasattr(self, '_ou_warned_unsupported'):
+            self._ou_warned_unsupported = False
+        self.ou_theta = getattr(args, 'ou_theta', 0.15) if args is not None else getattr(self, 'ou_theta', 0.15)
+        self.ou_sigma_initial = getattr(args, 'ou_sigma', 0.0) if args is not None else getattr(self, 'ou_sigma_initial', 0.0)
+        self.ou_sigma_final = getattr(args, 'ou_sigma_final', 0.0) if args is not None else getattr(self, 'ou_sigma_final', 0.0)
+        self.ou_sigma_current = self.ou_sigma_initial
+        self.ou_dt = getattr(args, 'ou_dt', None) if args is not None else getattr(self, 'ou_dt', None)
+        if self.ou_dt is None:
+            self.ou_dt = getattr(args, 'env_dt', 0.04) if args is not None else 0.04
+        self.ou_configured = (self.ou_sigma_initial != 0.0) or (self.ou_sigma_final != 0.0)
+
+    def _zero_ou_state(self, inputs):
+        ou_action_dim = getattr(self, 'ou_action_dim', 1)
+        return torch.zeros(inputs.size(0), ou_action_dim, device=inputs.device, dtype=inputs.dtype)
+
+    def _warn_if_ou_unsupported(self, dist):
+        if getattr(self, 'ou_configured', False) and not getattr(self, '_ou_warned_unsupported', False):
+            print(
+                f"Warning: OU exploration requested but unsupported for "
+                f"{dist.__class__.__name__}; running OU as a no-op.",
+                flush=True)
+            self._ou_warned_unsupported = True
+
+    def _apply_ou_shift(self, dist, inputs, masks, ou_state):
+        if not isinstance(dist, FixedNormal):
+            self._warn_if_ou_unsupported(dist)
+            return dist, self._zero_ou_state(inputs), False
+        if not getattr(self, 'ou_supported', False):
+            self._warn_if_ou_unsupported(dist)
+            return dist, self._zero_ou_state(inputs), False
+        if ou_state is None:
+            ou_state = self._zero_ou_state(inputs)
+        z_eff = ou_state * masks
+        ou_configured = getattr(self, 'ou_configured', False)
+        if ou_configured:
+            dist = FixedNormal(dist.loc + z_eff, dist.scale)
+        return dist, z_eff, ou_configured
+
     def forward(self, inputs, rnn_hxs, masks):
         raise NotImplementedError
 
-    def act(self, inputs, rnn_hxs, masks, deterministic=False):
+    def act(self, inputs, rnn_hxs, masks, deterministic=False, ou_state=None):
         value, actor_features, rnn_hxs, activities = self.base(inputs, rnn_hxs, masks)
         dist = self.dist(actor_features)
+        dist, z_eff, ou_active = self._apply_ou_shift(dist, inputs, masks, ou_state)
 
         if deterministic:
             action = dist.mode()
@@ -69,15 +127,24 @@ class Policy(nn.Module):
 
         action_log_probs = dist.log_probs(action)
 
-        return value, action, action_log_probs, rnn_hxs, activities
+        if ou_active:
+            dt = self.ou_dt
+            ou_state_new = z_eff + self.ou_theta * (-z_eff) * dt
+            if self.ou_sigma_current != 0.0:
+                ou_state_new = ou_state_new + self.ou_sigma_current * (dt ** 0.5) * torch.randn_like(z_eff)
+        else:
+            ou_state_new = self._zero_ou_state(inputs)
+
+        return value, action, action_log_probs, rnn_hxs, activities, ou_state_new
 
     def get_value(self, inputs, rnn_hxs, masks):
         value, _, _, _ = self.base(inputs, rnn_hxs, masks)
         return value
 
-    def evaluate_actions(self, inputs, rnn_hxs, masks, action):
+    def evaluate_actions(self, inputs, rnn_hxs, masks, action, ou_state=None):
         value, actor_features, rnn_hxs, activities = self.base(inputs, rnn_hxs, masks)
         dist = self.dist(actor_features)
+        dist, _, _ = self._apply_ou_shift(dist, inputs, masks, ou_state)
 
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()

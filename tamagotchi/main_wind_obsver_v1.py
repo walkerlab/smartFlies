@@ -16,12 +16,20 @@ import json
 from setproctitle import setproctitle as ptitle
 
 import tamagotchi.data_util as utils
-from env import make_vec_envs, get_vec_normalize
+try:
+    from env import make_vec_envs, get_vec_normalize
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from env import make_vec_envs, get_vec_normalize #hydra pipeline version
 from tamagotchi.a2c_ppo_acktr.ppo_wind_obsver_v1 import PPO
 from tamagotchi.a2c_ppo_acktr.model_wind_obsver_v1 import Policy
 from tamagotchi.a2c_ppo_acktr.storage_wind_obsver_v1 import RolloutStorage
-from training_wind_obsver_v1 import training_loop
-import mlflow
+try:
+    from training_wind_obsver_v1 import training_loop
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from training_wind_obsver_v1 import training_loop #hydra pipeline version
+from tamagotchi import wb as mlflow  # wandb shim with mlflow API
 
 def get_args():
     parser = argparse.ArgumentParser(description='PPO for Plume')
@@ -131,7 +139,24 @@ def get_args():
     parser.add_argument('--act_noise', type=float, default=0.0)
     parser.add_argument('--if_vec_norm', type=int, default=1) # whether to normalize the input
     parser.add_argument('--if_train_actor_std', type=bool, default=False) # whether to train the std of the stochastic policy
+    parser.add_argument('--ou_theta', type=float, default=0.15,
+        help='OU mean-reversion rate for temporally correlated action exploration')
+    parser.add_argument('--ou_sigma', type=float, default=0.0,
+        help='initial OU diffusion scale; 0 disables OU when ou_sigma_final is also 0')
+    parser.add_argument('--ou_sigma_final', type=float, default=0.0,
+        help='final OU diffusion scale after linear annealing')
+    parser.add_argument('--ou_anneal_steps', type=int, default=0,
+        help='environment steps over which to linearly anneal OU sigma; 0 disables annealing')
+    parser.add_argument('--ou_dt', type=float, default=None,
+        help='OU integration timestep; defaults to env_dt when unset')
+    parser.add_argument('--ou_eval', type=bool, default=False,
+        help='enable OU noise during evaluation ablations; off by default')
     parser.add_argument('--mlflow', type=int, default=1) # whether to train the std of the stochastic policy
+    parser.add_argument('--action_physics', type=str, default='air_vel_angvel',
+        choices=['air_vel_angvel', 'ground_vel_angvel', 'force'],
+        help="Action space: 'air_vel_angvel' (forward air speed + angular velocity, wind drifts the agent), "
+             "'ground_vel_angvel' (forward ground speed + angular velocity, no wind drift), "
+             "or 'force' (body-frame thrust + yaw torque, rigid-body dynamics integrated from config.force_physics)")
     args = parser.parse_args()
     assert len(args.dataset) == len(args.qvar) 
     assert len(args.dataset) == len(args.diff_max) 
@@ -360,6 +385,8 @@ def main(args=None):
                 getattr(get_vec_normalize(envs), 'obs_rms', None)
             ], start_fname)
             print('Saved', start_fname)
+    actor_critic.configure_ou(args)
+    actor_critic.to(device)
 
     agent = PPO(
         actor_critic,
@@ -372,7 +399,7 @@ def main(args=None):
         eps=args.eps,
         max_grad_norm=args.max_grad_norm,
         weight_decay=args.weight_decay,
-        track_ppo_fraction=True, 
+        track_ppo_fraction=True,
         wind_loss_coef=1e-2) # Wind_obsver_v1 modification: turn on wind loss for wind obsver v1 - otherwise 0!
     
     
@@ -394,7 +421,12 @@ def main(args=None):
         training_log = training_log.to_dict('records')
     else:
         training_log = None
-        
+        if os.path.isfile(args.model_fpath) and getattr(args, 'ou_anneal_steps', 0) > 0:
+            print(
+                "Warning: model checkpoint exists but training log is missing; "
+                "OU sigma annealing will restart from update 0.",
+                flush=True)
+
     eval_log = None
     # run training loop
     rollouts = RolloutStorage(args.num_steps, args.num_processes,
@@ -431,6 +463,7 @@ def main(args=None):
             print(f"Starting new run: {run_name}")
 
         # Single block using the appropriate parameters
+        run_params['dir'] = args.save_dir
         with mlflow.start_run(**run_params):
             # Log the hyperparameters dict to mlflow
             mlflow.log_params(vars(args)) 

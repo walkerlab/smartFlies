@@ -7,10 +7,18 @@ import os
 from collections import deque
 from tamagotchi.a2c_ppo_acktr.storage import RolloutStorage
 # from tamagotchi.eval import eval_lite
-import data_util as utils
-from env import get_vec_normalize
+try:
+    import data_util as utils
+except ImportError:
+    import sys; sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import data_util as utils #hydra pipeline version
+try:
+    from env import get_vec_normalize
+except ImportError:
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from env import get_vec_normalize #hydra pipeline version
 import matplotlib.pyplot as plt
-import mlflow
+from tamagotchi import wb as mlflow  # wandb shim with mlflow API
 
 def get_index_by_dataset(envs, dataset):
     """Get indices of the remotes that loaded the provided dataset."""
@@ -48,12 +56,21 @@ def update_by_schedule(envs, schedule_dict, curr_step):
             elif '_diff_min' in k:
                 # k format: '{ds}_diff_min'
                 ds_name = k.split('_diff_min')[0] # get the dataset name
-                idx = get_index_by_dataset(envs, ds_name) 
+                idx = get_index_by_dataset(envs, ds_name)
                 if len(idx) == 0:
                     print(f"No remote found for {ds_name} lesson")
                 else:
                     envs.env_method_at(idx, "update_env_param", {'diff_min': _schedule_dict[curr_step]})
                     print(f"update_env_param 'diff_min': {_schedule_dict[curr_step]} at {curr_step} for remote {idx}")
+            elif '_now_init_long' in k:
+                # k format: '{ds}_now_init_long'
+                ds_name = k.split('_now_init_long')[0]
+                idx = get_index_by_dataset(envs, ds_name)
+                if len(idx) == 0:
+                    print(f"No remote found for {ds_name} lesson")
+                else:
+                    envs.env_method_at(idx, "update_env_param", {'now_init_long': _schedule_dict[curr_step]})
+                    print(f"update_env_param 'now_init_long': {_schedule_dict[curr_step]} at {curr_step} for remote {idx}")
             elif '_rotate_by' in k:
                 # k format: '{ds}_rotate_by'
                 ds_name = k.split('_rotate_by')[0]
@@ -145,10 +162,6 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
 
     # print("[DEBUG] schedule_dict:", schedule_dict)
 
-    # Calculate how often to toggle cosine annealing of the learning rate - interval of curriculum updates
-    total_num_updates = len(course_schedule)  # already computed by your code
-    restart_period = total_number_periods // (total_num_updates + 1)
-    
     # add diff_max sub-lessons that is locked to the wind condition lessons
     lesson_times = [] # all lesson times in the schedule
     for k, v in schedule_dict.items():
@@ -161,67 +174,120 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
     wind_lesson_at = sorted(list(schedule_dict['wind_cond'].keys()))
 
     available_datasets = args.dataset
-    # get a length of period where loc algo grows 
-    # get diff_min diff_max of datasets which controls the location algorithm
-    # gradually increase diff_max over 4 lessons
-    if 'linear' in args.loc_algo:
-        # for each dataset find when their lessons are introduced and when the next one is introduced
-        if len(wind_lesson_at) > 1:
-            total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0] # over this period of time, grow diff_max
-        else:
-            total_lesson_time = total_number_periods
-        num_lessons = 4
-        lesson_time = round(total_lesson_time / num_lessons)
-        diff_max_step = (np.array(args.diff_max) - np.array(args.diff_min)) / num_lessons # the step size for the diff_max
-        for i, dataset in enumerate(available_datasets):
-            # init lesson for each dataset
-            lesson_name = f'{dataset}_diff_max'
-            if lesson_name not in schedule_dict:
-                schedule_dict[lesson_name] = {}
-            # get the start time of the lesson
-            ds_start = wind_lesson_at[i] # start after the i-th wind cond. is introduced
-            # add the lesson to the schedule
-            for j in range(4):
-                lesson_time_idx = ds_start + j * lesson_time
-                step = (j + 1) * diff_max_step[i]
-                schedule_dict[lesson_name][lesson_time_idx] = args.diff_min[i] + step
-                # eg: {'poisson_mag_narrow_noisy3x5b5_diff_max': {665: 0.4, 720: 0.5, 775: 0.6000000000000001, 830: 0.7000000000000001}
-            lesson_name = f'{dataset}_diff_min'
-            if lesson_name not in schedule_dict:
-                schedule_dict[lesson_name] = {}
-            for j in range(4):
-                lesson_time_idx = ds_start + j * lesson_time
-                step = (j + 1) * diff_max_step[i]
-                step = step / 3
-                new_diff_min = args.diff_min[i] + step
-                new_diff_min = min(0.4, new_diff_min)  # ensure it doesn't go below 0.4
-                schedule_dict[lesson_name][lesson_time_idx] = new_diff_min
-    
+
+    # Pre-compute rotate_by stage start times so loc_algo can repeat within each stage
+    rotate_stage_times = None
     if 'rotate_by' in args.r_shaping:
+        rb_num_stages = 4 if 'birthx_cl_last' in args.r_shaping else 3
         if len(wind_lesson_at) > 1:
-            total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0] # over this period of time, grow diff_max
+            rb_stage_start = wind_lesson_at[0]
+            rb_total_time = wind_lesson_at[1] - wind_lesson_at[0]
         else:
-            ds_start = 0
-            total_lesson_time = total_number_periods
-        num_lessons = 3
-        lesson_time = round(total_lesson_time / num_lessons)
+            rb_stage_start = 0
+            rb_total_time = total_number_periods
+        rb_stage_duration = round(rb_total_time / rb_num_stages)
+        rotate_stage_times = [rb_stage_start + k * rb_stage_duration for k in range(rb_num_stages)]
+
+    if 'linear' in args.loc_algo:
+        num_lessons = 6
+        diff_max_step = (np.array(args.diff_max) - np.array(args.diff_min)) / num_lessons
+
+        if rotate_stage_times is not None:
+            # Repeat all loc_algo lessons from scratch within each rotate_by stage
+            lesson_time = round(rb_stage_duration / num_lessons)
+            for i, dataset in enumerate(available_datasets):
+                lesson_name_max = f'{dataset}_diff_max'
+                lesson_name_min = f'{dataset}_diff_min'
+                if lesson_name_max not in schedule_dict:
+                    schedule_dict[lesson_name_max] = {}
+                if lesson_name_min not in schedule_dict:
+                    schedule_dict[lesson_name_min] = {}
+                for stage_start in rotate_stage_times:
+                    for j in range(num_lessons):
+                        t = stage_start + j * lesson_time
+                        step = (j + 1) * diff_max_step[i]
+                        schedule_dict[lesson_name_max][t] = args.diff_min[i] + step
+                        schedule_dict[lesson_name_min][t] = args.diff_min[i] + step / 3
+        else:
+            # Original logic: anchor to wind_lesson_at[i]
+            if len(wind_lesson_at) > 1:
+                total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0]
+            else:
+                total_lesson_time = total_number_periods
+            lesson_time = round(total_lesson_time / num_lessons)
+            for i, dataset in enumerate(available_datasets):
+                ds_start = wind_lesson_at[i]
+                lesson_name = f'{dataset}_diff_max'
+                if lesson_name not in schedule_dict:
+                    schedule_dict[lesson_name] = {}
+                for j in range(num_lessons):
+                    t = ds_start + j * lesson_time
+                    step = (j + 1) * diff_max_step[i]
+                    schedule_dict[lesson_name][t] = args.diff_min[i] + step
+                    # eg: {'poisson_mag_narrow_noisy3x5b5_diff_max': {665: 0.4, 720: 0.5, 775: 0.6000000000000001, 830: 0.7000000000000001}
+                lesson_name = f'{dataset}_diff_min'
+                if lesson_name not in schedule_dict:
+                    schedule_dict[lesson_name] = {}
+                for j in range(num_lessons):
+                    t = ds_start + j * lesson_time
+                    step = (j + 1) * diff_max_step[i]
+                    schedule_dict[lesson_name][t] = args.diff_min[i] + step / 3
+
+    if 'precise' in args.loc_algo:
+        num_lessons = 6
+        # evenly spaced levels from precise_min to precise_max, one per lesson
+        for i, dataset in enumerate(available_datasets):
+            level_values = np.linspace(args.precise_min[i], args.precise_max[i], num_lessons, endpoint=True)
+            lesson_name = f'{dataset}_now_init_long'
+            if lesson_name not in schedule_dict:
+                schedule_dict[lesson_name] = {}
+
+            if rotate_stage_times is not None:
+                lesson_time = round(rb_stage_duration / num_lessons)
+                for stage_start in rotate_stage_times:
+                    for j, val in enumerate(level_values):
+                        t = stage_start + j * lesson_time
+                        schedule_dict[lesson_name][t] = val
+            else:
+                if len(wind_lesson_at) > 1:
+                    total_lesson_time = wind_lesson_at[1] - wind_lesson_at[0]
+                else:
+                    total_lesson_time = total_number_periods
+                lesson_time = round(total_lesson_time / num_lessons)
+                ds_start = wind_lesson_at[i]
+                for j, val in enumerate(level_values):
+                    t = ds_start + j * lesson_time
+                    schedule_dict[lesson_name][t] = val
+
+    if 'rotate_by' in args.r_shaping:
+        angles = [[0, 180], [90, -90], [0, 90, 180, -90]]
         for i, dataset in enumerate(available_datasets):
             lesson_name = f'{dataset}_rotate_by'
             if lesson_name not in schedule_dict:
                 schedule_dict[lesson_name] = {}
-                # TODO look at ds_start = wind_lesson_at[i]! whnne there's more than one wind cond. lesson, this will not work!
-            for j in range(3):
-                lesson_time_idx = ds_start + j * lesson_time
-                if j == 0:
-                    schedule_dict[lesson_name][lesson_time_idx] = [0, 180]
-                elif j == 1:
-                    schedule_dict[lesson_name][lesson_time_idx] = [90, -90]
-                elif j == 2:
-                    schedule_dict[lesson_name][lesson_time_idx] = [0, 90, 180, -90]
-
+            for j, stage_start in enumerate(rotate_stage_times[:3]):  # only 3 rotate_by stages
+                schedule_dict[lesson_name][stage_start] = angles[j]
         print(f"Added rotate_by lessons to schedule_dict: {schedule_dict}")
-        # TODO look at what I actually threw in.. so that can add method for updating this!
-        # TODO add method for updating this in update CL function
+
+    if 'birthx_cl_last' in args.r_shaping:
+        # Reschedule all birthx lessons into the final stage (stage 4)
+        stage4_start = rotate_stage_times[3]
+        stage4_duration = total_number_periods - stage4_start
+        birthx_values = course_dirctory['birthx']['scheduled_value']
+        num_birthx_lessons = len(birthx_values) - 1  # excludes the initial value
+        birthx_lesson_time = round(stage4_duration / num_birthx_lessons)
+        schedule_dict['birthx'] = {0: birthx_values[0]}  # keep initial value
+        for j in range(num_birthx_lessons):
+            t = stage4_start + j * birthx_lesson_time
+            schedule_dict['birthx'][t] = birthx_values[j + 1]
+        print(f"Rescheduled birthx to stage 4 (starts {stage4_start}): {schedule_dict['birthx']}")
+
+    # Calculate how often to toggle cosine annealing of the learning rate - after each rotate_by stage or after each lesson if no rotate_by
+    if 'rotate_by' in args.r_shaping:
+        total_num_updates = len(rotate_stage_times)
+    else:
+        total_num_updates = len(course_schedule)
+    restart_period = total_number_periods // (total_num_updates + 1)
 
     return schedule_dict, restart_period
 
@@ -620,10 +686,8 @@ def training_loop(agent, envs, args, device, actor_critic,
     eval_log = eval_log if eval_log is not None else []
     # track trajectories for plotting
     best_mean = 0.0
-    if 'oob' not in args.r_shaping:
-        traj_storage = TrajectoryStorage(num_envs=envs.num_envs, possible_datasets=args.dataset, possible_outcomes=['HOME', 'OOT'])
-    else:
-        traj_storage = TrajectoryStorage(num_envs=envs.num_envs, possible_datasets=args.dataset, possible_outcomes=['HOME', 'OOB', 'OOT'])
+
+    traj_storage = TrajectoryStorage(num_envs=envs.num_envs, possible_datasets=args.dataset, possible_outcomes=['HOME', 'OOB', 'OOT'])
         
     # track stats for logging
     episode_rewards = deque(maxlen=50) 
@@ -632,17 +696,31 @@ def training_loop(agent, envs, args, device, actor_critic,
     episode_wind_directions = deque(maxlen=50)
     
     # initialize the curriculum schedule
-    if args.birthx_linear_tc_steps >= 0: 
-        schedule, restart_period = build_tc_schedule_dict(args, num_updates, birthx={'num_classes': args.birthx_linear_tc_steps, 
-                                                                'difficulty_range': [0.7, args.birthx], 
-                                                                'dtype': 'float', 'step_type': 'linear'}, 
-                                          wind_cond={'num_classes': len(args.dataset) - 1, 'difficulty_range': [1, len(args.dataset)], 
+    if args.birthx_linear_tc_steps >= 0:
+        schedule, restart_period = build_tc_schedule_dict(args, num_updates, birthx={'num_classes': args.birthx_linear_tc_steps,
+                                                                'difficulty_range': [0.7, args.birthx],
+                                                                'dtype': 'float', 'step_type': 'linear'},
+                                          wind_cond={'num_classes': len(args.dataset) - 1, 'difficulty_range': [1, len(args.dataset)],
                                                      'dtype': 'int', 'step_type': 'linear'}) # wind_cond: in the sequence of args.dataset - first is 1, last is 3
         update_by_schedule(envs, schedule, 0) # update the initialized envs according to the curriculum schedule. The default init values are incorrect, hence this update s.t. reset() returns correctly.
         if not args.dryrun:
             utils.save_tc_schedule(schedule, num_updates, args.num_processes, args.num_steps, args.save_dir)
 
-    
+    # Build OU per-stage annealing index from the rotate_by schedule, if applicable.
+    # ou_stage_transitions: sorted list of update indices where a rotate_by stage starts.
+    # When non-empty, sigma resets to ou_sigma at each boundary and anneals to ou_sigma_final
+    # by the end of that stage, overriding the flat ou_anneal_steps path.
+    ou_stage_transitions = []
+    if getattr(actor_critic, 'ou_configured', False) and 'rotate_by' in args.r_shaping:
+        ds_key = f'{args.dataset[0]}_rotate_by'
+        if args.birthx_linear_tc_steps >= 0 and ds_key in schedule:
+            ou_stage_transitions = sorted(schedule[ds_key].keys())
+    # Determine which stage we are already in (matters when resuming from a checkpoint).
+    ou_stage_start_j = ou_stage_transitions[0] if ou_stage_transitions else 0
+    for t in ou_stage_transitions:
+        if t <= (last_chkpt_update or 0):
+            ou_stage_start_j = t
+
     # finetuning
     # TODO see if works
     if 'finetune' in args.r_shaping:
@@ -676,6 +754,27 @@ def training_loop(agent, envs, args, device, actor_critic,
         update_range = range(last_chkpt_update, num_updates)
 
     for j in update_range:
+        # TODO collapse this into update by schedule
+        if ou_stage_transitions and args.ou_sigma != args.ou_sigma_final:
+            # 4-step discrete sigma schedule locked to rotate_by curriculum.
+            # Within each stage sigma takes one of 4 evenly-spaced levels
+            # (ou_sigma → ou_sigma_final), switching at equal sub-stage intervals.
+            OU_SUBSTEPS = 4
+            if j in ou_stage_transitions:
+                ou_stage_start_j = j  # boundary hit: reset stage clock
+            if j < ou_stage_transitions[0]:
+                actor_critic.ou_sigma_current = getattr(args, 'ou_sigma', 0.0)
+            else:
+                later = [t for t in ou_stage_transitions if t > ou_stage_start_j]
+                stage_end_j = later[0] if later else num_updates
+                stage_dur = max(1, stage_end_j - ou_stage_start_j)
+                sub_idx = min(OU_SUBSTEPS - 1,
+                              (j - ou_stage_start_j) * OU_SUBSTEPS // stage_dur)
+                actor_critic.ou_sigma_current = args.ou_sigma + (
+                    sub_idx / (OU_SUBSTEPS - 1)) * (args.ou_sigma_final - args.ou_sigma)
+        else:
+            actor_critic.ou_sigma_current = getattr(args, 'ou_sigma', 0.0)
+
         # decrease learning rate linearly
         if args.use_linear_lr_decay:
             if 'cosine' in args.r_shaping: # HACK! 
@@ -732,10 +831,11 @@ def training_loop(agent, envs, args, device, actor_critic,
         ##############################################################################################################
         for step in range(args.num_steps):
             with torch.no_grad():
-                value, action, action_log_prob, recurrent_hidden_states, activities = actor_critic.act(
-                    rollouts.obs[step], 
+                value, action, action_log_prob, recurrent_hidden_states, activities, ou_state = actor_critic.act(
+                    rollouts.obs[step],
                     rollouts.recurrent_hidden_states[step],
-                    rollouts.masks[step])
+                    rollouts.masks[step],
+                    ou_state=rollouts.ou_states[step])
             obs, reward, done, infos = envs.step(action)
             if j % plot_every_n_updates == 0:
                 traj_storage.add_step(infos)
@@ -771,7 +871,8 @@ def training_loop(agent, envs, args, device, actor_critic,
             # wind obsver v1 modification: insert wind into rollouts
             rollouts.insert(obs, recurrent_hidden_states, action, action_log_prob,
                             value, reward, masks, bad_masks,
-                            wind_targets=wind_dirs)
+                            wind_targets=wind_dirs,
+                            ou_state=ou_state)
         ##############################################################################################################
         # UPDATE AGENT 
         ##############################################################################################################
@@ -793,17 +894,23 @@ def training_loop(agent, envs, args, device, actor_critic,
             plot_trajectories(traj_storage, envs, save_path=plt_path)
             if args.mlflow:
                 try:
-                    mlflow.log_artifact(plt_path, artifact_path=f"figs")
-                    os.remove(plt_path)
+                    mlflow.log_artifact(plt_path, artifact_path="figs/trajectories", step=j)
                 except Exception as e:
                     print(f"Error logging artifact {plt_path}: {e}")
                 
         utils.log_agent_learning_wind_obsver(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], aux_loss_dict=extras, use_mlflow=args.mlflow)
         if j % 20 == 0: # wind obsver v1 modification: plot success fractions every 20 updates
             utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
-                
-        rollouts.after_update()
+
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
+        if j % args.log_interval == 0 and len(episode_rewards) > 1 and not args.dryrun:
+            training_log = log_episode(training_log, j, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates)
+            # Save training curve
+            pd.DataFrame(training_log).to_csv(args.training_log)
+
+        if args.mlflow:
+            mlflow.flush(j)
+        rollouts.after_update()
         ##############################################################################################################
         # save for every interval-th episode or for the last epoch
         ##############################################################################################################
@@ -816,7 +923,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                 agent.optimizer.state_dict(),
             ], args.model_fpath)
             print('Saved', args.model_fpath)
-            
+
             # save the VecNormalize state for evaluation
             if args.if_vec_norm:
                 vecNormalize_state_fname = args.model_fpath.replace(".pt", "_vecNormalize.pkl")
@@ -831,11 +938,6 @@ def training_loop(agent, envs, args, device, actor_critic,
                     getattr(get_vec_normalize(envs), 'obs_rms', None)
                 ], fname)
                 print('Saved', fname)
-
-        if j % args.log_interval == 0 and len(episode_rewards) > 1 and not args.dryrun:
-            training_log = log_episode(training_log, j, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates)
-            # Save training curve
-            pd.DataFrame(training_log).to_csv(args.training_log)
     
     # save the final model to mlflow
     if args.mlflow:
