@@ -6,27 +6,36 @@ converts it to the argparse.Namespace that main.main() expects, and runs it.
 Usage:
     python3 -m tamagotchi.main_hydra env_name=plume outsuffix=run01
     python3 -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=air_vel_angvel,ground_vel_angvel
+    python3 -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=force OU_exploration=medium_anneal experiment_name=force_physics r_shaping='r_shaping=[OU_locked_to_schedule,missed_time_cost,rotate_by,birthx_cl_last,cosine]'
 """
 import argparse
 import os
-
+import hashlib
 import hydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
+def adam_smoke(label):
+    import torch
+    import torch.optim as optim
+    p = torch.nn.Parameter(torch.randn(64, 7))
+    optim.Adam([p], lr=1e-3, eps=1e-5, weight_decay=0.0)
+
+
+adam_smoke("") # something about the import order causes a weird interaction - if init here, bug disappears
 
 from tamagotchi import main as base_main
-
+from tamagotchi import main_wind_obsver_v1
+from tamagotchi import main_wind_obsver_v2
 
 def _auto_outsuffix(cfg_dict: dict) -> str:
-    """Build a unique per-job outsuffix from Hydra override_dirname + seed."""
+    """Build a unique per-job outsuffix: seed-{seed}-{hash}, hash over the full override string."""
     override_dirname = HydraConfig.get().job.override_dirname  # e.g. "seed=1,action_physics=air_vel_angvel"
-    sanitized = override_dirname.replace(",", "_").replace("=", "-").replace("/", "-")
+    # take out seed if present
+    if "seed" in override_dirname:
+        override_dirname = ",".join([part for part in override_dirname.split(",") if not part.startswith("seed=")])
     seed = cfg_dict.get("seed", "")
-    if sanitized and f"seed-{seed}" not in sanitized and f"seed={seed}" not in sanitized:
-        sanitized = f"{sanitized}_seed-{seed}"
-    elif not sanitized:
-        sanitized = f"seed-{seed}"
-    return sanitized
+    h = hashlib.sha1(override_dirname.encode("utf-8")).hexdigest()[:8]
+    return f"seed-{seed}-{h}"
 
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
@@ -41,14 +50,24 @@ def run(cfg: DictConfig) -> None:
 
     if not cfg_dict.get("outsuffix"):
         cfg_dict["outsuffix"] = _auto_outsuffix(cfg_dict)
-    
+
     print("Running with config:")
     print(OmegaConf.to_yaml(cfg))
 
     args = argparse.Namespace(**cfg_dict)
     import torch
     args.cuda = torch.cuda.is_available()
-    base_main.main(args=vars(args))
+
+    # Dispatch to the appropriate main function based on variant
+    variant = cfg_dict.get("variant", "base")
+    if variant == "wind_obsver_v1":
+        main_wind_obsver_v1.main(args=vars(args))
+    elif variant == "wind_obsver_v2":
+        main_wind_obsver_v2.main(args=vars(args))
+    elif variant == "base":
+        base_main.main(args=vars(args))
+    else:
+        raise ValueError(f"Unknown variant: {variant}. Must be 'base', 'wind_obsver_v1', or 'wind_obsver_v2'")
 
 
 if __name__ == "__main__":
