@@ -579,20 +579,6 @@ def update_eps_info(update_episodes_df, info, episode_counter, update_idx):
 def log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, use_mlflow=True):
     if not use_mlflow:
         return
-    mlflow.log_metric("advantages_mean", advantages.mean().item(), step=j)
-    mlflow.log_metric("advantages_std", advantages.std().item(), step=j)
-    mlflow.log_metric("advantages_max", advantages.max().item(), step=j)
-    mlflow.log_metric("advantages_min", advantages.min().item(), step=j)
-    mlflow.log_metric("value_loss", value_loss, step=j)
-    mlflow.log_metric("action_loss", action_loss, step=j)
-    mlflow.log_metric("dist_entropy", dist_entropy, step=j)
-    mlflow.log_metric("clip_fraction", clip_fraction, step=j)
-    mlflow.log_metric("learning_rate", learning_rate, step=j)
-
-
-def log_agent_learning_wind_obsver(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, aux_loss_dict, use_mlflow=True):
-    if not use_mlflow:
-        return
     mlflow.log_metric("ppo/advantages_mean", advantages.mean().item(), step=j)
     mlflow.log_metric("ppo/advantages_std", advantages.std().item(), step=j)
     mlflow.log_metric("ppo/advantages_max", advantages.max().item(), step=j)
@@ -603,23 +589,52 @@ def log_agent_learning_wind_obsver(j, advantages, value_loss, action_loss, dist_
     mlflow.log_metric("ppo/clip_fraction", clip_fraction, step=j)
     mlflow.log_metric("ppo/learning_rate", learning_rate, step=j)
 
+
+def log_agent_learning_wind_obsver(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, aux_loss_dict, use_mlflow=True):
+    log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, use_mlflow=use_mlflow)
+
     all_wind_nll = aux_loss_dict['wind_nll_all']
     all_wind_sqerr = aux_loss_dict['wind_sqerr_all']
     all_wind_logvar = aux_loss_dict['wind_logvar_all']
     wind_nll_mean = all_wind_nll.mean().item()
     wind_nll_std  = all_wind_nll.std().item()
     wind_loss_epoch = aux_loss_dict["wind_loss_epoch"]
-    mlflow.log_metric("ppo/wind_loss_mean", wind_loss_epoch, step=j)
-    mlflow.log_metric("ppo/wind_nll_mean", wind_nll_mean, step=j)
-    mlflow.log_metric("ppo/wind_nll_std",  wind_nll_std, step=j)
-    mlflow.log_metric("ppo/wind_sqerr_mean", all_wind_sqerr.mean().item(), step=j)
-    mlflow.log_metric("ppo/wind_logvar_mean", all_wind_logvar.mean().item(), step=j)
+    mlflow.log_metric("wind_observer/wind_loss_mean", wind_loss_epoch, step=j)
+    mlflow.log_metric("wind_observer/wind_nll_mean", wind_nll_mean, step=j)
+    mlflow.log_metric("wind_observer/wind_nll_std",  wind_nll_std, step=j)
+    mlflow.log_metric("wind_observer/wind_sqerr_mean", all_wind_sqerr.mean().item(), step=j)
+    mlflow.log_metric("wind_observer/wind_logvar_mean", all_wind_logvar.mean().item(), step=j)
 
-    
 
-def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True):
+def log_curriculum_schedule(schedule_dict, j, use_mlflow=True):
+    """Log current curriculum variable values at update index j"""
+    if not use_mlflow:
+        return
+
+    for lesson_name, lesson_schedule in schedule_dict.items():
+        # Find the most recent value at or before update j
+        applicable_steps = [step for step in lesson_schedule.keys() if step <= j]
+        if applicable_steps:
+            current_step = max(applicable_steps)
+            current_value = lesson_schedule[current_step]
+            mlflow.log_metric(f"curriculum/{lesson_name}", current_value, step=j)
+
+
+def log_eps_info(j, update_episodes_df, use_mlflow=True):
+    if not use_mlflow:
+        return
+    for outcome in ['HOME', 'OOB', 'OOT']:
+        mlflow.log_metric(f"perf/{outcome}_num", sum(update_episodes_df['outcome'] == outcome), step=j)
+        mlflow.log_metric(f"perf/{outcome}_ratio", sum(update_episodes_df['outcome'] == outcome) / len(update_episodes_df['outcome']), step=j)
+        mlflow.log_metric(f"perf/num_episodes", len(update_episodes_df['outcome']), step=j)
+
+    mlflow.log_metric("perf/init_distance", update_episodes_df['location_initial'].apply(np.linalg.norm).mean(), step=j)
+    mlflow.log_metric("perf/stray_initial", update_episodes_df['stray_initial'].mean(), step=j)
+
+def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifacts=True):
     """
     Log episode statistics and plot a histogram of plume density for successful episodes.
+    Just log episode statistics if not long_artifacts
     Args:
         j (int): Update index for logging and for labeling the plot.
         args (Namespace): Contains `save_dir` for saving the plot.
@@ -627,76 +642,76 @@ def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True):
     """
     
     # Log episode statistics
-    if use_mlflow:
-        for outcome in ['HOME', 'OOB', 'OOT']:
-            mlflow.log_metric(f"{outcome}_num", sum(update_episodes_df['outcome'] == outcome), step=j)
-            mlflow.log_metric(f"{outcome}_ratio", sum(update_episodes_df['outcome'] == outcome) / len(update_episodes_df['outcome']), step=j)
-            mlflow.log_metric('num_episodes', len(update_episodes_df['outcome']), step=j)
-    log_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '')}_eps_log_{j}.csv"
-    update_episodes_df.to_csv(log_path, index=False)
-    if use_mlflow:
+    if not use_mlflow:
+        return
+    
+    log_eps_info(j, update_episodes_df)
+    
+    if log_artifacts:
+        log_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '')}_eps_log_{j}.csv"
+        update_episodes_df.to_csv(log_path, index=False)
         try:
             mlflow.log_artifact(log_path, artifact_path=f"eps_log", step=j)
         except Exception as e:
             print(f"Error logging artifact {log_path}: {e}")
     
     # Plot plume density histogram for successful episodes
-    successful_df = update_episodes_df[update_episodes_df['outcome'] == 'HOME']
-    # Check if there's any data to plot
-    if len(successful_df) > 0:        
-        # Plot success rate by plume density and dataset
-        # Define common bins for plume density
-        bins = np.linspace(update_episodes_df['plume_density'].min(), 
-                        update_episodes_df['plume_density'].max(), 10)
-        bin_width = bins[1] - bins[0]
-        # Get unique datasets
-        datasets = update_episodes_df['dataset'].unique()
-        # Set up the plot
-        plt.figure(figsize=(4, 4))
-        # Offset width to prevent bar overlap
-        offset_factor = 0.8 / len(datasets)
+        successful_df = update_episodes_df[update_episodes_df['outcome'] == 'HOME']
+        # Check if there's any data to plot
+        if len(successful_df) > 0:        
+            # Plot success rate by plume density and dataset
+            # Define common bins for plume density
+            bins = np.linspace(update_episodes_df['plume_density'].min(), 
+                            update_episodes_df['plume_density'].max(), 10)
+            bin_width = bins[1] - bins[0]
+            # Get unique datasets
+            datasets = update_episodes_df['dataset'].unique()
+            # Set up the plot
+            plt.figure(figsize=(4, 4))
+            # Offset width to prevent bar overlap
+            offset_factor = 0.8 / len(datasets)
 
-        for i, dataset in enumerate(datasets):
-            subset = update_episodes_df[update_episodes_df['dataset'] == dataset].copy()
-            subset['plume_bin'] = pd.cut(subset['plume_density'], bins=bins)
-            
-            grouped = subset.groupby('plume_bin')
-            
-            # Compute success rate and number of successes
-            success_rate = grouped['outcome'].apply(lambda x: (x == 'HOME').mean())
-            n_success = grouped['outcome'].apply(lambda x: (x == 'HOME').sum())
-            bin_centers = grouped['plume_density'].apply(lambda x: x.mean()).values
-            
-            # Apply offset to bin centers to avoid bar overlap
-            bin_centers_shifted = bin_centers + (i - len(datasets)/2) * offset_factor * bin_width
+            for i, dataset in enumerate(datasets):
+                subset = update_episodes_df[update_episodes_df['dataset'] == dataset].copy()
+                subset['plume_bin'] = pd.cut(subset['plume_density'], bins=bins)
+                
+                grouped = subset.groupby('plume_bin')
+                
+                # Compute success rate and number of successes
+                success_rate = grouped['outcome'].apply(lambda x: (x == 'HOME').mean())
+                n_success = grouped['outcome'].apply(lambda x: (x == 'HOME').sum())
+                bin_centers = grouped['plume_density'].apply(lambda x: x.mean()).values
+                
+                # Apply offset to bin centers to avoid bar overlap
+                bin_centers_shifted = bin_centers + (i - len(datasets)/2) * offset_factor * bin_width
 
-            # Plot bars
-            plt.bar(bin_centers_shifted, success_rate.values, 
-                    width=offset_factor * bin_width, 
-                    label=dataset, alpha=0.8, color=config.mlflow_colors[dataset])
+                # Plot bars
+                plt.bar(bin_centers_shifted, success_rate.values, 
+                        width=offset_factor * bin_width, 
+                        label=dataset, alpha=0.8, color=config.mlflow_colors[dataset])
 
-            # Annotate number of successes, colored by group
-            for x, y, n in zip(bin_centers_shifted, success_rate.values, n_success.values):
-                if np.isfinite(x) and np.isfinite(y):
-                    plt.text(x, y + 0.02, str(n), ha='center', va='bottom', fontsize=8, color=config.mlflow_colors[dataset])
+                # Annotate number of successes, colored by group
+                for x, y, n in zip(bin_centers_shifted, success_rate.values, n_success.values):
+                    if np.isfinite(x) and np.isfinite(y):
+                        plt.text(x, y + 0.02, str(n), ha='center', va='bottom', fontsize=8, color=config.mlflow_colors[dataset])
 
-        # Labels and formatting
-        plt.xlabel('Plume Density')
-        plt.ylabel('HOME fraction; n = {}'.format(len(update_episodes_df['outcome'])))
-        plt.title(f"Success Rate by Plume Density and Dataset (Update {int(update_episodes_df['update_idx'].min())} - {int(update_episodes_df['update_idx'].max())} )")
-        plt.ylim(0, 1.05)
-        plt.legend(title='Dataset')
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        # Save the figure to a file in your update directory
-        plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}HOME_density_{j}_rate.png"
-        plt.savefig(plt_path, dpi=100, bbox_inches='tight')
-        plt.close()  # Close the figure to free memory
-        if use_mlflow: 
-            try:
-                mlflow.log_artifact(plt_path, artifact_path="figs/density", step=j)
-            except Exception as e:
-                print(f"Error logging artifact {plt_path}: {e}")
+            # Labels and formatting
+            plt.xlabel('Plume Density')
+            plt.ylabel('HOME fraction; n = {}'.format(len(update_episodes_df['outcome'])))
+            plt.title(f"Success Rate by Plume Density and Dataset (Update {int(update_episodes_df['update_idx'].min())} - {int(update_episodes_df['update_idx'].max())} )")
+            plt.ylim(0, 1.05)
+            plt.legend(title='Dataset')
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            # Save the figure to a file in your update directory
+            plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}HOME_density_{j}_rate.png"
+            plt.savefig(plt_path, dpi=100, bbox_inches='tight')
+            plt.close()  # Close the figure to free memory
+            if use_mlflow: 
+                try:
+                    mlflow.log_artifact(plt_path, artifact_path="figs/density", step=j)
+                except Exception as e:
+                    print(f"Error logging artifact {plt_path}: {e}")
         
 
 # from a2c_ppo_acktr/storage.py
@@ -706,3 +721,105 @@ from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
 
 def _flatten_helper(T, N, _tensor):
     return _tensor.view(T * N, *_tensor.size()[2:])
+
+"""Load a curriculum schedule saved by the Curriculum Scheduler (JSON) and
+optionally realign it to a different total number of updates.
+
+The scheduler saves a dict of the same shape produced by ``build_tc_schedule_dict``::
+
+    {
+        "birthx":    {"0": 0.7, "90": 0.60, ...},   # JSON makes the update keys strings
+        "wind_cond": {"0": 1},
+        ...
+    }
+
+``load_tc_schedule`` reads that file, converts the update keys back to ints, and
+(optionally) rescales every lesson time so the curriculum spans a new number of
+updates -- useful when you rerun training with a different ``total_number_periods``
+than the one the curriculum was generated with.
+"""
+
+import json
+import math
+
+
+def realign_schedule(schedule, num_updates, orig_num_updates):
+    """Rescale lesson times so the curriculum spans ``num_updates`` instead of
+    ``orig_num_updates``.
+
+    The new time for each lesson is ``old_time * (num_updates / orig_num_updates)``,
+    rounded up (ceil) by default. Time 0 stays at 0, so the initial value of every
+    track is preserved. Times are clamped to ``num_updates``; if two lessons land on
+    the same update after rounding, the later (higher original time) one wins.
+
+    Args:
+        schedule: dict[str, dict[int, value]] with integer update keys.
+        num_updates: target total number of updates.
+        orig_num_updates: total number of updates used to generate the curriculum.
+        round_up: ceil when True (default), otherwise round to nearest.
+
+    Returns:
+        A new dict[str, dict[int, value]] with realigned integer update keys.
+    """
+    if orig_num_updates == num_updates:
+        # nothing to do (same horizon, or no reference to scale against)
+        return {var: (dict(v) if isinstance(v, dict) else v)
+                for var, v in schedule.items()}
+
+    realign_ratio = num_updates / orig_num_updates
+    _round = (lambda x: int(math.ceil(x)))
+
+    realigned = {}
+    for var, lessons in schedule.items():
+        if not isinstance(lessons, dict):
+            # scalar entries (e.g. restart_period) scale with the same ratio so the
+            # number of restart cycles over the run stays the same
+            realigned[var] = (min(_round(lessons * realign_ratio), num_updates)
+                              if isinstance(lessons, (int, float)) else lessons)
+            continue
+        new_lessons = {}
+        for t, v in sorted(lessons.items()):           # ascending -> last write wins on collision
+            nt = min(_round(t * realign_ratio), num_updates)
+            new_lessons[nt] = v
+        realigned[var] = new_lessons
+    return realigned, realign_ratio
+
+
+def load_tc_schedule(path, num_updates):
+    """Load a saved curriculum schedule JSON and optionally realign its update count.
+
+    Args:
+        path: path to the ``.json`` file saved by the scheduler.
+        num_updates: target total number of updates. If None (default), the schedule
+            is returned as saved, with no realignment.
+        orig_num_updates: total number of updates the curriculum was *generated* with.
+            If None, it is inferred from the largest lesson time in the schedule. Note
+            that the last lesson usually sits below the true total (lessons are placed
+            with ``endpoint=False``), so passing this explicitly is recommended for an
+            exact rescale.
+        round_up: passed through to :func:`realign_schedule`.
+
+    Returns:
+        schedule: dict[str, dict[int, value]] with integer update keys, realigned to
+            ``num_updates`` when that differs from ``orig_num_updates``.
+    """
+    with open(path) as f:
+        raw = json.load(f)
+
+    # JSON object keys are strings -> turn the update indices back into ints.
+    # Scalar top-level entries (e.g. restart_period) are kept as plain numbers.
+    
+    # grab and remove meta
+    meta = raw.pop('meta', None)
+    
+    # convert update keys to ints, but only for dict entries (the lessons)
+    schedule = {var: ({int(k): v for k, v in lessons.items()}
+                      if isinstance(lessons, dict) else lessons)
+                for var, lessons in raw.items()}
+
+    orig_num_updates = meta.get('total_num_updates', None) if meta else None
+    if orig_num_updates is not None:
+        schedule, realign_ratio = realign_schedule(schedule, num_updates, orig_num_updates)
+    restart_period = meta.get('restart_period', None) * realign_ratio if meta else None
+
+    return schedule, restart_period

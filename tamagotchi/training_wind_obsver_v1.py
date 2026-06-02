@@ -1,3 +1,13 @@
+'''
+
+python3 -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=force OU_exploration=off experiment_name=force_physics_uncertainty 'r_shaping=[step,oob,,rotate_by,birthx_cl_last,cosine]' loc_algo=linear_precise precise_min=[0.5] num_env_steps=3500000 precise_max=[6] variant=wind_obsver_v1 'dataset=[constant_mag_narrowx5b5]'
+
+let's try without oob and time cost and OU next time!
+python3 -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=force OU_exploration=off experiment_name=force_physics_uncertainty 'r_shaping=[step,oob,,rotate_by,birthx_cl_last,cosine]' loc_algo=linear_precise precise_min=[0.5] num_env_steps=3500000 precise_max=[6] variant=wind_obsver_v1 'dataset=[constant_mag_narrowx5b5]'
+
+'''
+
+
 import time
 import numpy as np
 import itertools
@@ -5,7 +15,6 @@ import torch
 import pandas as pd
 import os
 from collections import deque
-from tamagotchi.a2c_ppo_acktr.storage import RolloutStorage
 # from tamagotchi.eval import eval_lite
 try:
     import data_util as utils
@@ -258,7 +267,15 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
                 for j, val in enumerate(level_values):
                     t = ds_start + j * lesson_time
                     schedule_dict[lesson_name][t] = val
-
+        # remove diff_min max lessons since precise loc_algo makes the difficulty not directly tied to the diff range
+        for dataset in available_datasets:
+            lesson_name_max = f'{dataset}_diff_max'
+            lesson_name_min = f'{dataset}_diff_min'
+            if lesson_name_max in schedule_dict:
+                del schedule_dict[lesson_name_max]
+            if lesson_name_min in schedule_dict:
+                del schedule_dict[lesson_name_min]
+                
     if 'rotate_by' in args.r_shaping:
         angles = [[0, 180], [90, -90], [0, 90, 180, -90]]
         for i, dataset in enumerate(available_datasets):
@@ -372,8 +389,8 @@ class TrajectoryStorage:
             dataset: {outcome: 0 for outcome in self.possible_outcomes}
             for dataset in self.expected_datasets
         }
-        print(f"Expecting datasets: {self.expected_datasets}")
-        print(f"Target: {self.trajectories_per_outcome} {self.possible_outcomes} per dataset")
+        # print(f"Expecting datasets: {self.expected_datasets}")
+        # print(f"Target: {self.trajectories_per_outcome} {self.possible_outcomes} per dataset")
 
     def reset_update(self, expected_datasets=None):
         """Reset counters and storage for new update"""
@@ -697,11 +714,15 @@ def training_loop(agent, envs, args, device, actor_critic,
     
     # initialize the curriculum schedule
     if args.birthx_linear_tc_steps >= 0:
-        schedule, restart_period = build_tc_schedule_dict(args, num_updates, birthx={'num_classes': args.birthx_linear_tc_steps,
-                                                                'difficulty_range': [0.7, args.birthx],
-                                                                'dtype': 'float', 'step_type': 'linear'},
-                                          wind_cond={'num_classes': len(args.dataset) - 1, 'difficulty_range': [1, len(args.dataset)],
-                                                     'dtype': 'int', 'step_type': 'linear'}) # wind_cond: in the sequence of args.dataset - first is 1, last is 3
+        if args.curriculum_path and os.path.exists(args.curriculum_path):
+            schedule, restart_period = utils.load_tc_schedule(args.curriculum_path, num_updates)
+            print(f"Loaded curriculum schedule from {args.curriculum_path}")
+        else:
+            schedule, restart_period = build_tc_schedule_dict(args, num_updates, birthx={'num_classes': args.birthx_linear_tc_steps,
+                                                                    'difficulty_range': [0.7, args.birthx],
+                                                                    'dtype': 'float', 'step_type': 'linear'},
+                                            wind_cond={'num_classes': len(args.dataset) - 1, 'difficulty_range': [1, len(args.dataset)],
+                                                        'dtype': 'int', 'step_type': 'linear'}) # wind_cond: in the sequence of args.dataset - first is 1, last is 3
         update_by_schedule(envs, schedule, 0) # update the initialized envs according to the curriculum schedule. The default init values are incorrect, hence this update s.t. reset() returns correctly.
         if not args.dryrun:
             utils.save_tc_schedule(schedule, num_updates, args.num_processes, args.num_steps, args.save_dir)
@@ -815,7 +836,8 @@ def training_loop(agent, envs, args, device, actor_critic,
                     vecNormalize_state_fname = lesson_fpath.replace(".pt", "_vecNormalize.pkl")
                     envs.venv.save(vecNormalize_state_fname)
                 print('Saved', lesson_fpath, vecNormalize_state_fname)
-
+            utils.log_curriculum_schedule(schedule, j)
+            
         # Initialize df to track episode statistics
         if j % plot_every_n_updates == 0:
             update_episodes_df = pd.DataFrame(columns=[
@@ -899,8 +921,8 @@ def training_loop(agent, envs, args, device, actor_critic,
                     print(f"Error logging artifact {plt_path}: {e}")
                 
         utils.log_agent_learning_wind_obsver(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], aux_loss_dict=extras, use_mlflow=args.mlflow)
-        if j % 20 == 0: # wind obsver v1 modification: plot success fractions every 20 updates
-            utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow)
+        # wind obsver v1 modification: plot success fractions every 20 updates
+        utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow, log_artifacts=True)
 
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
         if j % args.log_interval == 0 and len(episode_rewards) > 1 and not args.dryrun:

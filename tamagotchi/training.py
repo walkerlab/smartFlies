@@ -258,6 +258,15 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
                 for j, val in enumerate(level_values):
                     t = ds_start + j * lesson_time
                     schedule_dict[lesson_name][t] = val
+                    
+        # remove diff_min max lessons since precise loc_algo makes the difficulty not directly tied to the diff range
+        for dataset in available_datasets:
+            lesson_name_max = f'{dataset}_diff_max'
+            lesson_name_min = f'{dataset}_diff_min'
+            if lesson_name_max in schedule_dict:
+                del schedule_dict[lesson_name_max]
+            if lesson_name_min in schedule_dict:
+                del schedule_dict[lesson_name_min]
 
     if 'rotate_by' in args.r_shaping:
         angles = [[0, 180], [90, -90], [0, 90, 180, -90]]
@@ -696,12 +705,16 @@ def training_loop(agent, envs, args, device, actor_critic,
     episode_wind_directions = deque(maxlen=50)
     
     # initialize the curriculum schedule
-    if args.birthx_linear_tc_steps >= 0: 
-        schedule, restart_period = build_tc_schedule_dict(args, num_updates, birthx={'num_classes': args.birthx_linear_tc_steps, 
-                                                                'difficulty_range': [0.7, args.birthx], 
-                                                                'dtype': 'float', 'step_type': 'linear'}, 
-                                          wind_cond={'num_classes': len(args.dataset) - 1, 'difficulty_range': [1, len(args.dataset)], 
-                                                     'dtype': 'int', 'step_type': 'linear'}) # wind_cond: in the sequence of args.dataset - first is 1, last is 3
+    if args.birthx_linear_tc_steps >= 0:
+        if args.curriculum_path and os.path.exists(args.curriculum_path):
+            schedule, restart_period = utils.load_tc_schedule(args.curriculum_path, num_updates)
+            print(f"Loaded curriculum schedule from {args.curriculum_path}")
+        else:
+            schedule, restart_period = build_tc_schedule_dict(args, num_updates, birthx={'num_classes': args.birthx_linear_tc_steps,
+                                                                    'difficulty_range': [0.7, args.birthx],
+                                                                    'dtype': 'float', 'step_type': 'linear'},
+                                            wind_cond={'num_classes': len(args.dataset) - 1, 'difficulty_range': [1, len(args.dataset)],
+                                                        'dtype': 'int', 'step_type': 'linear'}) # wind_cond: in the sequence of args.dataset - first is 1, last is 3
         update_by_schedule(envs, schedule, 0) # update the initialized envs according to the curriculum schedule. The default init values are incorrect, hence this update s.t. reset() returns correctly.
         if not args.dryrun:
             utils.save_tc_schedule(schedule, num_updates, args.num_processes, args.num_steps, args.save_dir)
@@ -815,7 +828,8 @@ def training_loop(agent, envs, args, device, actor_critic,
                     vecNormalize_state_fname = lesson_fpath.replace(".pt", "_vecNormalize.pkl")
                     envs.venv.save(vecNormalize_state_fname)
                 print('Saved', lesson_fpath, vecNormalize_state_fname)
-
+            utils.log_curriculum_schedule(schedule, j)
+            
         # Initialize df to track episode statistics
         if j % plot_every_n_updates == 0:
             update_episodes_df = pd.DataFrame(columns=[
