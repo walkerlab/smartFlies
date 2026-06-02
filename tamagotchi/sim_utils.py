@@ -126,6 +126,45 @@ def get_wind_vectors_flexible(T, wind_magnitude, local_state=None, regime=None):
 
         wind_degrees += noise # no smoothing
 
+    # Poisson jumps with mean reversion for wind direction and magnitude
+    if 'constant_jitter' in regime:
+        # Poisson events: average 1 jump every 3 seconds
+        lambda_ = 1 / 3
+        events = local_state.poisson(lambda_ / 100, len(T))
+        switch_idxs = np.where(events > 0)[0]
+
+        # Wind direction: mean 0°, std 10°, exponential decay to mean between jumps
+        dir_mean = 0.0
+        dir_std = 10.0
+        dir_decay = 0.5  # exponential decay rate
+        dir_x = dir_mean
+
+        for i in range(len(T)):
+            if i in switch_idxs:
+                dir_x = local_state.normal(dir_mean, dir_std)
+            else:
+                # Exponentially revert toward mean
+                dir_x = dir_mean + (dir_x - dir_mean) * np.exp(-dir_decay * 0.01)
+            wind_degrees[i] = dir_x
+
+        # Wind magnitude: mean 0.5, std 0.1, exponential decay to mean between jumps
+        mag_mean = 0.5
+        mag_std = 0.1
+        mag_decay = 0.5
+        mag_x = mag_mean
+
+        mag_ratios = np.ones(len(T))
+        for i in range(len(T)):
+            if i in switch_idxs:
+                mag_x = local_state.normal(mag_mean, mag_std)
+                mag_x = np.clip(mag_x, 0.1, 1.0)  # keep within reasonable bounds
+            else:
+                # Exponentially revert toward mean
+                mag_x = mag_mean + (mag_x - mag_mean) * np.exp(-mag_decay * 0.01)
+            mag_ratios[i] = mag_x / wind_magnitude
+
+        wind_speeds = wind_speeds * mag_ratios
+
     # Convert to X Y
     wind_x = np.cos( wind_degrees * np.pi / 180. )*wind_speeds
     wind_y = np.sin( wind_degrees * np.pi / 180. )*wind_speeds

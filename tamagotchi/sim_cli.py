@@ -135,10 +135,10 @@ print("Saved", fname)
 ## -- Extra Viz -- ##
 # Plot puffs - also serves a good test
 # Need to add concentration & radius data before plotting
-import sim_analysis # load config later, eek!
-data_puffs, data_wind = sim_analysis.load_plume(f'{args.dataset_name}{args.fname_suffix}')
+import data_util # load config later, eek!
+data_puffs, data_wind = data_util.load_plume(f'{args.dataset_name}{args.fname_suffix}')
 t_val = data_puffs['time'].iloc[-1]
-fig, ax = sim_analysis.plot_puffs_and_wind_vectors(
+fig, ax = data_util.plot_puffs_and_wind_vectors(
 	data_puffs, 
 	data_wind, 
 	t_val, 
