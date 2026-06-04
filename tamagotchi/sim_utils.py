@@ -130,37 +130,26 @@ def get_wind_vectors_flexible(T, wind_magnitude, local_state=None, regime=None):
     if 'constant_jitter' in regime:
         # Poisson events: average 1 jump every 3 seconds
         lambda_ = 1 / 3
-        events = local_state.poisson(lambda_ / 100, len(T))
-        switch_idxs = np.where(events > 0)[0]
 
-        # Wind direction: mean 0°, std 10°, exponential decay to mean between jumps
-        dir_mean = 0.0
-        dir_std = 10.0
-        dir_decay = 0.5  # exponential decay rate
-        dir_x = dir_mean
+        # Wind direction: uniform ±5° at Poisson jumps
+        dir_events = local_state.poisson(lambda_ / 100, len(T))
+        dir_switch_idxs = np.where(dir_events > 0)[0]
+        dir_x = 0.0
 
         for i in range(len(T)):
-            if i in switch_idxs:
-                dir_x = local_state.normal(dir_mean, dir_std)
-            else:
-                # Exponentially revert toward mean
-                dir_x = dir_mean + (dir_x - dir_mean) * np.exp(-dir_decay * 0.01)
+            if i in dir_switch_idxs:
+                dir_x = local_state.uniform(-5, 5)
             wind_degrees[i] = dir_x
 
-        # Wind magnitude: mean 0.5, std 0.1, exponential decay to mean between jumps
-        mag_mean = 0.5
-        mag_std = 0.1
-        mag_decay = 0.5
-        mag_x = mag_mean
+        # Wind magnitude: uniform 0.45~0.55 at Poisson jumps
+        mag_events = local_state.poisson(lambda_ / 100, len(T))
+        mag_switch_idxs = np.where(mag_events > 0)[0]
+        mag_x = 0.5
 
         mag_ratios = np.ones(len(T))
         for i in range(len(T)):
-            if i in switch_idxs:
-                mag_x = local_state.normal(mag_mean, mag_std)
-                mag_x = np.clip(mag_x, 0.1, 1.0)  # keep within reasonable bounds
-            else:
-                # Exponentially revert toward mean
-                mag_x = mag_mean + (mag_x - mag_mean) * np.exp(-mag_decay * 0.01)
+            if i in mag_switch_idxs:
+                mag_x = local_state.uniform(0.45, 0.55)
             mag_ratios[i] = mag_x / wind_magnitude
 
         wind_speeds = wind_speeds * mag_ratios
