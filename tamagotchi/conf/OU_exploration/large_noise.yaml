@@ -1,0 +1,7 @@
+# @package _global_
+# tamagotchi/conf/ou/large_noise.yaml
+ou_theta: 1.0
+ou_sigma: 1.0
+ou_sigma_final: 0.1
+ou_dt: null
+ou_eval: false

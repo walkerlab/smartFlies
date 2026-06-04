@@ -1,0 +1,8 @@
+# @package _global_
+# tamagotchi/conf/ou/short_corr.yaml
+ou_theta: 2.0
+ou_sigma: 0.8
+ou_sigma_final: 0.08
+ou_anneal_steps: 2250000
+ou_dt: null
+ou_eval: false

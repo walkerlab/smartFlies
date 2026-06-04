@@ -1,0 +1,8 @@
+# @package _global_
+# Ornstein-Uhlenbeck exploration. ou_sigma=0 and ou_sigma_final=0 disable it.
+ou_theta: 1.0 # mean reversion speed; 1.25 for about 20 steps of correlation, 0.15 for about 200 steps
+ou_sigma: 0.0 
+ou_sigma_final: 0.0
+ou_anneal_steps: 0
+ou_dt: null
+ou_eval: false

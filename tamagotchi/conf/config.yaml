@@ -1,11 +1,15 @@
 # Hydra config for dronmagotchi. Override from CLI, e.g.:
 #   python -m tamagotchi.main_hydra outsuffix=run01 action_physics=ground_vel_angvel
 # Multirun sweep:
-#   python -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=air_vel_angvel,ground_vel_angvel
+#   python3 -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=air_vel_angvel,ground_vel_angvel
+#   python3 -m tamagotchi.main_hydra -m seed=1,2,3
 
 defaults:
-  # - override hydra/launcher: submitit_local
+  - OU_exploration: "off"
   - _self_
+
+# Training variant: "base" (default), "wind_obsver_v1", or "wind_obsver_v2"
+variant: base
 
 # PPO / optimizer
 algo: ppo
@@ -36,7 +40,11 @@ weight_decay: 0.0001
 # Env / experiment
 env_name: plume
 log_dir: /src/data/wind_sensing/apparent_wind_visual_feedback/logs/
-save_dir: /src/data/wind_sensing/apparent_wind_visual_feedback/slice_linear_birthx_cl_last_cosine_early_stop_time_cost/
+experiment_name: default
+save_dir: /src/data/wind_sensing/apparent_wind_visual_feedback/${experiment_name}/
+curriculum_dir: /src/tamagotchi/conf/curriculum/
+curriculum_name: false
+curriculum_path: ${curriculum_dir}/${curriculum_name}.json
 
 dynamic: false
 eval_type: skip
@@ -52,9 +60,11 @@ stride: 1
 dataset: [constantx5b5]
 num_env_steps: 3000000
 qvar: [1.5]
-birthx: 0.1
+birthx: 0.7
 diff_max: [0.8]
-diff_min: [0.5]
+diff_min: [0.3]
+precise_max: [8.0]
+precise_min: [1.0]
 birthx_linear_tc_steps: 6
 
 apparent_wind: true
@@ -95,8 +105,8 @@ if_train_actor_std: false
 # Logging (wandb via tamagotchi.wb shim). Name kept for backward compat.
 mlflow: 1
 
-# New: action physics. 'air_vel_angvel' (legacy) or 'ground_vel_angvel'.
-action_physics: ground_vel_angvel
+# New: action physics. 'air_vel_angvel' (legacy) or 'ground_vel_angvel', or 'force'.
+action_physics: force
 
 hydra:
   run:
@@ -108,4 +118,3 @@ hydra:
   # launcher:
   #   timeout_min: 120
   #   gpus_per_node: 1  # if using GPUs
-
