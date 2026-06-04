@@ -11,13 +11,13 @@ qvar: [0.5]
 # qvar: [1.5]
 # qvar: [2.0]
 
-diff_max: [0.4]
-# diff_max: [0.8]
+# diff_max: [0.4]
+diff_max: [0.8]
 
 diff_min: [0.2]
 # diff_min: [0.7]
 
-num_env_steps: 2500000
+num_env_steps: 500000
 # num_env_steps: 10000000
 
 birthx: 0.01
@@ -25,6 +25,9 @@ flipping: false
 rotate_by: 1
 
 save_dir: /src/data/wind_sensing/apparent_wind_visual_feedback/PE_test/
+curriculum_dir: /src/tamagotchi/conf/curriculum/
+curriculum_name: 060226_const
+curriculum_path: ${curriculum_dir}/${curriculum_name}.json
 log_interval: 1
 
 r_shaping: [step, oob, rotate_by]
@@ -48,6 +51,6 @@ if_vec_norm: 1
 obs_noise: 0.0
 mlflow: 0
 
-loc_algo: on_plume_linear
-# loc_algo: slice_linear
+# loc_algo: on_plume_linear
+loc_algo: slice_linear
 # loc_algo: slice
