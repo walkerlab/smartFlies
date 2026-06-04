@@ -38,7 +38,7 @@ def search_runs(filter_string=""):
         project = _experiment or os.environ.get("WANDB_PROJECT", "dronmagotchi")
         entity = os.environ.get("WANDB_ENTITY")
         path = f"{entity}/{project}" if entity else project
-        runs = api.runs(path, filters={"display_name": name} if name else None)
+        runs = api.runs(path, filters={"displayName": {"$eq": name}} if name else None)
         rows = [{"run_id": r.id, "run_name": r.name} for r in runs]
         return pd.DataFrame(rows)
     except Exception:
