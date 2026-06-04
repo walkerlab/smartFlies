@@ -820,6 +820,6 @@ def load_tc_schedule(path, num_updates):
     orig_num_updates = meta.get('total_num_updates', None) if meta else None
     if orig_num_updates is not None:
         schedule, realign_ratio = realign_schedule(schedule, num_updates, orig_num_updates)
-    restart_period = meta.get('restart_period', None) * realign_ratio if meta else None
+    restart_period = math.ceil(meta.get('restart_period', None) * realign_ratio) if meta else None
 
     return schedule, restart_period
