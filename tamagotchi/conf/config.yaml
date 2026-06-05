@@ -6,10 +6,12 @@
 
 defaults:
   - OU_exploration: "off"
+  - path: glados
   - _self_
 
 # Training variant: "base" (default), "wind_obsver_v1", or "wind_obsver_v2"
 variant: base
+experiment_name: default # should be overridden by CLI - acts as both suffix of save dir and wandb run name
 
 # PPO / optimizer
 algo: ppo
@@ -39,13 +41,6 @@ weight_decay: 0.0001
 
 # Env / experiment
 env_name: plume
-log_dir: /src/data/wind_sensing/apparent_wind_visual_feedback/logs/
-experiment_name: default
-save_dir: /src/data/wind_sensing/apparent_wind_visual_feedback/${experiment_name}/
-curriculum_dir: /src/tamagotchi/conf/curriculum/
-curriculum_name: false
-curriculum_path: ${curriculum_dir}/${curriculum_name}.json
-
 dynamic: false
 eval_type: skip
 eval_episodes: 20
@@ -110,9 +105,9 @@ action_physics: force
 
 hydra:
   run:
-    dir: ${save_dir}
+    dir: ${path.save_dir}
   sweep:
-    dir: ${save_dir}
+    dir: ${path.save_dir}
     subdir: sweep_${hydra.job.num}
   output_subdir: json
   # launcher:

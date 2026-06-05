@@ -48,6 +48,11 @@ def run(cfg: DictConfig) -> None:
         if v and not os.path.isabs(v):
             cfg_dict[k] = os.path.join(orig_cwd, v)
 
+    # flatten path subconfig into top level
+    if isinstance(cfg_dict.get("path"), dict):
+        cfg_dict.update(cfg_dict.pop("path"))
+
+    # Build an outsuffix
     if not cfg_dict.get("outsuffix"):
         cfg_dict["outsuffix"] = _auto_outsuffix(cfg_dict)
 

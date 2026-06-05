@@ -24,10 +24,10 @@ birthx: 0.01
 flipping: false
 rotate_by: 1
 
-save_dir: /src/data/wind_sensing/apparent_wind_visual_feedback/PE_test/
-curriculum_dir: /src/tamagotchi/conf/curriculum/
-curriculum_name: 060226_const
-curriculum_path: ${curriculum_dir}/${curriculum_name}.json
+experiment_name: PE_test
+path:
+  curriculum_name: 060226_const_jitter
+
 log_interval: 1
 
 r_shaping: [step, oob, rotate_by]
