@@ -68,64 +68,6 @@ def get_wind_vectors_flexible(T, wind_magnitude, local_state=None, regime=None):
 
 
 
-    # Add random noise to wind degree
-    if 'noisy' in regime:
-
-        noise = np.zeros(len(T)) # Init
-        repN = 100 # timesteps
-        repN = 200 if 'noisy2' in regime else repN
-        repN = 300 if 'noisy3' in regime else repN
-        repN = 400 if 'noisy4' in regime else repN
-        repN = 500 if 'noisy5' in regime else repN
-        repN = 600 if 'noisy6' in regime else repN
-        degz = 60 # +/- degz 
-
-        # More evenly spaced
-        switch_idxs = np.arange(len(T), step=repN, dtype=int)        
-        switch_idxs = [ s + local_state.choice(np.arange(-int(repN/10), int(repN/10), dtype=int)) for s in switch_idxs ]
-        switch_idxs = np.sort(switch_idxs)
-        for idx in switch_idxs:
-            noise[idx:] = local_state.normal(0, degz/2)
-
-
-        # limit max
-        noise = np.clip(noise, -degz, degz)        
-
-        wind_degrees += noise # no smoothing
-
-    # Add random noise to wind degree
-    if 'poisson_noisy3' in regime:
-        # note that poisson_mag_noisy3 does not get ran with this!!!! - 
-        # based on /src/JH_boilerplate/check_noisy_wind_dirs.ipynb
-        noise = np.zeros(len(T)) # Init
-        degz = 60 # +/- degz 
-
-        # Parameters used in sim_plume.sh
-        lambda_ = 1 / 3  # Average rate (1 event every 3 seconds)
-        # Time steps
-        num_samples = len(T)
-        local_state = np.random.RandomState(11)
-        # Generate Poisson-distributed events
-        events = local_state.poisson(lambda_ / 100, num_samples) # (average_hit_rate_per_sec / sampling_rate), len(time_series)
-        # Convert to binary (0s and 1s)
-        poisson_time_series = (events > 0).astype(int)
-        # for logging purposes
-        start_idx=60*100
-        end_idx=103*100
-        print(f"[LOG] avergae num wind changes per sec {sum(poisson_time_series[start_idx:end_idx]) / (end_idx-start_idx) * 100} from {start_idx/100} to {end_idx/100}")
-        print(f"[LOG] # wind changes {sum(poisson_time_series[start_idx:end_idx])} from {start_idx/100} to {end_idx/100}")
-
-        # which indices where the wind changes
-        switch_idxs = np.where(poisson_time_series == 1)[0]
-
-        for idx in switch_idxs:
-            noise[idx:] = local_state.normal(0, degz/2)
-            
-        # limit max
-        noise = np.clip(noise, -degz, degz)        
-
-        wind_degrees += noise # no smoothing
-
     # Poisson jumps with mean reversion for wind direction and magnitude
     if 'constant_jitter' in regime:
         # Poisson events: average 1 jump every 3 seconds
@@ -153,6 +95,94 @@ def get_wind_vectors_flexible(T, wind_magnitude, local_state=None, regime=None):
             mag_ratios[i] = mag_x / wind_magnitude
 
         wind_speeds = wind_speeds * mag_ratios
+
+    # Noisy jitter: larger direction changes (±60°) with max 20° change per jump
+    elif 'noisy_jitter' in regime:
+        # Poisson events: average 1 jump every 3 seconds
+        lambda_ = 1 / 3
+
+        # Wind direction: uniform ±60°, clamped to ±20° change per jump
+        dir_events = local_state.poisson(lambda_ / 100, len(T))
+        dir_switch_idxs = np.where(dir_events > 0)[0]
+        dir_x = 0.0
+
+        for i in range(len(T)):
+            if i in dir_switch_idxs:
+                new_dir = local_state.uniform(-60, 60)
+                # Constrain change to not exceed ±20 degrees
+                dir_x = np.clip(new_dir, dir_x - 20, dir_x + 20)
+            wind_degrees[i] = dir_x
+
+        # Wind magnitude: uniform 0.45~0.55 at Poisson jumps
+        mag_events = local_state.poisson(lambda_ / 100, len(T))
+        mag_switch_idxs = np.where(mag_events > 0)[0]
+        mag_x = 0.5
+
+        mag_ratios = np.ones(len(T))
+        for i in range(len(T)):
+            if i in mag_switch_idxs:
+                mag_x = local_state.uniform(0.45, 0.55)
+            mag_ratios[i] = mag_x / wind_magnitude
+
+        wind_speeds = wind_speeds * mag_ratios
+
+    # Add random noise to wind degree
+    elif 'noisy' in regime:
+
+        noise = np.zeros(len(T)) # Init
+        repN = 100 # timesteps
+        repN = 200 if 'noisy2' in regime else repN
+        repN = 300 if 'noisy3' in regime else repN
+        repN = 400 if 'noisy4' in regime else repN
+        repN = 500 if 'noisy5' in regime else repN
+        repN = 600 if 'noisy6' in regime else repN
+        degz = 60 # +/- degz
+
+        # More evenly spaced
+        switch_idxs = np.arange(len(T), step=repN, dtype=int)
+        switch_idxs = [ s + local_state.choice(np.arange(-int(repN/10), int(repN/10), dtype=int)) for s in switch_idxs ]
+        switch_idxs = np.sort(switch_idxs)
+        for idx in switch_idxs:
+            noise[idx:] = local_state.normal(0, degz/2)
+
+
+        # limit max
+        noise = np.clip(noise, -degz, degz)
+
+        wind_degrees += noise # no smoothing
+
+    # Add random noise to wind degree
+    if 'poisson_noisy3' in regime:
+        # note that poisson_mag_noisy3 does not get ran with this!!!! -
+        # based on /src/JH_boilerplate/check_noisy_wind_dirs.ipynb
+        noise = np.zeros(len(T)) # Init
+        degz = 60 # +/- degz
+
+        # Parameters used in sim_plume.sh
+        lambda_ = 1 / 3  # Average rate (1 event every 3 seconds)
+        # Time steps
+        num_samples = len(T)
+        local_state = np.random.RandomState(11)
+        # Generate Poisson-distributed events
+        events = local_state.poisson(lambda_ / 100, num_samples) # (average_hit_rate_per_sec / sampling_rate), len(time_series)
+        # Convert to binary (0s and 1s)
+        poisson_time_series = (events > 0).astype(int)
+        # for logging purposes
+        start_idx=60*100
+        end_idx=103*100
+        print(f"[LOG] avergae num wind changes per sec {sum(poisson_time_series[start_idx:end_idx]) / (end_idx-start_idx) * 100} from {start_idx/100} to {end_idx/100}")
+        print(f"[LOG] # wind changes {sum(poisson_time_series[start_idx:end_idx])} from {start_idx/100} to {end_idx/100}")
+
+        # which indices where the wind changes
+        switch_idxs = np.where(poisson_time_series == 1)[0]
+
+        for idx in switch_idxs:
+            noise[idx:] = local_state.normal(0, degz/2)
+
+        # limit max
+        noise = np.clip(noise, -degz, degz)
+
+        wind_degrees += noise # no smoothing
 
     # Convert to X Y
     wind_x = np.cos( wind_degrees * np.pi / 180. )*wind_speeds
