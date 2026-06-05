@@ -77,7 +77,7 @@ auto_reward: false
 loc_algo: slice_linear
 time_algo: uniform
 env_dt: 0.04
-outsuffix: ""        # TODO: make this!
+outsuffix: ""        
 walking: false
 radiusx: 1.0
 diffusion_min: 1.0

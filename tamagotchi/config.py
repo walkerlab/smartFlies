@@ -139,7 +139,8 @@ force_physics = {
 mlflow_colors = {
             'constantx5b5': 'blue',
             'constant_mag_narrowx5b5': 'green',
-            'constant_magx5b5': 'red',
+            'constant_jitterx5b5': 'red',
+			# 'constant_magx5b5': 'red',
             'noisy3x5b5': 'purple',
             'poisson_mag_narrow_noisy3x5b5': 'orange',
             'poisson_mag_noisy3x5b5': 'cyan',
