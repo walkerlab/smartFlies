@@ -113,10 +113,12 @@ def main():
                              '(e.g. "outsuffix=run01 action_physics=force seed=1")')
     parser.add_argument('--n_seeds', type=int, default=1,
                         help='Submit N jobs with seed=1 through seed=N (default: 1)')
+    parser.add_argument('--seed_from', type=int, default=1,
+                        help='Start submitting jobs from this seed (default: 1)')
 
     args = parser.parse_args()
 
-    for seed in range(1, args.n_seeds + 1):
+    for seed in range(args.seed_from, args.seed_from + args.n_seeds):
         seed_override = f'{args.override} seed={seed}'.strip()
         submit(
             override=seed_override,
