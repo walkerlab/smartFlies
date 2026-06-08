@@ -247,7 +247,7 @@ def get_wind_xyt(duration, dt, wind_magnitude, verbose=True, regime='noisy3'):
     #         switch_direction=switch_direction)
 
     if 'eval' in regime:
-        local_state = np.random.RandomState(6) # seed for eval_noisy with a good range of wind directions 
+        local_state = np.random.RandomState(6) # seed for eval_noisy with a good range of wind directions NOTE: 060826 - did not check for eval_noisy_jitter - more formal eval requires online simulation and purposeful coverage of wind dir...
     else:
         local_state = None # init in function 
     wind_x, wind_y = get_wind_vectors_flexible(T, wind_magnitude, regime=regime, local_state=local_state)
