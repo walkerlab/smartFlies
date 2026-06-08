@@ -148,47 +148,21 @@ def evaluate_agent(actor_critic, env, args):
                 _action = action.detach().numpy().squeeze()
             _info = info[0]
             _done = done
-
-            if info[0]['done'] != 'HOME':
-                if _reward>9:
-                    print(f"Reward: {_reward}, info: {_info}; WRONG REWARD! Should NOT have added 100.")
-            elif info[0]['done'] == 'HOME':
-                if _reward<=9:
-                    print(f"Reward: {_reward}, info: {_info}; WRONG REWARD! Should HAVE added 100.")
-
-            _reward = (_reward + 100) if _reward > 9 else _reward # HACK! Unsure/Debug!
+            _reward = (_reward + 100) if _reward > 9 else _reward # HACK! Unsure/Debug! - defs wrong but dont look at it anyway
             
             reward_sum += _reward
-            if args.squash_action:
-                action = (np.tanh(action.to("cpu")) + 1)/2
             trajectory.append( _info['location'] )
             observations.append( _obs )
             actions.append( _action )
             rewards.append( _reward )
             infos.append( [_info] )
-            if args.device != 'cpu':
-                if args.perturb_RNN_by:
-                    activities.append( {
-                        'rnn_hxs': activity['rnn_hxs'].to("cpu").numpy().squeeze(), # returned from a2c_ppo_acktr.model.MLPBase.forward; a copy of the hidden states
-                        'rnn_hxs_perturbed': recurrent_hidden_states.to("cpu").numpy().squeeze(), # recurrent_hidden_states object has been perturbed 
-                        'hx1_actor': activity['hx1_actor'].to("cpu").numpy().squeeze(),
-                        'value': activity['value'].to("cpu").numpy().squeeze(),
-                    } )
-                else:
-                    activities.append( {
-                        'rnn_hxs': activity['rnn_hxs'].to("cpu").numpy().squeeze(), # returned from a2c_ppo_acktr.model.MLPBase.forward; a copy of the hidden states
-                        'hx1_actor': activity['hx1_actor'].to("cpu").numpy().squeeze(),
-                        'value': activity['value'].to("cpu").numpy().squeeze(),
-                    } )
-            else:
-                activities.append( {
-                    'rnn_hxs': activity['rnn_hxs'].detach().numpy().squeeze(),
-                    'hx1_actor': activity['hx1_actor'].detach().numpy().squeeze(),
-                    # 'hx1_critic': activity['hx1_critic'].detach().numpy().squeeze(), # don't care
-                    # 'hidden_actor': activity['hidden_actor'].detach().numpy().squeeze(), # don't care
-                    # 'hidden_critic': activity['hidden_critic'].detach().numpy().squeeze(), # don't care
-                    'value': activity['value'].detach().numpy().squeeze(),
-                } )
+            to_np = (lambda t: t.to("cpu").numpy().squeeze()) if args.device != 'cpu' \
+                    else (lambda t: t.detach().numpy().squeeze())
+            grab_activity_keys = ['rnn_hxs', 'hx1_actor', 'value', 'wind_mu', 'wind_logvar']
+            record = {k: to_np(activity[k]) if k in activity else None for k in grab_activity_keys}
+            if args.perturb_RNN_by:
+                record['rnn_hxs_perturbed'] = to_np(recurrent_hidden_states)
+            activities.append(record)
 
             ep_step += 1
 
@@ -285,7 +259,7 @@ def eval_loop(args, actor_critic, test_sparsity=True):
             agent_analysis.visualize_episodes(episode_logs[:args.viz_episodes], 
                                             zoom=zoom, 
                                             dataset=args.dataset,
-                                            animate=False, # Quick plot
+                                            animate=True, # Quick plot
                                             fprefix=args.dataset,
                                             diffusionx=args.diffusionx,
                                             abs_out_dir=args.abs_out_dir
