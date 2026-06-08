@@ -696,7 +696,10 @@ def training_loop(agent, envs, args, device, actor_critic,
 
     num_updates = int(
         args.num_env_steps) // args.num_steps // args.num_processes # args.num_env_steps 20M for all # args.num_steps=2048 (found in logs) # args.num_processes=4=mini_batch (found in logs)
-    
+
+    # stage_offset: global step number where this stage begins (0 for non-staged runs)
+    stage_offset = getattr(args, 'stage_update_offset', 0)
+
     # See if a chkpt was loaded
     training_log = training_log if training_log is not None else [] # check pointing if there's any train logs that exist
     last_chkpt_update = len(training_log) # the number of updates already done in case of checkpointing
@@ -723,9 +726,16 @@ def training_loop(agent, envs, args, device, actor_critic,
                                                                     'dtype': 'float', 'step_type': 'linear'},
                                             wind_cond={'num_classes': len(args.dataset) - 1, 'difficulty_range': [1, len(args.dataset)],
                                                         'dtype': 'int', 'step_type': 'linear'}) # wind_cond: in the sequence of args.dataset - first is 1, last is 3
-        update_by_schedule(envs, schedule, 0) # update the initialized envs according to the curriculum schedule. The default init values are incorrect, hence this update s.t. reset() returns correctly.
+        # For staged training, shift all schedule keys by stage_offset so curriculum
+        # transitions fire at the correct global update index.
+        if stage_offset > 0:
+            schedule = {
+                var: {k + stage_offset: v for k, v in var_sched.items()}
+                for var, var_sched in schedule.items()
+            }
+        update_by_schedule(envs, schedule, stage_offset) # update the initialized envs according to the curriculum schedule. The default init values are incorrect, hence this update s.t. reset() returns correctly.
         if not args.dryrun:
-            utils.save_tc_schedule(schedule, num_updates, args.num_processes, args.num_steps, args.save_dir)
+            utils.save_tc_schedule(schedule, num_updates + stage_offset, args.num_processes, args.num_steps, args.save_dir)
 
     # Build OU per-stage annealing index from the rotate_by schedule, if applicable.
     # ou_stage_transitions: sorted list of update indices where a rotate_by stage starts.
@@ -737,9 +747,12 @@ def training_loop(agent, envs, args, device, actor_critic,
         if args.birthx_linear_tc_steps >= 0 and ds_key in schedule:
             ou_stage_transitions = sorted(schedule[ds_key].keys())
     # Determine which stage we are already in (matters when resuming from a checkpoint).
-    ou_stage_start_j = ou_stage_transitions[0] if ou_stage_transitions else 0
+    # Use global update position (last_chkpt_update + stage_offset) for comparison since
+    # ou_stage_transitions are stored as global indices after the schedule key shift above.
+    ou_stage_start_j = ou_stage_transitions[0] if ou_stage_transitions else stage_offset
+    chkpt_global = (last_chkpt_update or 0) + stage_offset
     for t in ou_stage_transitions:
-        if t <= (last_chkpt_update or 0):
+        if t <= chkpt_global:
             ou_stage_start_j = t
 
     # finetuning
@@ -775,22 +788,23 @@ def training_loop(agent, envs, args, device, actor_critic,
         update_range = range(last_chkpt_update, num_updates)
 
     for j in update_range:
+        j_global = j + stage_offset   # absolute step for wandb logging; j is used for save/log intervals
         # TODO collapse this into update by schedule
         if ou_stage_transitions and args.ou_sigma != args.ou_sigma_final:
             # 4-step discrete sigma schedule locked to rotate_by curriculum.
             # Within each stage sigma takes one of 4 evenly-spaced levels
             # (ou_sigma → ou_sigma_final), switching at equal sub-stage intervals.
             OU_SUBSTEPS = 4
-            if j in ou_stage_transitions:
-                ou_stage_start_j = j  # boundary hit: reset stage clock
-            if j < ou_stage_transitions[0]:
+            if j_global in ou_stage_transitions:
+                ou_stage_start_j = j_global  # boundary hit: reset stage clock
+            if j_global < ou_stage_transitions[0]:
                 actor_critic.ou_sigma_current = getattr(args, 'ou_sigma', 0.0)
             else:
                 later = [t for t in ou_stage_transitions if t > ou_stage_start_j]
-                stage_end_j = later[0] if later else num_updates
+                stage_end_j = later[0] if later else (num_updates + stage_offset)
                 stage_dur = max(1, stage_end_j - ou_stage_start_j)
                 sub_idx = min(OU_SUBSTEPS - 1,
-                              (j - ou_stage_start_j) * OU_SUBSTEPS // stage_dur)
+                              (j_global - ou_stage_start_j) * OU_SUBSTEPS // stage_dur)
                 actor_critic.ou_sigma_current = args.ou_sigma + (
                     sub_idx / (OU_SUBSTEPS - 1)) * (args.ou_sigma_final - args.ou_sigma)
         else:
@@ -812,31 +826,31 @@ def training_loop(agent, envs, args, device, actor_critic,
             if last_chkpt_update:
                 # update is not 0 when resuming training - need to catch up on the schedule
                 for pre_update in range(last_chkpt_update):
-                    updated = update_by_schedule(envs, schedule, pre_update)
+                    updated = update_by_schedule(envs, schedule, pre_update + stage_offset)
                 obs = envs.reset_after_checkpoint() # reset
                 obs = torch.tensor(obs, dtype=torch.float32)
                 rollouts.obs[0].copy_(obs) # https://discuss.pytorch.org/t/which-copy-is-better/56393
                 rollouts.to(device)
                 last_chkpt_update = 0 # reset the last_chkpt_update to 0 after catching up
-            updated_var = update_by_schedule(envs, schedule, j)
+            updated_var = update_by_schedule(envs, schedule, j_global)
             
             ##############################################################################################################
             # Checkpointing
             ##############################################################################################################
-            if updated_var and not args.dryrun: # save model if an update to env occurred during this trial
-                lesson_fpath = os.path.join(args.save_dir, 'chkpt', args.model_fname.replace(".pt", f'_before_{updated_var}{schedule[updated_var][j]}_update{j}.pt'))
-                torch.save([
-                    actor_critic,
-                    getattr(get_vec_normalize(envs), 'obs_rms', None),
-                    agent.optimizer.state_dict(),
-                ], lesson_fpath)
-                # also save the VecNormalize state 
-                vecNormalize_state_fname = ''
-                if args.if_vec_norm:
-                    vecNormalize_state_fname = lesson_fpath.replace(".pt", "_vecNormalize.pkl")
-                    envs.venv.save(vecNormalize_state_fname)
-                print('Saved', lesson_fpath, vecNormalize_state_fname)
-            utils.log_curriculum_schedule(schedule, j)
+            # if updated_var and not args.dryrun: # save model if an update to env occurred during this trial
+            #     lesson_fpath = os.path.join(args.save_dir, 'chkpt', args.model_fname.replace(".pt", f'_before_{updated_var}{schedule[updated_var][j_global]}_update{j_global}.pt'))
+            #     torch.save([
+            #         actor_critic,
+            #         getattr(get_vec_normalize(envs), 'obs_rms', None),
+            #         agent.optimizer.state_dict(),
+            #     ], lesson_fpath)
+            #     # also save the VecNormalize state 
+            #     vecNormalize_state_fname = ''
+            #     if args.if_vec_norm:
+            #         vecNormalize_state_fname = lesson_fpath.replace(".pt", "_vecNormalize.pkl")
+            #         envs.venv.save(vecNormalize_state_fname)
+            #     print('Saved', lesson_fpath, vecNormalize_state_fname)
+            utils.log_curriculum_schedule(schedule, j_global)
             
         # Initialize df to track episode statistics
         if j % plot_every_n_updates == 0:
@@ -871,7 +885,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                         episode_plume_densities.append(infos[i]['plume_density']) # plume_density and num_puffs are expected to be similar across different agents. Tracking to confirm. 
                         episode_puffs.append(infos[i]['num_puffs'])
                         episode_wind_directions.append(envs.ds2wind(infos[i]['dataset'])) # density and dataset are logged to see eps. statistics implemented by the curriculum
-                        update_episodes_df = utils.update_eps_info(update_episodes_df, infos[i], episode_counter, j)
+                        update_episodes_df = utils.update_eps_info(update_episodes_df, infos[i], episode_counter, j_global)
                     except KeyError:
                         raise KeyError("Logging info not found... check why it's not here when done")
             
@@ -912,26 +926,26 @@ def training_loop(agent, envs, args, device, actor_critic,
         #     update_trajectories = traj_storage.get_trajectories()
         #     status = traj_storage.get_collection_status()
         #     summary = traj_storage.get_summary_counts()
-            plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}trajectories_update{j}.png"
+            plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}trajectories_update{j_global}.png"
             plot_trajectories(traj_storage, envs, save_path=plt_path)
             if args.mlflow:
                 try:
-                    mlflow.log_artifact(plt_path, artifact_path="figs/trajectories", step=j)
+                    mlflow.log_artifact(plt_path, artifact_path="figs/trajectories", step=j_global)
                 except Exception as e:
                     print(f"Error logging artifact {plt_path}: {e}")
                 
-        utils.log_agent_learning_wind_obsver(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], aux_loss_dict=extras, use_mlflow=args.mlflow)
+        utils.log_agent_learning_wind_obsver(j_global, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], aux_loss_dict=extras, use_mlflow=args.mlflow)
         # wind obsver v1 modification: plot success fractions every 20 updates
-        utils.log_eps_artifacts(j, args, update_episodes_df, use_mlflow=args.mlflow, log_artifacts=True)
+        utils.log_eps_artifacts(j_global, args, update_episodes_df, use_mlflow=args.mlflow, log_artifacts=True)
 
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
         if j % args.log_interval == 0 and len(episode_rewards) > 1 and not args.dryrun:
-            training_log = log_episode(training_log, j, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates)
+            training_log = log_episode(training_log, j_global, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates)
             # Save training curve
             pd.DataFrame(training_log).to_csv(args.training_log)
 
         if args.mlflow:
-            mlflow.flush(j)
+            mlflow.flush(j_global)
         rollouts.after_update()
         ##############################################################################################################
         # save for every interval-th episode or for the last epoch

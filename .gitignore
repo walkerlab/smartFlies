@@ -138,6 +138,7 @@ figshare/
 JH_boilerplate/
 *sif
 slurm*out
+scripts/slurm_outfiles
 tamagotchi/test
 datajoint.ipynb
 orca.deb

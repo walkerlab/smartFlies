@@ -53,6 +53,12 @@ def run(cfg: DictConfig) -> None:
         cfg_dict.update(cfg_dict.pop("path"))
 
     # Build an outsuffix
+    if cfg_dict.get("stage_name") and not cfg_dict.get("outsuffix"):
+        raise ValueError(
+            "staged training (stage_name is set) requires an explicit outsuffix= override. "
+            "Auto-generation would bake stage_name/resume_from into the hash, creating a "
+            "new outsuffix that won't match the original wandb run."
+        )
     if not cfg_dict.get("outsuffix"):
         cfg_dict["outsuffix"] = _auto_outsuffix(cfg_dict)
 

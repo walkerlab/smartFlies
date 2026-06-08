@@ -221,44 +221,24 @@ def set_random_seed(seed):
     ptitle('PPO Seed {}'.format(seed))
     
 def set_up_staged_training(args):
-    """Set up staged training by modifying the args object.
-    The goal is to check if it's a staged training run and set the appropriate flags and paths.
-    This function checks if the r_shaping contains 'staged' and modifies the args object accordingly. 
-    Args:
-        args (_type_): _description_
+    """Detect staged training via args.stage_name and compute the stage hash/suffix.
 
-    Raises:
-        Exception: _description_
-    """ 
-    if_staged_training = [i for i, item in enumerate(args.r_shaping) if 'staged' in item]
-    if sum(if_staged_training):
-        args.staged_training = True
-        # extract subexperiment name
-        full_str = args.r_shaping[if_staged_training[0]]
-        subexp_name = full_str.split('staged_')[-1]
-        args.staged_subexp_name = subexp_name
-        args.save_dir =  '/'.join([args.save_dir, subexp_name, ""])
-        root_model_fpath = args.model_fpath
-        # handle .pt - insert subexp_name before weights folder of the model_fpath
-        args.model_fpath = args.model_fpath.replace('weights', f'{subexp_name}/weights')
-        # ensure the subexperiment model file exists 
-        if os.path.isfile(args.model_fpath):
-            print("Subexperiment model file exists; This is likely a checkpoint rerun")
-        else:
-            print("Subexperiment model file does not exist; Copying from parent experiment")
-            # copy the model file from parent experiment
-            if os.path.isfile(root_model_fpath):
-                import shutil
-                os.makedirs(os.path.join(args.save_dir, 'weights'), exist_ok=True)
-                shutil.copy(root_model_fpath, args.model_fpath)
-            else:
-                raise Exception(f"Parent model file not found in parent folder. Unexpected for staged training {root_model_fpath} Exiting.")
-        args.training_log = args.training_log.replace('train_logs', f'{subexp_name}/train_logs')
-        args.json_config = args.json_config.replace('/json', f'/{subexp_name}/json')
-        print("Setting args.staged_training = True; resulting save_dir:", args.save_dir)
-    else:
+    Staged training loads parent weights from args.resume_from, saves new checkpoints
+    with a _stage_{hash} suffix into the new experiment's save_dir, and logs to the
+    same wandb run as the parent (matching by outsuffix / run_name).
+    """
+    stage_name = getattr(args, 'stage_name', '') or ''
+    if not stage_name:
         args.staged_training = False
-        args.staged_subexp_name = None
+        args.stage_hash = ''
+        args.stage_checkpoint_suffix = ''
+        return
+
+    args.staged_training = True
+    h_input = stage_name + getattr(args, 'outsuffix', '')
+    args.stage_hash = hashlib.sha1(h_input.encode()).hexdigest()[:8]
+    args.stage_checkpoint_suffix = f'_stage_{args.stage_hash}'
+    print(f"Staged training: stage_name={stage_name}, stage_hash={args.stage_hash}")
 
 def main(args=None):
     if not args:
@@ -271,15 +251,13 @@ def main(args=None):
     args.mlflow = True if "mlflow" not in args else args.mlflow # mlflow not in args when running from datajoint
     args.rotate_by = None if not args.rotate_by else args.rotate_by # False means no rotation, None means no rotation
     args.model_fname = f"{args.env_name}_{args.outsuffix}.pt"
-    args.model_fpath = os.path.join(args.save_dir, 'weights', args.model_fname)
-    args.training_log = os.path.join(args.save_dir, 'train_logs', args.model_fname.replace(".pt", '_train.csv'))
     args.soft_reset = False
     if 'soft_reset' in args.r_shaping:
         args.r_shaping.remove('soft_reset')
         args.soft_reset = True
     # Save args and config info
     # https://stackoverflow.com/questions/16878315/what-is-the-right-way-to-treat-argparse-namespace-as-a-dictionary
-    args.json_config = os.path.join(args.save_dir, 'json', args.model_fname.replace(".pt", "_args.json"))
+    # Paths are set after set_up_staged_training so the stage suffix is available.
     print("PPO Args --->", args)
     print(args.seed)
     set_random_seed(args.seed)
@@ -296,17 +274,25 @@ def main(args=None):
         print("CUDA is not available. Running on CPU.", flush=True, file=sys.stderr)
         args.cuda = False
 
-    # handle staged training
-    set_up_staged_training(args) 
-     
+    # Staged training detection — sets args.staged_training, args.stage_hash, args.stage_checkpoint_suffix
+    set_up_staged_training(args)
+
+    # Build all checkpoint / log paths (suffix '' for normal runs, '_stage_HASH' for staged)
+    suffix = args.stage_checkpoint_suffix
+    stem   = f"{args.env_name}_{args.outsuffix}{suffix}"
+    args.init_fpath   = os.path.join(args.save_dir, 'weights', f"{stem}.init.pt")
+    args.chkpt_fpath  = os.path.join(args.save_dir, 'weights', f"{stem}.chkpt.pt")
+    args.final_fpath  = os.path.join(args.save_dir, 'weights', f"{stem}.final.pt")
+    args.model_fpath  = args.chkpt_fpath   # unified load/save target
+    args.training_log = os.path.join(args.save_dir, 'train_logs', f"{stem}_train.csv")
+    args.json_config  = os.path.join(args.save_dir, 'json', f"{stem}_args.json")
+
     if not args.dryrun:
         make_dirs(args)
-        # handling checkpoint loading
-            # only save json if not loading a checkpoint
         if not os.path.isfile(args.json_config):
-            with open(args.json_config , 'w') as fp:
+            with open(args.json_config, 'w') as fp:
                 json.dump(vars(args), fp)
-                
+
     torch.set_num_threads(1)
     gpu_idx = 0
     device = torch.device(f"cuda:{gpu_idx}" if args.cuda else "cpu")
@@ -317,19 +303,66 @@ def main(args=None):
         'qvar': args.qvar,
         'diff_max': args.diff_max,
         'diff_min': args.diff_min,
-        'reset_offset_tmax': [30, 30, 30, 30], # 3 for switch condition, according to evalCli 
-        't_val_min': [60, 60, 60, 60] # start time of plume data. 58 for switch condition, at around when the switching happens accoding to evalCli
+        'reset_offset_tmax': [30, 30, 30, 30],
+        't_val_min': [60, 60, 60, 60]
     }
-    
-    # handling checkpoint loading
-    if os.path.isfile(args.model_fpath):
-        print("Loading model from", args.model_fpath)
+
+    # Weight loading: priority (a) stage chkpt > (b) resume_from (fresh stage) > (c) scratch
+    resume_from = getattr(args, 'resume_from', '') or ''
+    args.is_fresh_stage = False
+
+    if os.path.isfile(args.chkpt_fpath):
+        print("Loading stage checkpoint from", args.chkpt_fpath)
         actor_critic, optimizer_state_dict, curriculum_vars = load_model(args, curriculum_vars)
         actor_critic.base.rnn.flatten_parameters()
+    elif args.staged_training and resume_from and os.path.isfile(resume_from):
+        print("Fresh stage start — loading parent weights from", resume_from)
+        args.model_fpath = resume_from
+        actor_critic, optimizer_state_dict, curriculum_vars = load_model(args, curriculum_vars)
+        actor_critic.base.rnn.flatten_parameters()
+        args.is_fresh_stage = True
+        args.model_fpath = args.chkpt_fpath   # restore save target
     else:
-        print(f"No model file found. Starting from scratch. {args.model_fpath}")
+        print(f"No checkpoint found. Starting from scratch. ({args.chkpt_fpath})")
         actor_critic = None
         optimizer_state_dict = None
+
+    # Stage update offset — how many updates the parent (or earlier stage) already ran
+    args.stage_update_offset = 0
+    args.parent_experiment_name = None
+    if args.staged_training and resume_from:
+        import pandas as _pd
+        parent_save_dir = os.path.dirname(os.path.dirname(os.path.abspath(resume_from)))
+        args.parent_experiment_name = os.path.basename(parent_save_dir)
+        parent_stem     = os.path.splitext(os.path.basename(resume_from))[0].replace('.chkpt', '')
+        parent_log_path = os.path.join(parent_save_dir, 'train_logs', f"{parent_stem}_train.csv")
+        if os.path.isfile(parent_log_path):
+            parent_df = _pd.read_csv(parent_log_path, index_col=0)
+            if len(parent_df) > 0 and 'update' in parent_df.columns:
+                args.stage_update_offset = int(parent_df['update'].max()) + 1
+                print(f"Stage update offset: {args.stage_update_offset} (from {parent_log_path})")
+
+    # Config diff — track which hyperparameters changed relative to parent
+    args.config_diff = {}
+    if args.staged_training and resume_from:
+        parent_json = os.path.join(parent_save_dir, 'json', f"{parent_stem}_args.json")
+        if os.path.isfile(parent_json):
+            with open(parent_json) as f:
+                parent_args_dict = json.load(f)
+            _skip = {
+                'model_fpath', 'chkpt_fpath', 'init_fpath', 'final_fpath', 'model_fname',
+                'training_log', 'json_config', 'device', 'eval_log_dir', 'cuda',
+                'staged_training', 'stage_hash', 'stage_checkpoint_suffix',
+                'stage_update_offset', 'is_fresh_stage', 'config_diff', 'resume_from',
+            }
+            current = vars(args)
+            args.config_diff = {
+                k: {'original': parent_args_dict[k], 'new': current[k]}
+                for k in set(parent_args_dict) & set(current)
+                if k not in _skip and parent_args_dict.get(k) != current.get(k)
+            }
+            if args.config_diff:
+                print("Config changes from parent:", args.config_diff)
     
     if 'haltere' in args.r_shaping:
         args.haltere = True
@@ -364,7 +397,12 @@ def main(args=None):
     
     if not args.if_vec_norm:
         envs.venv.norm_obs = False
-    
+
+    # Save init checkpoint for fresh staged runs (parent weights, before any stage training)
+    if not args.dryrun and getattr(args, 'is_fresh_stage', False) and not os.path.isfile(args.init_fpath):
+        torch.save([actor_critic, getattr(get_vec_normalize(envs), 'obs_rms', None)], args.init_fpath)
+        print('Saved init', args.init_fpath)
+
     # handling checkpoint loading
     if actor_critic is None:
         actor_critic = Policy(
@@ -377,14 +415,12 @@ def main(args=None):
                         },
             args=args)
         actor_critic.to(device)
-        if not args.dryrun:    
-            # Save model at START of training
-            start_fname = f'{args.model_fpath}.start'
+        if not args.dryrun and not os.path.isfile(args.init_fpath):
             torch.save([
                 actor_critic,
                 getattr(get_vec_normalize(envs), 'obs_rms', None)
-            ], start_fname)
-            print('Saved', start_fname)
+            ], args.init_fpath)
+            print('Saved init', args.init_fpath)
     actor_critic.configure_ou(args)
     actor_critic.to(device)
 
@@ -432,15 +468,13 @@ def main(args=None):
                         envs.observation_space.shape, envs.action_space,
                         actor_critic.recurrent_hidden_state_size)
     
-    # Set our tracking server uri for logging
-    # Create a new MLflow Experiment
-    if args.staged_training:
-        # store under parent dir and name with added suffix
-        experiment_name = os.path.basename(os.path.dirname(os.path.dirname(args.save_dir)))
-        run_name = "_".join([args.outsuffix, args.staged_subexp_name])
+    # Staged runs search for the original wandb run in the PARENT's project so the run_id is found.
+    # Non-staged runs use their own experiment_name as the wandb project.
+    if args.staged_training and args.parent_experiment_name:
+        experiment_name = args.parent_experiment_name
     else:
-        experiment_name = os.path.basename((os.path.dirname(args.save_dir))) 
-        run_name = args.outsuffix
+        experiment_name = os.path.basename(os.path.dirname(args.save_dir))
+    run_name = args.outsuffix   # same for all stages — identifies the wandb run
         
     if args.mlflow:
         mlflow.set_tracking_uri(uri="https://dev0.uwcnc.net/mlflow/")
@@ -464,10 +498,12 @@ def main(args=None):
         # Single block using the appropriate parameters
         run_params['dir'] = args.save_dir
         with mlflow.start_run(**run_params):
-            # Log the hyperparameters dict to mlflow
-            mlflow.log_params(vars(args)) 
+            mlflow.log_params(vars(args))
+            if getattr(args, 'config_diff', {}):
+                mlflow.log_summary('stage_changes', args.config_diff)
+                mlflow.log_summary('stage_hash', args.stage_hash)
 
-            training_log, eval_log = training_loop(agent, envs, args, device, actor_critic, 
+            training_log, eval_log = training_loop(agent, envs, args, device, actor_critic,
                 training_log=training_log, eval_log=eval_log, eval_env=None, rollouts=rollouts)
     else:
         print("MLflow is not enabled. Running training without logging.")

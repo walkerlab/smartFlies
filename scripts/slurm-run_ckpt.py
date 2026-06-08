@@ -7,9 +7,16 @@
 #
 # Cancel all your jobs: squeue -u $USER -h | awk '{print $1}' | xargs scancel
 
+# python3 scripts/slurm-run_ckpt.py \
+#   --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ \
+#   --stage_name noisy \
+#   --substr 4deaf7e9 \
+#   --override "action_physics=force OU_exploration=off experiment_name=force_physics_uncertainty 'r_shaping=[step,missed_time_cost,rotate_by,birthx_cl_last,cosine]' loc_algo=linear_precise num_env_steps=7200000 precise_max=[1] precise_max=[6] variant=wind_obsver_v1 'dataset=[noisy_jitterx5b5]' path.curriculum_name=060226_noisy_jitter" 
 
 import argparse
+import glob
 import os
+import re
 import subprocess
 import sys
 
@@ -84,7 +91,8 @@ python3 -u -m tamagotchi.main_hydra \\
 
     print('Submitting job with script:')
     print(script)
-    script_path = os.path.join(OUTFILES_DIR, f'submit_{config_name}_{override.replace(" ", "_")[:60]}.sh')
+    safe_override = re.sub(r'[^A-Za-z0-9_\-]', '_', override)[:60]
+    script_path = os.path.join(OUTFILES_DIR, f'submit_{config_name}_{safe_override}.sh')
     with open(script_path, 'w') as f:
         f.write(script)
     job_id = slurm_submit(script_path)
@@ -115,21 +123,58 @@ def main():
                         help='Submit N jobs with seed=1 through seed=N (default: 1)')
     parser.add_argument('--seed_from', type=int, default=1,
                         help='Start submitting jobs from this seed (default: 1)')
+    parser.add_argument('--from_folder', type=str, default='',
+                        help='Path to experiment folder containing weights/ — discovers trained '
+                             'seeds automatically (mutually exclusive with --n_seeds loop)')
+    parser.add_argument('--stage_name', type=str, default='',
+                        help='Short label for this continuation stage (e.g. "morewind"); '
+                             'required when --from_folder is used')
+    parser.add_argument('--substr', type=str, default='',
+                        help='Only load checkpoints whose filename contains this substring '
+                             '(e.g. a hash "4deaf7e9" to pin a specific run)')
 
     args = parser.parse_args()
 
-    for seed in range(args.seed_from, args.seed_from + args.n_seeds):
-        seed_override = f'{args.override} seed={seed}'.strip()
-        submit(
-            override=seed_override,
-            config_name=args.config,
-            num_gpus=args.num_gpus,
-            gpu_type=args.gpu_type,
-            mem=args.mem,
-            cpus=args.cpus,
-            time=args.time,
-            partition=args.partition,
-        )
+    submit_kwargs = dict(
+        config_name=args.config,
+        num_gpus=args.num_gpus,
+        gpu_type=args.gpu_type,
+        mem=args.mem,
+        cpus=args.cpus,
+        time=args.time,
+        partition=args.partition,
+    )
+
+    if args.from_folder:
+        if not args.stage_name:
+            print('Error: --stage_name is required when --from_folder is used', file=sys.stderr)
+            sys.exit(1)
+        # Discover seed checkpoints: plume_seed-N-HASH.pt (or .chkpt.pt for older runs)
+        pattern = os.path.join(args.from_folder, 'weights', 'plume_seed-*.pt')
+        pt_files = sorted(glob.glob(pattern))
+        pt_files = [f for f in pt_files
+                    if re.search(r'seed-\d+-[0-9a-f]{8}(\.chkpt)?\.pt$', f)
+                    and not f.endswith('_vecNormalize.pkl')
+                    and (not args.substr or args.substr in os.path.basename(f))]
+        if not pt_files:
+            print(f'No seed checkpoints found in {args.from_folder}/weights/', file=sys.stderr)
+            sys.exit(1)
+        for pt_file in pt_files:
+            stem = os.path.splitext(os.path.basename(pt_file))[0]  # plume_seed-22-4deaf7e9 or .chkpt
+            outsuffix = stem.replace('plume_', '', 1).replace('.chkpt', '')  # seed-22-4deaf7e9
+            seed_n = int(outsuffix.split('-')[1])
+            seed_override = (
+                f'outsuffix={outsuffix} '
+                f'resume_from={pt_file} '
+                f'stage_name={args.stage_name} '
+                f'seed={seed_n} '
+                f'{args.override}'
+            ).strip()
+            submit(override=seed_override, **submit_kwargs)
+    else:
+        for seed in range(args.seed_from, args.seed_from + args.n_seeds):
+            seed_override = f'{args.override} seed={seed}'.strip()
+            submit(override=seed_override, **submit_kwargs)
 
 
 if __name__ == '__main__':
