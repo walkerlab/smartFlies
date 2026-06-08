@@ -671,9 +671,13 @@ def get_traj_df_tmp(episode_log,
     act = pd.DataFrame(act)
     if squash_action:
         act = (np.tanh(act) + 1)/2
-    act.columns = ['step', 'turn']
-    traj_df['step'] = act['step']
-    traj_df['turn'] = act['turn']
+    # check how many columns in act - some older logs only have step, while newer ones have step and turn
+    if act.shape[1] == 2:
+        act.columns = ['step', 'turn']
+        traj_df['step'] = act['step']
+        traj_df['turn'] = act['turn']
+    elif act.shape[1] == 3:
+        act.columns = ['T_par', 'T_perp', 'tau']
     traj_df['stray_distance'] = [record[0]['stray_distance'] for record in episode_log['infos']]
     # Observation derived
     traj_df['odor_raw'] = obs['odor'] # added for open loop perturbation analysis - do not rectify
@@ -779,7 +783,8 @@ def get_traj_df_tmp(episode_log,
         if obs.shape[1] == 7:
             colnames_diff.append('ego_course_direction_theta')
         for col in colnames_diff:
-            traj_df[f'{col}_dt1'] = traj_df[col].diff()
+            if col in traj_df.columns:
+                traj_df[f'{col}_dt1'] = traj_df[col].diff()
             # traj_df[f'{col}_dt2'] = traj_df[f'{col}_dt1'].diff()
 
     return traj_df
@@ -846,6 +851,7 @@ def get_episode_metadata(log, odor_threshold=ODOR_THRESHOLD, squash_action=False
 
 def get_wind_module_outputs(log):
     df_act = pd.DataFrame(log['activity'])
+    print(f"Activity columns: {df_act.columns}")
 
     def stack_2d(key):
         arr = np.stack(df_act[key].to_list())  # (T, B, 2)
