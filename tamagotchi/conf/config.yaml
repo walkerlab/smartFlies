@@ -103,6 +103,9 @@ mlflow: 1
 # New: action physics. 'air_vel_angvel' (legacy) or 'ground_vel_angvel', or 'force'.
 action_physics: force
 
+stage_name: ""      # non-empty triggers staged-training mode; short label for this stage
+resume_from: ""     # explicit .chkpt.pt path to load weights from (parent seed)
+
 hydra:
   run:
     dir: ${path.save_dir}

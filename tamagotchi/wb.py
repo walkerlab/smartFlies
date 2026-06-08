@@ -93,6 +93,11 @@ def log_artifact(local_path, artifact_path=None, step=None):
     wandb.save(local_path, base_path=os.path.dirname(local_path) or ".", policy="live")
 
 
+def log_summary(key, value):
+    if wandb.run is not None:
+        wandb.run.summary[key] = value
+
+
 def _jsonable(v):
     try:
         import json
