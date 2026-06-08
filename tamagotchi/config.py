@@ -7,13 +7,14 @@ import matplotlib
 import socket
 MACHINE = socket.gethostname().lower()
 curr_wd = os.getcwd()
-datadir = '/src/data/published_results/reproduce/'
 # datadir = '/src/data/performance_plot_data_code/collection_1/'
 # datadir = '/src/data/performance_plot_data_code/lawrence/' # for running Toha comparison experiments
 if 'gscratch' in curr_wd and 'walkerlab' in curr_wd:
     datadir = '/gscratch/walkerlab/jqhu/smartFlies/data/published_results/reproduce/'
 elif 'gscratch' in curr_wd and 'portia' in curr_wd:
 	datadir = '/gscratch/portia/jqhu/work/active_sensing/smartFlies/data/published_results/reproduce/'
+elif '/src' in curr_wd:
+    datadir = '/src/data/published_results/reproduce/'
 else:
 	raise ValueError(f'Unrecognized gscratch path: {curr_wd}')
 
@@ -140,7 +141,6 @@ mlflow_colors = {
             'constantx5b5': 'blue',
             'constant_mag_narrowx5b5': 'green',
             'constant_jitterx5b5': 'red',
-            'noisy_jitterx5b5': 'purple',
 			# 'constant_magx5b5': 'red',
             'noisy3x5b5': 'purple',
             'poisson_mag_narrow_noisy3x5b5': 'orange',
