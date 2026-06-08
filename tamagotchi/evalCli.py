@@ -25,6 +25,7 @@ import os
 
 ### UTILITY ###
 def evaluate_agent(actor_critic, env, args):
+    actor_critic.ou_sigma_current = getattr(args, 'ou_sigma', 0.0) if getattr(args, 'ou_eval', False) else 0.0
     num_tests = 0
     reward_total_sum = 0
     episode_logs = []
@@ -108,6 +109,7 @@ def evaluate_agent(actor_critic, env, args):
                 
 
         obs = env.reset()
+        ou_state = actor_critic._zero_ou_state(obs) if getattr(args, 'ou_eval', False) else None
 
         reward_sum = 0    
         ep_step = 0
@@ -120,16 +122,21 @@ def evaluate_agent(actor_critic, env, args):
 
         while True:
             with torch.no_grad():
-                value, action, _, recurrent_hidden_states, activity = actor_critic.act(
+                value, action, _, recurrent_hidden_states, activity, ou_state_new = actor_critic.act(
                     obs, 
                     recurrent_hidden_states, 
                     masks, 
-                    deterministic=True)
+                    deterministic=True,
+                    ou_state=ou_state)
+                if getattr(args, 'ou_eval', False):
+                    ou_state = ou_state_new
                 if args.perturb_RNN_by:
                     recurrent_hidden_states = agent_analysis.perturb_rnn_activity(recurrent_hidden_states, orthogonal_basis, sigma_noise, args.perturb_RNN_by)
                     
             obs, reward, done, info = env.step(action)
             masks.fill_(0.0 if done else 1.0)
+            if done and getattr(args, 'ou_eval', False):
+                ou_state.zero_()
 
             if args.device != 'cpu':
                 _obs = obs.to("cpu").numpy()
@@ -416,6 +423,10 @@ if __name__ == "__main__":
     
     parser.add_argument('--no_vec_norm_stats', action='store_true', default=False, help='an agent that is trained without storing vecNormalize stats, or did not use it during training')
     parser.add_argument('--out_dir', type=str, default='eval')
+    parser.add_argument('--ou_sigma', type=float, default=0.0,
+        help='OU diffusion scale for eval ablations when ou_eval is true')
+    parser.add_argument('--ou_eval', type=bool, default=False,
+        help='enable OU noise during evaluation ablations; off by default')
     
     parser.add_argument('--mlflow', type=bool, default=False)
     parser.add_argument('--time_offsets', type=float, nargs='+', default=[0.0, 1.0])
@@ -491,6 +502,7 @@ if __name__ == "__main__":
         actor_critic, obs_rms, optimizer_state_dict = torch.load(args.model_fname, map_location=torch.device(args.device), weights_only=False)
     except ValueError:
         actor_critic, obs_rms = torch.load(args.model_fname, map_location=torch.device(args.device), weights_only=False)
+    actor_critic.configure_ou(args)
     
     if args.mlflow:
         import mlflow
