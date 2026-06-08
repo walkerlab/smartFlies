@@ -1834,7 +1834,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.soft_reset_button: # gets turned on when failed in step()
             self.soft_reset_button = False # reset the button
             return self.soft_reset()
-        self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
+        if not self.loc_algo == self.angle_algo == self.time_algo == 'fixed': # Only sample rotate_by when in training. These three algos are used for eval. 
+            self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
         if self.haltere:
             self.air_acc = 0.0 # reset acceleration
             self.ang_acc = 0.0 # reset angular acceleration
@@ -2237,7 +2238,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             'allocentric_head_direction': observation[3:5],
             'egocentric_course_direction': observation[5:7], # within SubprocVecEnv, unnormalized obs. Later nomalized in VecPyTorch
             'air_acc': observation[7] if self.haltere else None, # within SubprocVecEnv, unnormalized obs. Later nomalized in VecPyTorch
-            'ang_acc': observation[8] if self.haltere else None # within SubprocVecEnv, unnormalized obs. Later nomalized in VecPyTorch
+            'ang_acc': observation[8] if self.haltere else None, # within SubprocVecEnv, unnormalized obs. Later nomalized in VecPyTorch
+            'ang_vel': self.ang_vel if self.action_physics == 'force' else None
             }
 
         if done:
