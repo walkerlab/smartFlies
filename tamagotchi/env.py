@@ -1697,7 +1697,14 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             wide = 'y' if long == 'x' else 'x'
 
             # +- ~10% noise to the curriculum-set long coordinate
-            long_coord = self.now_init_long * (1 + 0.1 * np.random.randn())
+            if "random" in algo:
+                # sample actual location with noise - control case to increasing curriculum 
+                # uniform sample from 1 to self.now_init_long
+                init_long = np.random.uniform(1, self.now_init_long)
+                long_coord = init_long * (1 + 0.1 * np.random.randn())
+            else:
+                # sample actual location with noise around self.now_init_long - this is the intended curriculum
+                long_coord = self.now_init_long * (1 + 0.1 * np.random.randn())
             
             # Align sign with plume direction
             long_sign = np.sign(Z[long].mean())
