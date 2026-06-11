@@ -2641,10 +2641,12 @@ class SubprocVecEnv(SubprocVecEnv_):
         assert len(self.deployed_remotes) == len(set(self.deployed_processes)), "duplicated remotes"
     
     def sample_wind_direction(self, lower_lim = 1):
-        if np.random.random() > 0.3:
-            wind_dir = self.wind_directions # 70% chance to use the highest ranked wind direction
-        else:
-            wind_dir = np.random.randint(lower_lim, self.wind_directions+1) # +1 because randint is end-exclusive
+        # if np.random.random() > 0.3:
+        #     wind_dir = self.wind_directions # 70% chance to use the highest ranked wind direction
+        # else:
+        #     wind_dir = np.random.randint(lower_lim, self.wind_directions+1) # +1 because randint is end-exclusive
+        # for ctl exp with no CL
+        wind_dir = np.random.randint(lower_lim, self.wind_directions+1) # +1 because randint is end-exclusive
         
         return wind_dir
 
@@ -2660,10 +2662,7 @@ class SubprocVecEnv(SubprocVecEnv_):
                     # infos[i]["terminal_observation"] = obs[i] # wrong place to do this - already happened in worker step and then replaced by reset - the reseted values are not the terminal ones
                     if self.wind_directions > 1: # if there are multiple wind directions, then sample a new wind condition
                         # sample a new wind condition
-                        if 'constant' in self.unique_datasets[0]:
-                            new_wind_direction = self.sample_wind_direction(lower_lim=2) # skip constant once new wind has been added! 
-                        else:
-                            new_wind_direction = self.sample_wind_direction()
+                        new_wind_direction = self.sample_wind_direction()
                         # print('[DEBUG] sampled wind direction:', new_wind_direction)
                         current_wind_direction = self.ds2wind(self.get_attr('dataset', i)[0])
                         # print('[DEBUG] current wind direction:', current_wind_direction)
@@ -2674,7 +2673,7 @@ class SubprocVecEnv(SubprocVecEnv_):
                             for remote_idx, status in self.remote_directory.items():
                                 if status['deployed'] == False and status['wind_direction'] == new_wind_direction:
                                     self.swap(i, remote_idx)
-                                    # print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
+                                    print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
                                     swapped = True
                                     break
                     
