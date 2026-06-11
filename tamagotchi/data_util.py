@@ -592,7 +592,6 @@ def log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, cli
 
 def log_agent_learning_wind_obsver(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, aux_loss_dict, use_mlflow=True):
     log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, use_mlflow=use_mlflow)
-
     all_wind_nll = aux_loss_dict['wind_nll_all']
     all_wind_sqerr = aux_loss_dict['wind_sqerr_all']
     all_wind_logvar = aux_loss_dict['wind_logvar_all']
@@ -631,7 +630,7 @@ def log_eps_info(j, update_episodes_df, use_mlflow=True):
     mlflow.log_metric("perf/init_distance", update_episodes_df['location_initial'].apply(np.linalg.norm).mean(), step=j)
     mlflow.log_metric("perf/stray_initial", update_episodes_df['stray_initial'].mean(), step=j)
 
-def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifacts=True):
+def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifacts=True, plot=True):
     """
     Log episode statistics and plot a histogram of plume density for successful episodes.
     Just log episode statistics if not long_artifacts
@@ -655,7 +654,8 @@ def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifact
         except Exception as e:
             print(f"Error logging artifact {log_path}: {e}")
     
-    # Plot plume density histogram for successful episodes
+    if plot:
+        # Plot plume density histogram for successful episodes
         successful_df = update_episodes_df[update_episodes_df['outcome'] == 'HOME']
         # Check if there's any data to plot
         if len(successful_df) > 0:        
