@@ -780,7 +780,7 @@ def training_loop(agent, envs, args, device, actor_critic,
     rollouts.to(device)
     start = time.time()
     
-    plot_every_n_updates = 1
+    plot_every_n_updates = args.plot_every_n_updates if 'plot_every_n_updates' in args else 1 # find how often to plot. default is every update
     # at each bout of update
     update_range = range(num_updates)
     if last_chkpt_update:
@@ -835,29 +835,13 @@ def training_loop(agent, envs, args, device, actor_critic,
             updated_var = update_by_schedule(envs, schedule, j_global)
             
             ##############################################################################################################
-            # Checkpointing
-            ##############################################################################################################
-            # if updated_var and not args.dryrun: # save model if an update to env occurred during this trial
-            #     lesson_fpath = os.path.join(args.save_dir, 'chkpt', args.model_fname.replace(".pt", f'_before_{updated_var}{schedule[updated_var][j_global]}_update{j_global}.pt'))
-            #     torch.save([
-            #         actor_critic,
-            #         getattr(get_vec_normalize(envs), 'obs_rms', None),
-            #         agent.optimizer.state_dict(),
-            #     ], lesson_fpath)
-            #     # also save the VecNormalize state 
-            #     vecNormalize_state_fname = ''
-            #     if args.if_vec_norm:
-            #         vecNormalize_state_fname = lesson_fpath.replace(".pt", "_vecNormalize.pkl")
-            #         envs.venv.save(vecNormalize_state_fname)
-            #     print('Saved', lesson_fpath, vecNormalize_state_fname)
             utils.log_curriculum_schedule(schedule, j_global)
             
         # Initialize df to track episode statistics
-        if j % plot_every_n_updates == 0:
-            update_episodes_df = pd.DataFrame(columns=[
-                'episode_id', 'dataset', 'outcome', 'reward', 'plume_density', 
-                'start_tidx', 'end_tidx', 'location_initial', 'init_angle'
-            ]) # track stats of episodes
+        update_episodes_df = pd.DataFrame(columns=[
+            'episode_id', 'dataset', 'outcome', 'reward', 'plume_density', 
+            'start_tidx', 'end_tidx', 'location_initial', 'init_angle'
+        ]) # track stats of episodes
         episode_counter = 0
         # do this every 10th update
         if j % plot_every_n_updates == 0:
@@ -936,7 +920,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                 
         utils.log_agent_learning_wind_obsver(j_global, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], aux_loss_dict=extras, use_mlflow=args.mlflow)
         # wind obsver v1 modification: plot success fractions every 20 updates
-        utils.log_eps_artifacts(j_global, args, update_episodes_df, use_mlflow=args.mlflow, log_artifacts=True)
+        utils.log_eps_artifacts(j_global, args, update_episodes_df, use_mlflow=args.mlflow, log_artifacts=True, plot=(j % plot_every_n_updates == 0))
 
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
         if j % args.log_interval == 0 and len(episode_rewards) > 1 and not args.dryrun:

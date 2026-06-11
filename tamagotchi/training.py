@@ -770,7 +770,7 @@ def training_loop(agent, envs, args, device, actor_critic,
     rollouts.to(device)
     start = time.time()
     
-    plot_every_n_updates = 1
+    plot_every_n_updates = args.plot_every_n_updates if 'plot_every_n_updates' in args else 1 # find how often to plot. default is every update
     # at each bout of update
     update_range = range(num_updates)
     if last_chkpt_update:
@@ -844,11 +844,10 @@ def training_loop(agent, envs, args, device, actor_critic,
             utils.log_curriculum_schedule(schedule, j_global)
             
         # Initialize df to track episode statistics
-        if j % plot_every_n_updates == 0:
-            update_episodes_df = pd.DataFrame(columns=[
-                'episode_id', 'dataset', 'outcome', 'reward', 'plume_density', 
-                'start_tidx', 'end_tidx', 'location_initial', 'init_angle'
-            ]) # track stats of episodes
+        update_episodes_df = pd.DataFrame(columns=[
+            'episode_id', 'dataset', 'outcome', 'reward', 'plume_density', 
+            'start_tidx', 'end_tidx', 'location_initial', 'init_angle'
+        ]) # track stats of episodes
         episode_counter = 0
         # do this every 10th update
         if j % plot_every_n_updates == 0:
@@ -876,7 +875,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                         episode_plume_densities.append(infos[i]['plume_density']) # plume_density and num_puffs are expected to be similar across different agents. Tracking to confirm. 
                         episode_puffs.append(infos[i]['num_puffs'])
                         episode_wind_directions.append(envs.ds2wind(infos[i]['dataset'])) # density and dataset are logged to see eps. statistics implemented by the curriculum
-                        update_episodes_df = utils.update_eps_info(update_episodes_df, infos[i], episode_counter, j)
+                        update_episodes_df = utils.update_eps_info(update_episodes_df, infos[i], episode_counter, j_global)
                     except KeyError:
                         raise KeyError("Logging info not found... check why it's not here when done")
             
@@ -905,22 +904,22 @@ def training_loop(agent, envs, args, device, actor_critic,
                                 args.gae_lambda, args.use_proper_time_limits)
         value_loss, action_loss, dist_entropy, clip_fraction, advantages = agent.update(rollouts)
         
-        # After update, generate trajectory plot (deferred logging until after metrics)
+        # After update, get stored trajectories
         if j % plot_every_n_updates == 0:
         #     update_trajectories = traj_storage.get_trajectories()
         #     status = traj_storage.get_collection_status()
         #     summary = traj_storage.get_summary_counts()
             plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}trajectories_update{j_global}.png"
             plot_trajectories(traj_storage, envs, save_path=plt_path)
-
-        utils.log_agent_learning(j_global, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
-        if j % plot_every_n_updates == 0:
-            utils.log_eps_artifacts(j_global, args, update_episodes_df, use_mlflow=args.mlflow)
             if args.mlflow:
                 try:
                     mlflow.log_artifact(plt_path, artifact_path="figs/trajectories", step=j_global)
                 except Exception as e:
                     print(f"Error logging artifact {plt_path}: {e}")
+                
+        utils.log_agent_learning(j_global, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
+        # wind obsver v1 modification: plot success fractions every 20 updates
+        utils.log_eps_artifacts(j_global, args, update_episodes_df, use_mlflow=args.mlflow, log_artifacts=True, plot=(j % plot_every_n_updates == 0))
 
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
         if j % args.log_interval == 0 and len(episode_rewards) > 1 and not args.dryrun:
