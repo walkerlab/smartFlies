@@ -5,7 +5,6 @@ import torch
 import pandas as pd
 import os
 from collections import deque
-from tamagotchi.a2c_ppo_acktr.storage import RolloutStorage
 # from tamagotchi.eval import eval_lite
 try:
     import data_util as utils
@@ -381,8 +380,8 @@ class TrajectoryStorage:
             dataset: {outcome: 0 for outcome in self.possible_outcomes}
             for dataset in self.expected_datasets
         }
-        print(f"Expecting datasets: {self.expected_datasets}")
-        print(f"Target: {self.trajectories_per_outcome} {self.possible_outcomes} per dataset")
+        # print(f"Expecting datasets: {self.expected_datasets}")
+        # print(f"Target: {self.trajectories_per_outcome} {self.possible_outcomes} per dataset")
 
     def reset_update(self, expected_datasets=None):
         """Reset counters and storage for new update"""
@@ -689,7 +688,7 @@ def training_loop(agent, envs, args, device, actor_critic,
     num_updates = int(
         args.num_env_steps) // args.num_steps // args.num_processes # args.num_env_steps 20M for all # args.num_steps=2048 (found in logs) # args.num_processes=4=mini_batch (found in logs)
 
-    # stage_offset: global step number where this stage begins (0 for stage-0 runs)
+    # stage_offset: global step number where this stage begins (0 for non-staged runs)
     stage_offset = getattr(args, 'stage_update_offset', 0)
 
     # See if a chkpt was loaded
@@ -697,6 +696,8 @@ def training_loop(agent, envs, args, device, actor_critic,
     last_chkpt_update = len(training_log) # the number of updates already done in case of checkpointing
     eval_log = eval_log if eval_log is not None else []
     # track trajectories for plotting
+    best_mean = 0.0
+
     traj_storage = TrajectoryStorage(num_envs=envs.num_envs, possible_datasets=args.dataset, possible_outcomes=['HOME', 'OOB', 'OOT'])
         
     # track stats for logging
@@ -826,21 +827,6 @@ def training_loop(agent, envs, args, device, actor_critic,
             updated_var = update_by_schedule(envs, schedule, j_global)
             
             ##############################################################################################################
-            # Checkpointing
-            ##############################################################################################################
-            if updated_var and not args.dryrun: # save model if an update to env occurred during this trial
-                lesson_fpath = os.path.join(args.save_dir, 'chkpt', args.model_fname.replace(".pt", f'_before_{updated_var}{schedule[updated_var][j_global]}_update{j_global}.pt'))
-                torch.save([
-                    actor_critic,
-                    getattr(get_vec_normalize(envs), 'obs_rms', None),
-                    agent.optimizer.state_dict(),
-                ], lesson_fpath)
-                # also save the VecNormalize state 
-                vecNormalize_state_fname = ''
-                if args.if_vec_norm:
-                    vecNormalize_state_fname = lesson_fpath.replace(".pt", "_vecNormalize.pkl")
-                    envs.venv.save(vecNormalize_state_fname)
-                print('Saved', lesson_fpath, vecNormalize_state_fname)
             utils.log_curriculum_schedule(schedule, j_global)
             
         # Initialize df to track episode statistics
@@ -941,28 +927,31 @@ def training_loop(agent, envs, args, device, actor_critic,
                 actor_critic,
                 getattr(get_vec_normalize(envs), 'obs_rms', None),
                 agent.optimizer.state_dict(),
-            ], args.chkpt_fpath)
-            if args.if_vec_norm:
-                envs.venv.save(args.chkpt_fpath.replace('.pt', '_vecNormalize.pkl'))
-            print('Saved chkpt', args.chkpt_fpath)
+            ], args.model_fpath)
+            print('Saved', args.model_fpath)
 
-            # Final checkpoint — written only on the last update
-            if j == num_updates - 1:
+            # save the VecNormalize state for evaluation
+            if args.if_vec_norm:
+                vecNormalize_state_fname = args.model_fpath.replace(".pt", "_vecNormalize.pkl")
+                envs.venv.save(vecNormalize_state_fname)
+
+            current_mean = np.median(episode_rewards)
+            if current_mean >= best_mean:
+                best_mean = current_mean
+                fname = f'{args.model_fpath}.best'
                 torch.save([
                     actor_critic,
-                    getattr(get_vec_normalize(envs), 'obs_rms', None),
-                    agent.optimizer.state_dict(),
-                ], args.final_fpath)
-                if args.if_vec_norm:
-                    envs.venv.save(args.final_fpath.replace('.pt', '_vecNormalize.pkl'))
-                print('Saved final', args.final_fpath)
-
-
+                    getattr(get_vec_normalize(envs), 'obs_rms', None)
+                ], fname)
+                print('Saved', fname)
+    
     # save the final model to mlflow
     if args.mlflow:
-        mlflow.log_artifact(args.final_fpath, artifact_path="weights")
+        # mlflow.log_artifact(args.model_fpath, artifact_path="weights") # 111725 1mb agent file too big - never used this so turn off
         mlflow.log_artifact(args.training_log, artifact_path="training_logs")
-        if args.if_vec_norm:
-            mlflow.log_artifact(args.final_fpath.replace('.pt', '_vecNormalize.pkl'), artifact_path="weights")
+        # if args.if_vec_norm:
+        #     vecNormalize_state_fname = args.model_fpath.replace(".pt", "_vecNormalize.pkl")
+        #     mlflow.log_artifact(vecNormalize_state_fname, artifact_path="weights")
+        #     # save the final training log
         
     return training_log, eval_log
