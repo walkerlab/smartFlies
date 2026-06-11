@@ -1,0 +1,36 @@
+{
+  "birthx": {
+    "0": 0.1
+  },
+  "wind_cond": {
+    "0": 2
+  },
+  "constant_jitterx5b5_rotate_by": {
+    "0": [
+      0,
+      90,
+      180,
+      -90
+    ]
+  },
+  "constant_jitterx5b5_now_init_long": {
+    "0": 7
+  },
+  "noisy_jitterx5b5_rotate_by": {
+    "0": [
+      0,
+      90,
+      180,
+      -90
+    ]
+  },
+  "noisy_jitterx5b5_now_init_long": {
+    "0": 7
+  },
+  "meta": {
+    "total_num_updates": 400,
+    "restart_period": 400,
+    "note": "No curriculum, randomized plume sparsity, all possible rotate-by angles, and random plume location 1 ~ 7 along long axis"
+  }
+}
+
