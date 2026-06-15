@@ -13,6 +13,11 @@
 #   --substr 4deaf7e9 \
 #   --override "action_physics=force OU_exploration=off experiment_name=force_physics_uncertainty 'r_shaping=[step,missed_time_cost,rotate_by,birthx_cl_last,cosine]' loc_algo=linear_precise num_env_steps=7200000 precise_max=[1] precise_max=[6] variant=wind_obsver_v1 'dataset=[noisy_jitterx5b5]' path.curriculum_name=060226_noisy_jitter" 
 
+
+'''
+python3 /gscratch/portia/jqhu/work/active_sensing/smartFlies/scripts/slurm-run_ckpt.py --dry_run --config config_control_noCL --n_seeds 30 --override "action_physics=force OU_exploration=off experiment_name=CTL_noCL 'r_shaping=[step,missed_time_cost,rotate_by]' num_env_steps=10800000 variant=wind_obsver_v1"
+'''
+
 import argparse
 import glob
 import os
@@ -50,6 +55,7 @@ def submit(
         cpus,
         time,
         partition,
+        dry_run
         ):
     gpu_resource = GPU_CONFIGS[gpu_type]
     group_name = 'walkerlab' if partition == 'gpu-a100' else 'portia'
@@ -93,10 +99,12 @@ python3 -u -m tamagotchi.main_hydra \\
     print(script)
     safe_override = re.sub(r'[^A-Za-z0-9_\-]', '_', override)[:60]
     script_path = os.path.join(OUTFILES_DIR, f'submit_{config_name}_{safe_override}.sh')
-    with open(script_path, 'w') as f:
-        f.write(script)
-    job_id = slurm_submit(script_path)
-    print(f'Submitted job {job_id}')
+    if not dry_run:
+        print(f'Dry run: Would create script at {script_path}')
+        with open(script_path, 'w') as f:
+            f.write(script)
+        job_id = slurm_submit(script_path)
+        print(f'Submitted job {job_id}')
 
 
 def main():
@@ -132,6 +140,8 @@ def main():
     parser.add_argument('--substr', type=str, default='',
                         help='Only load checkpoints whose filename contains this substring '
                              '(e.g. a hash "4deaf7e9" to pin a specific run)')
+    parser.add_argument('--dry_run', action='store_true', default=False,
+                        help='Print the commands that would be executed without actually submitting the jobs')
 
     args = parser.parse_args()
 
@@ -143,6 +153,7 @@ def main():
         cpus=args.cpus,
         time=args.time,
         partition=args.partition,
+        dry_run=args.dry_run
     )
 
     if args.from_folder:
@@ -159,6 +170,9 @@ def main():
         if not pt_files:
             print(f'No seed checkpoints found in {args.from_folder}/weights/', file=sys.stderr)
             sys.exit(1)
+        if args.dry_run:
+            print('Dry run mode: found following checkpoints:')
+            print('\n'.join(pt_files))
         for pt_file in pt_files:
             stem = os.path.splitext(os.path.basename(pt_file))[0]  # plume_seed-22-4deaf7e9 or .chkpt
             outsuffix = stem.replace('plume_', '', 1).replace('.chkpt', '')  # seed-22-4deaf7e9
@@ -171,10 +185,14 @@ def main():
                 f'{args.override}'
             ).strip()
             submit(override=seed_override, **submit_kwargs)
+            if args.dry_run:
+                break  # just show the first one in dry run
     else:
         for seed in range(args.seed_from, args.seed_from + args.n_seeds):
             seed_override = f'{args.override} seed={seed}'.strip()
             submit(override=seed_override, **submit_kwargs)
+            if args.dry_run:
+                break  # just show the first one in dry run
 
 
 if __name__ == '__main__':
