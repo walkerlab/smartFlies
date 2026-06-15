@@ -7,7 +7,18 @@ import matplotlib
 import socket
 MACHINE = socket.gethostname().lower()
 # datadir = '/data/published_results/reproduce/'
-datadir = '/src/data/published_results/reproduce/'
+curr_wd = os.getcwd()
+# datadir = '/src/data/performance_plot_data_code/collection_1/'
+# datadir = '/src/data/performance_plot_data_code/lawrence/' # for running Toha comparison experiments
+if 'gscratch' in curr_wd and 'walkerlab' in curr_wd:
+    datadir = '/gscratch/walkerlab/jqhu/smartFlies/data/published_results/reproduce/'
+elif 'gscratch' in curr_wd and 'portia' in curr_wd:
+	datadir = '/gscratch/portia/jqhu/work/active_sensing/smartFlies/data/published_results/reproduce/'
+elif '/src' in curr_wd:
+    datadir = '/src/data/published_results/reproduce/'
+else:
+	raise ValueError(f'Unrecognized gscratch path: {curr_wd}')
+
 # if MACHINE == 'mycroft':
 # 	datadir = '/data/users/satsingh/plumedata/'
 # if (MACHINE == 'salarian') or (MACHINE == 'cylon'):
