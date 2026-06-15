@@ -11,7 +11,9 @@
 #
 # Cancel all your jobs: squeue -u $USER -h | awk '{print $1}' | xargs scancel
 
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ --dataset eval_noisy_jitterx5b5 --substr stage --dry_run
+# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ --dataset eval_noisy_jitterx5b5 --substr stage --dry_run  --extra_args "--no_viz False --test_sparsity"
+# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/CTL_noCL/ --dataset eval_noisy_jitterx5b5 --substr chkpt --dry_run  --extra_args "--no_viz False --test_sparsity"
+# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ --dataset eval_noisy_jitterx5b5 --substr stage --dry_run  --extra_args="--only_test_sparsity"
 
 import argparse
 import glob
@@ -134,8 +136,8 @@ def main():
                         default=[0.0, 10.0, 20.0, 30.0],
                         # default=[0.0, 1.0, 10.0, 11.0, 20.0, 21.0, 30.0, 31.0],
                         help='Time offsets in seconds passed to evalCli (default: 0.0 1.0 10.0 11.0 20.0 21.0 30.0 31.0)')
-    parser.add_argument('--viz_episodes', type=int, default=20,
-                        help='Number of episodes to visualize (default: 20)')
+    parser.add_argument('--viz_episodes', type=int, default=2,
+                        help='Number of episodes to visualize (default: 2)')
     parser.add_argument('--substr', type=str, default='',
                         help='Only eval checkpoints whose filename contains this substring')
     parser.add_argument('--extra_args', type=str, default='',
