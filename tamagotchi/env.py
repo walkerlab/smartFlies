@@ -1,5 +1,5 @@
 ##### from plume/plume_env.py  ##### from plume/plume_env.py  ##### from plume/plume_env.py
-from data_util import load_plume, get_concentration_at_tidx, rotate_wind, rotate_puffs, rotate_wind_optimized, rotate_puffs_optimized
+from .data_util import load_plume, get_concentration_at_tidx, rotate_wind, rotate_puffs, rotate_wind_optimized, rotate_puffs_optimized
 try:
     import config as config
 except ImportError:
