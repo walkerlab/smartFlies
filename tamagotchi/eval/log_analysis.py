@@ -341,7 +341,8 @@ def get_traj_and_activity_and_stack_them(eval_log_pkl_df: pd.DataFrame,
             stacked_neural_activity = np.vstack(h_episodes)
         if obtain_traj_df:
             stacked_traj_df = pd.concat(traj_dfs)
-
+        stacked_traj_df['time'] = stacked_traj_df.groupby('ep_idx')['t_val'].transform(lambda x: x - x.iloc[0])
+        stacked_traj_df['time'] = stacked_traj_df['time'].round(2)
     return stacked_traj_df, stacked_neural_activity
 
 
@@ -642,7 +643,7 @@ def get_traj_df_tmp(episode_log,
         egocentric_course_direction_theta = rad_over_pi_shift2_01(vec2rad_norm_by_pi(ego_course_direction_x, ego_course_direction_y)) # normalize by pi and then shift to 0-1
         traj_df['ego_course_direction_x'] = ego_course_direction_x
         traj_df['ego_course_direction_y'] = ego_course_direction_y
-        traj_df['ego_course_direction_theta'] = egocentric_course_direction_theta
+        traj_df['ego_course_direction_theta'] = egocentric_course_direction_theta # calculated from info and normed to 0-1
         traj_df['allo_ground_velocity'] = allo_ground_velocity
         traj_df['raw_ego_course_direction'] = [ record[0]['egocentric_course_direction'][0] for record in episode_log['infos']]
         traj_df['agent_angle_x_obs'] = obs['agent_angle_x']
@@ -663,7 +664,7 @@ def get_traj_df_tmp(episode_log,
     traj_df['wind_angle_ground_y'] = [ record[0][true_wind_direction_key][1] for record in episode_log['infos']]
     traj_df['wind_speed_ground'] = [ np.linalg.norm(record[0][true_wind_direction_key]) for record in episode_log['infos']]
     # for rel wind backwrad compatibility
-    if 'air_velocity' in episode_log['infos'][0][0].keys():
+    if 'air_velcity' in episode_log['infos'][0][0].keys():
         traj_df['air_velocity'] = [ record[0]['air_velcity'] for record in episode_log['infos']]
     # else:
         # print("air_velocity not found in episode_log['infos'][0][0].keys() Could be looking at an older log file. May or may not be a problem.")
@@ -676,8 +677,10 @@ def get_traj_df_tmp(episode_log,
         act.columns = ['step', 'turn']
         traj_df['step'] = act['step']
         traj_df['turn'] = act['turn']
+        traj_df['angular_velocity'] = [record[0]['ang_vel'] for record in episode_log['infos']]
     elif act.shape[1] == 3:
         act.columns = ['T_par', 'T_perp', 'tau']
+        traj_df['angular_velocity'] = [record[0]['ang_vel'] for record in episode_log['infos']]
     traj_df['stray_distance'] = [record[0]['stray_distance'] for record in episode_log['infos']]
     # Observation derived
     traj_df['odor_raw'] = obs['odor'] # added for open loop perturbation analysis - do not rectify
@@ -716,34 +719,34 @@ def get_traj_df_tmp(episode_log,
         # traj_df['odor_cummax'] = traj_df['odor_obs'].cummax()
         # traj_df['odor_cummax'] = rescale_col(traj_df['odor_cummax']) 
 
-        # Add a range of ENC (encounters)
-        for j in np.arange(2, n_history, step=2):
-            j = int(j)
-            colname = f'odor_enc_{j}'
-            traj_df[colname] = traj_df['odor_01'].diff().fillna(0).clip(lower=0).ewm(span=j).mean()*25
-            # traj_df[colname] = traj_df['odor_01'].diff().fillna(0).clip(lower=0).rolling(j).mean()*25
-            # traj_df[colname] = traj_df['odor_01'].diff().fillna(0).clip(lower=0).ewm(span=j).mean()*25
+        # # Add a range of ENC (encounters)
+        # for j in np.arange(2, n_history, step=2):
+        #     j = int(j)
+        #     colname = f'odor_enc_{j}'
+        #     traj_df[colname] = traj_df['odor_01'].diff().fillna(0).clip(lower=0).ewm(span=j).mean()*25
+        #     # traj_df[colname] = traj_df['odor_01'].diff().fillna(0).clip(lower=0).rolling(j).mean()*25
+        #     # traj_df[colname] = traj_df['odor_01'].diff().fillna(0).clip(lower=0).ewm(span=j).mean()*25
 
-        # Add a range of EWM
-        traj_df['odor_ewm'] = traj_df['odor_clip'].ewm(span=15).mean()
-        # traj_df['odor_ewm'] = rescale_col(traj_df['odor_ewm']) 
-        for j in np.arange(2, n_history, step=2):
-            j = int(j)
-            colname = f'odor_ewm_{j}'
-            traj_df[colname] = traj_df['odor_clip'].ewm(span=j).mean()
-            # traj_df[colname] = traj_df['odor_clip'].ewm(span=j).mean()
-            # traj_df[colname] = traj_df['odor_01'].ewm(span=j).mean()
-            # traj_df[colname + '_norm'] = rescale_col(traj_df[colname]) 
+        # # Add a range of EWM
+        # traj_df['odor_ewm'] = traj_df['odor_clip'].ewm(span=15).mean()
+        # # traj_df['odor_ewm'] = rescale_col(traj_df['odor_ewm']) 
+        # for j in np.arange(2, n_history, step=2):
+        #     j = int(j)
+        #     colname = f'odor_ewm_{j}'
+        #     traj_df[colname] = traj_df['odor_clip'].ewm(span=j).mean()
+        #     # traj_df[colname] = traj_df['odor_clip'].ewm(span=j).mean()
+        #     # traj_df[colname] = traj_df['odor_01'].ewm(span=j).mean()
+        #     # traj_df[colname + '_norm'] = rescale_col(traj_df[colname]) 
 
-        # Add a range of MA
-        traj_df['odor_ma'] = traj_df['odor_clip'].rolling(15).mean()
-        # traj_df['odor_ma_norm'] = rescale_col(traj_df['odor_ma']) 
-        for j in np.arange(2, n_history, step=2):
-            j = int(j)
-            colname = f'odor_ma_{j}'
-            traj_df[colname] = traj_df['odor_clip'].rolling(j).mean()
-            # traj_df[colname] = traj_df['odor_01'].rolling(j).mean()
-            # traj_df[colname + '_norm'] = rescale_col(traj_df[colname]) 
+        # # Add a range of MA
+        # traj_df['odor_ma'] = traj_df['odor_clip'].rolling(15).mean()
+        # # traj_df['odor_ma_norm'] = rescale_col(traj_df['odor_ma']) 
+        # for j in np.arange(2, n_history, step=2):
+        #     j = int(j)
+        #     colname = f'odor_ma_{j}'
+        #     traj_df[colname] = traj_df['odor_clip'].rolling(j).mean()
+        #     # traj_df[colname] = traj_df['odor_01'].rolling(j).mean()
+        #     # traj_df[colname + '_norm'] = rescale_col(traj_df[colname]) 
         
         # Add a range of MA wind direction - wind doesn't change often enough for this to be interesting
         for j in np.arange(2, n_history, step=2):
@@ -769,13 +772,13 @@ def get_traj_df_tmp(episode_log,
             'loc_x', 
             'loc_y', 
             'wind_theta_obs', # wind input to the model... depends on the experiment
-            'odor_obs', 
-            'odor_01',
-            'odor_clip', 
-            'odor_lastenc', 
-            'radius', 
-            'stray_distance',
-            'r_step', 
+            # 'odor_obs', 
+            # 'odor_01',
+            # 'odor_clip', 
+            # 'odor_lastenc', 
+            # 'radius', 
+            # 'stray_distance',
+            # 'r_step', 
             # 'agent_angle_ground_theta', # discontinuous - not useful for diff
             'wind_speed_ground',
             'wind_angle_ground_theta' # discontinuous, but ok since limited to first/fourth quadrant
@@ -851,7 +854,6 @@ def get_episode_metadata(log, odor_threshold=ODOR_THRESHOLD, squash_action=False
 
 def get_wind_module_outputs(log):
     df_act = pd.DataFrame(log['activity'])
-    print(f"Activity columns: {df_act.columns}")
 
     def stack_2d(key):
         arr = np.stack(df_act[key].to_list())  # (T, B, 2)
