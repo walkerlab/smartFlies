@@ -188,6 +188,7 @@ def main():
     parser.add_argument('--no_viz', type=bool, default=True)
     parser.add_argument('--fixed_eval', action='store_true', default=False)
     parser.add_argument('--test_sparsity', action='store_true', default=False)
+    parser.add_argument('--only_test_sparsity', action='store_true', default=False)
     parser.add_argument('--no_vec_norm_stats', action='store_true', default=False)
     parser.add_argument('--dry_run', action='store_true', default=False)
     parser.add_argument('--mlflow', type=bool, default=False)
@@ -229,7 +230,10 @@ def main():
     # env_setting = ['apparent_wind', 'action_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'rotate_by', 'visual_feedback'] # just keep rotate_by off for now
     #'ou_eval' set to true
     args = apply_configs(args, train_cfg, keys=agent_setting + env_setting)
-    
+    print("\n" + "=" * 100)
+    print("Proceeding to evaluation with args:")
+    print(args)
+    print("=" * 100 + "\n")
     if args.show_matching:
         in_both  = sorted(set(train_cfg) & set(eval_defaults))
         matching = [k for k in in_both if eval_defaults[k] == train_cfg[k]]

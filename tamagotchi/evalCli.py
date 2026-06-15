@@ -200,97 +200,99 @@ def evaluate_agent(actor_critic, env, args):
 
 ### BACK TO MAIN ###
 def eval_loop(args, actor_critic, test_sparsity=True):
-    try:
-        # Extract default values from __init__ method
-        init_signature_vis_fb_params = inspect.signature(PlumeEnvironment_v3.__init__)
-        init_signature = inspect.signature(PlumeEnvironment_v2.__init__)
-        defaults = {param.name: param.default for param in init_signature.parameters.values() if param.default != inspect.Parameter.empty}
-        defaults.update({param.name: param.default for param in init_signature_vis_fb_params.parameters.values() if param.default != inspect.Parameter.empty})
-        # Write into args if not already present
-        for key, value in defaults.items():
-            if not hasattr(args, key):
-                setattr(args, key, value)
-        if not args.no_vec_norm_stats:
-            vecNormalize_pkl_file = args.model_fname.replace('.pt', '_vecNormalize.pkl')
-            kwargs = {'vecNormalize_pkl_file': vecNormalize_pkl_file, 'eval': True} # init settings file path and mode eval to be true 
-            print(f"Loading vecNormalize stats from {vecNormalize_pkl_file}")
-        else:
-            kwargs = {}
-        #### ------- Nonsparse ------- #### 
-        env = make_vec_envs(
-            args.env_name,
-            args.seed + 1000,
-            num_processes=1,
-            gamma=0.99, # redundant
-            log_dir=None, # redundant
-            # device='cpu',
-            device=args.device,
-            args=args,
-            allow_early_resets=False,
-            **kwargs
-            )
+    # Extract default values from __init__ method
+    init_signature_vis_fb_params = inspect.signature(PlumeEnvironment_v3.__init__)
+    init_signature = inspect.signature(PlumeEnvironment_v2.__init__)
+    defaults = {param.name: param.default for param in init_signature.parameters.values() if param.default != inspect.Parameter.empty}
+    defaults.update({param.name: param.default for param in init_signature_vis_fb_params.parameters.values() if param.default != inspect.Parameter.empty})
+    # Write into args if not already present
+    for key, value in defaults.items():
+        if not hasattr(args, key):
+            setattr(args, key, value)
+    if not args.no_vec_norm_stats:
+        vecNormalize_pkl_file = args.model_fname.replace('.pt', '_vecNormalize.pkl')
+        kwargs = {'vecNormalize_pkl_file': vecNormalize_pkl_file, 'eval': True} # init settings file path and mode eval to be true 
+        print(f"Loading vecNormalize stats from {vecNormalize_pkl_file}")
+    else:
+        kwargs = {}
+        
+    if not args.only_test_sparsity:
+        try:
+            #### ------- Nonsparse ------- #### 
+            env = make_vec_envs(
+                args.env_name,
+                args.seed + 1000,
+                num_processes=1,
+                gamma=0.99, # redundant
+                log_dir=None, # redundant
+                # device='cpu',
+                device=args.device,
+                args=args,
+                allow_early_resets=False,
+                **kwargs
+                )
 
-        if 'switch' in args.dataset: 
-            venv = env.unwrapped.envs[0].venv
-            venv.qvar = 0.0
-            venv.t_val_min = 58.0
-            venv.reset_offset_tmax = 3.0
-            venv.diff_max = 0.9
-            venv.reload_dataset()
+            if 'switch' in args.dataset: 
+                venv = env.unwrapped.envs[0].venv
+                venv.qvar = 0.0
+                venv.t_val_min = 58.0
+                venv.reset_offset_tmax = 3.0
+                venv.diff_max = 0.9
+                venv.reload_dataset()
 
-        episode_logs, episode_summaries = evaluate_agent(actor_critic, env, args)
-        # save the logs
-        fname3 = f"{args.abs_out_dir}/{args.dataset}.pkl"
-        with open(fname3, 'wb') as f_handle:
-            pickle.dump(episode_logs, f_handle)
+            episode_logs, episode_summaries = evaluate_agent(actor_critic, env, args)
+            # save the logs
+            fname3 = f"{args.abs_out_dir}/{args.dataset}.pkl"
+            with open(fname3, 'wb') as f_handle:
+                pickle.dump(episode_logs, f_handle)
+                print("Saving", fname3)
+            if args.mlflow:
+                mlflow.log_artifact(fname3)
+
+            fname3 = f"{args.abs_out_dir}/{args.dataset}_summary.csv"
+            pd.DataFrame(episode_summaries).to_csv(fname3)
             print("Saving", fname3)
-        if args.mlflow:
-            mlflow.log_artifact(fname3)
+            if args.mlflow:
+                mlflow.log_artifact(fname3)
+            # graph_abs_out_dir = f"{args.abs_out_dir}/eg_trajectory/"
+            if not args.no_viz:
+                zoom = 1 if 'constant' in args.dataset else 2    
+                zoom = 3 if args.walking else zoom
+                agent_analysis.visualize_episodes(episode_logs[:args.viz_episodes], 
+                                                zoom=zoom, 
+                                                dataset=args.dataset,
+                                                animate=True, # Quick plot
+                                                fprefix=args.dataset,
+                                                diffusionx=args.diffusionx,
+                                                abs_out_dir=args.abs_out_dir
+                                                )
 
-        fname3 = f"{args.abs_out_dir}/{args.dataset}_summary.csv"
-        pd.DataFrame(episode_summaries).to_csv(fname3)
-        print("Saving", fname3)
-        if args.mlflow:
-            mlflow.log_artifact(fname3)
-        # graph_abs_out_dir = f"{args.abs_out_dir}/eg_trajectory/"
-        if not args.no_viz:
-            zoom = 1 if 'constant' in args.dataset else 2    
-            zoom = 3 if args.walking else zoom
-            agent_analysis.visualize_episodes(episode_logs[:args.viz_episodes], 
-                                            zoom=zoom, 
-                                            dataset=args.dataset,
-                                            animate=True, # Quick plot
-                                            fprefix=args.dataset,
-                                            diffusionx=args.diffusionx,
-                                            abs_out_dir=args.abs_out_dir
-                                            )
+            # for episode_idx in range(len(episode_logs[:args.viz_episodes])):
+            #     log = episode_logs[episode_idx]
+            #     if actor_critic.is_recurrent:
+            #         ep_activity = pd.DataFrame(log['activity'])['rnn_hxs'].to_list()
+            #     else:
+            #         ep_activity = pd.DataFrame(log['activity'])['hx1_actor'].to_list()
 
-        # for episode_idx in range(len(episode_logs[:args.viz_episodes])):
-        #     log = episode_logs[episode_idx]
-        #     if actor_critic.is_recurrent:
-        #         ep_activity = pd.DataFrame(log['activity'])['rnn_hxs'].to_list()
-        #     else:
-        #         ep_activity = pd.DataFrame(log['activity'])['hx1_actor'].to_list()
+            #     traj_df = pd.DataFrame( log['trajectory'] )
+            #     traj_df['t_val'] = [record[0]['t_val'] for record in log['infos']]
+            #     log_analysis.animate_activity_1episode(ep_activity, 
+            #             traj_df, 
+            #             episode_idx, 
+            #             fprefix=args.dataset,
+            #             abs_out_dir=abs_out_dir,
+            #             pca_dims=3)
 
-        #     traj_df = pd.DataFrame( log['trajectory'] )
-        #     traj_df['t_val'] = [record[0]['t_val'] for record in log['infos']]
-        #     log_analysis.animate_activity_1episode(ep_activity, 
-        #             traj_df, 
-        #             episode_idx, 
-        #             fprefix=args.dataset,
-        #             abs_out_dir=abs_out_dir,
-        #             pca_dims=3)
-
-    except Exception as e:
-        print(f"Exception: {e}")
-        traceback.print_exc()
+        except Exception as e:
+            print(f"Exception: {e}")
+            traceback.print_exc()
 
     #### ------- Sparse ------- #### #### ------- Sparse ------- #### #### ------- Sparse ------- #### #### ------- Sparse ------- #### 
-    if test_sparsity:
+    if test_sparsity or args.only_test_sparsity:
         # x = np.linspace(0.9, 0.1, 5)
         # y = np.array([0.05, 0.01, 0.005, 0.001, 0.0005])
         # z = np.concatenate((x,y))
-        z = np.linspace(0.7, 0.1, 3)
+        z = np.linspace(0.7, 0.1, 4)
         # for birthx in np.arange(0.9, 0.1, -0.05):
         for birthx in z:
             birthx = round(birthx, 4)
@@ -327,19 +329,19 @@ def eval_loop(args, actor_critic, test_sparsity=True):
                 if args.mlflow:
                     mlflow.log_artifact(fname3)
 
-                if not args.no_viz:
-                    zoom = 1 if 'constant' in args.dataset else 2    
-                    zoom = 3 if args.walking else zoom
-                    if birthx in [0.1, 0.05, 0.001]:
-                        agent_analysis.visualize_episodes(episode_logs[:args.viz_episodes], 
-                            zoom=zoom, 
-                            dataset=args.dataset,
-                            animate=True,
-                            fprefix=f'sparse_{args.dataset}_{birthx}', 
-                            abs_out_dir=args.abs_out_dir,
-                            diffusionx=args.diffusionx,
-                            birthx=birthx,
-                            )
+                # if not args.no_viz:
+                #     zoom = 1 if 'constant' in args.dataset else 2    
+                #     zoom = 3 if args.walking else zoom
+                #     if birthx in [0.1, 0.05, 0.001]:
+                #         agent_analysis.visualize_episodes(episode_logs[:args.viz_episodes], 
+                #             zoom=zoom, 
+                #             dataset=args.dataset,
+                #             animate=True,
+                #             fprefix=f'sparse_{args.dataset}_{birthx}', 
+                #             abs_out_dir=args.abs_out_dir,
+                #             diffusionx=args.diffusionx,
+                #             birthx=birthx,
+                #             )
 
                 # for episode_idx in range(len(episode_logs[:args.viz_episodes])):
                 #     log = episode_logs[episode_idx]
@@ -381,6 +383,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--fixed_eval', action='store_true', default=False)
     parser.add_argument('--test_sparsity', action='store_true', default=False)
+    parser.add_argument('--only_test_sparsity', action='store_true', default=False)
     parser.add_argument('--device', default="cuda:0")
     
     # env related
@@ -414,7 +417,6 @@ if __name__ == "__main__":
     
     args.rotate_by = None if not args.rotate_by else args.rotate_by # convert to None if False
         
-    print(args)
     args.det = True # override
 
     np.random.seed(args.seed)
@@ -460,7 +462,8 @@ if __name__ == "__main__":
 
     args.abs_out_dir = '/'.join([exp_dir, args.out_dir, args.f_prefix]) # {/path/to/experiment}/{args.out_dir=eval}/plume_seed_hash/
     
-    print(f"Output directory: {args.abs_out_dir}")
+    print(f"Output directory here: {args.abs_out_dir}")
+    print("evalCli args:", args, flush=True)
     # make sure the directory exists
     os.makedirs('/'.join([exp_dir, args.out_dir]), exist_ok=True)
     os.makedirs(args.abs_out_dir, exist_ok=True)
