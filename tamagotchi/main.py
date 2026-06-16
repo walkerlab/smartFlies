@@ -468,32 +468,45 @@ def main(args=None):
                         envs.observation_space.shape, envs.action_space,
                         actor_critic.recurrent_hidden_state_size)
     
-    # Staged runs search for the original wandb run in the PARENT's project so the run_id is found.
-    # Non-staged runs use their own experiment_name as the wandb project.
-    if args.staged_training and args.parent_experiment_name:
-        experiment_name = args.parent_experiment_name
-    else:
-        experiment_name = os.path.basename(os.path.dirname(args.save_dir))
+    # Determine experiment and run behavior:
+    # - Same experiment as parent → staged continuation: log to parent experiment, reuse existing run
+    # - Different experiment (branch-off) → fresh run in own experiment (save_dir already points there via Hydra)
+    own_experiment = os.path.basename(os.path.dirname(args.save_dir))
+    is_branch_off = (args.staged_training and args.parent_experiment_name
+                     and own_experiment != args.parent_experiment_name)
+    experiment_name = own_experiment
     run_name = args.outsuffix   # same for all stages — identifies the wandb run
-        
+
+    print(f"[staged training check] save_dir       = {args.save_dir}")
+    print(f"[staged training check] chkpt_fpath    = {args.chkpt_fpath}")
+    print(f"[staged training check] experiment     = {experiment_name}")
+    print(f"[staged training check] run_name       = {run_name}")
+    print(f"[staged training check] is_branch_off  = {is_branch_off}")
+
     if args.mlflow:
         mlflow.set_tracking_uri(uri="https://dev0.uwcnc.net/mlflow/")
         mlflow.set_system_metrics_sampling_interval(3600)
         mlflow.set_experiment(experiment_name)
         # Start an MLflow run
-        run_object = mlflow.search_runs(filter_string=f"attributes.run_name = '{run_name}'")
         run_params = {}
-        if len(run_object) > 0:
-            # Run exists - use its run_id
-            run_id = run_object.iloc[0]["run_id"]
-            run_params['run_id'] = run_id
-            run_params['log_system_metrics'] = True
-            print(f"Continuing existing run: {run_name} (ID: {run_id})")
-        else:
-            # Run doesn't exist - use run_name
+        if is_branch_off:
+            # Branch-off: always start a fresh run in the new experiment
             run_params['run_name'] = run_name
             run_params['log_system_metrics'] = True
-            print(f"Starting new run: {run_name}")
+            print(f"Branch off: starting new run '{run_name}' in experiment '{experiment_name}'")
+        else:
+            run_object = mlflow.search_runs(filter_string=f"attributes.run_name = '{run_name}'")
+            if len(run_object) > 0:
+                # Run exists - use its run_id
+                run_id = run_object.iloc[0]["run_id"]
+                run_params['run_id'] = run_id
+                run_params['log_system_metrics'] = True
+                print(f"Continuing existing run: {run_name} (ID: {run_id})")
+            else:
+                # Run doesn't exist - use run_name
+                run_params['run_name'] = run_name
+                run_params['log_system_metrics'] = True
+                print(f"Starting new run: {run_name}")
 
         # Single block using the appropriate parameters
         run_params['dir'] = args.save_dir
