@@ -7,15 +7,35 @@
 #
 # Cancel all your jobs: squeue -u $USER -h | awk '{print $1}' | xargs scancel
 
+
+# Staged training after conti
 # python3 scripts/slurm-run_ckpt.py \
 #   --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ \
 #   --stage_name noisy \
 #   --substr 4deaf7e9 \
 #   --override "action_physics=force OU_exploration=off experiment_name=force_physics_uncertainty 'r_shaping=[step,missed_time_cost,rotate_by,birthx_cl_last,cosine]' loc_algo=linear_precise num_env_steps=7200000 precise_max=[1] precise_max=[6] variant=wind_obsver_v1 'dataset=[noisy_jitterx5b5]' path.curriculum_name=060226_noisy_jitter" 
 
+# Drone finetune
+# python3 scripts/slurm-run_ckpt.py \
+#   --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ \
+#   --time 0-04:00:00 \
+#   --stage_name drone_physics \
+#   --override "action_physics=force OU_exploration=off experiment_name=drone_physics r_shaping=[step,missed_time_cost,rotate_by,birthx_cl_last,cosine] loc_algo=linear_precise num_env_steps=4000000 precise_min=[1] precise_max=[6] variant=wind_obsver_v1 dataset=[noisy_jitterx5b5] path.curriculum_name=061626_noisy_jitter_dron_finetune" \
+#   --substr seed-4-4deaf7e9_stage
+#   --dry_run \
+
+# for seed in 4 6 7 9 10 11 21 24 29 30; do
+#     python3 scripts/slurm-run_ckpt.py \
+#         --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ \
+#         --time 0-04:00:00 \
+#         --stage_name drone_physics_dt01 \
+#         --override "env_dt=0.1 action_physics=force OU_exploration=off experiment_name=drone_physics_dt01 r_shaping=[step,missed_time_cost,rotate_by,birthx_cl_last,cosine] loc_algo=linear_precise num_env_steps=4000000 precise_min=[1] precise_max=[6] variant=wind_obsver_v1 dataset=[noisy_jitterx5b5] path.curriculum_name=061626_noisy_jitter_dron_finetune" \
+#         --substr "seed-${seed}-4deaf7e9_stage" \
+#         --dry_run
+# done
 
 '''
-python3 /gscratch/portia/jqhu/work/active_sensing/smartFlies/scripts/slurm-run_ckpt.py --dry_run --config config_control_noCL --n_seeds 30 --override "action_physics=force OU_exploration=off experiment_name=CTL_noCL 'r_shaping=[step,missed_time_cost,rotate_by]' num_env_steps=10800000 variant=wind_obsver_v1"
+python3 /gscratch/portia/jqhu/work/active_sensing/smartFlies/scripts/slurm-run_ckpt.py --dry_run --config config_control_noCL --n_seeds 30 dry_run--override "action_physics=force OU_exploration=off experiment_name=CTL_noCL 'r_shaping=[step,missed_time_cost,rotate_by]' num_env_steps=10800000 variant=wind_obsver_v1"
 '''
 
 import argparse
@@ -100,11 +120,12 @@ python3 -u -m tamagotchi.main_hydra \\
     safe_override = re.sub(r'[^A-Za-z0-9_\-]', '_', override)[:60]
     script_path = os.path.join(OUTFILES_DIR, f'submit_{config_name}_{safe_override}.sh')
     if not dry_run:
-        print(f'Dry run: Would create script at {script_path}')
         with open(script_path, 'w') as f:
             f.write(script)
         job_id = slurm_submit(script_path)
         print(f'Submitted job {job_id}')
+    else:
+        print(f'Dry run: Would create script at {script_path}')
 
 
 def main():
@@ -164,7 +185,7 @@ def main():
         pattern = os.path.join(args.from_folder, 'weights', 'plume_seed-*.pt')
         pt_files = sorted(glob.glob(pattern))
         pt_files = [f for f in pt_files
-                    if re.search(r'seed-\d+-[0-9a-f]{8}(\.chkpt)?\.pt$', f)
+                    if re.search(r'seed-\d+-[0-9a-f]{8}(_stage_[0-9a-f]{8})?(\.chkpt)?\.pt$', f)
                     and not f.endswith('_vecNormalize.pkl')
                     and (not args.substr or args.substr in os.path.basename(f))]
         if not pt_files:
