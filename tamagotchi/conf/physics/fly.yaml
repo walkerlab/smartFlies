@@ -1,0 +1,11 @@
+# Physics coefficients for the 'force' action_physics mode — ~1 mg fly model.
+# SI units. Thrust reaches ~2 m/s steady-state in still air.
+
+T_para_max: 6.0e-5    # N, parallel (forward/back, body frame)
+T_perp_max: 2.0e-5    # N, perpendicular (lateral, body frame)
+tau_max: 3.0e-10      # N*m, yaw torque (ccw positive)
+mass: 1.0e-6          # kg
+drag: 3.0e-5          # N*s/m, linear drag on airspeed
+inertia: 5.0e-13      # kg*m^2
+k_rot: 2.0e-11        # N*m*s, rotational drag
+physics_substeps: 4   # zero-order-hold substeps per env step
