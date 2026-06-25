@@ -148,8 +148,12 @@ def rotate_wind_optimized(data_wind, rotation_angle_degrees, mirror):
             # Mirror along the long side
             wind_x_new = -wind_x_new
     else:
-        raise ValueError(f"Unsupported rotation angle: {rotation_angle_degrees}. "
-                        "Supported angles are: [0, 90, 180, -90]")
+        theta = np.deg2rad(rotation_angle_degrees)
+        c, s = np.cos(theta), np.sin(theta)
+        wind_x_new = c * wind_rotated['wind_x'] - s * wind_rotated['wind_y']
+        wind_y_new = s * wind_rotated['wind_x'] + c * wind_rotated['wind_y']
+        if mirror:
+            wind_x_new = -wind_x_new
     
     wind_rotated['wind_x'] = wind_x_new
     wind_rotated['wind_y'] = wind_y_new
@@ -161,6 +165,7 @@ def rotate_puffs_optimized(data_puffs, rotation_angle_degrees, mirror):
     """
     Rotate puff locations by specified angle around origin.
     Optimized for angles: [0, 90, 180, -90] degrees, or None.
+    Used when making the traj vis and another copy of this in the env obj
     
     Parameters:
     -----------
@@ -210,9 +215,13 @@ def rotate_puffs_optimized(data_puffs, rotation_angle_degrees, mirror):
             # Mirror along the long side
             x_new = -x_new
     else:
-        raise ValueError(f"Unsupported rotation angle: {rotation_angle_degrees}. "
-                        "Supported angles are: [0, 90, 180, -90]")
-    
+        theta = np.deg2rad(rotation_angle_degrees)
+        c, s = np.cos(theta), np.sin(theta)
+        wind_x_new = c * puffs_rotated['wind_x'] - s * puffs_rotated['wind_y']
+        wind_y_new = s * puffs_rotated['wind_x'] + c * puffs_rotated['wind_y']
+        if mirror:
+            wind_x_new = -wind_x_new
+
     puffs_rotated['x'] = x_new
     puffs_rotated['y'] = y_new
     
@@ -346,7 +355,10 @@ def get_concentration_at_tidx(data, tidx, x_val, y_val, rotate_by=0, mirror=Fals
         #     ax.legend()
         #     fig.savefig('/src/tamagotchi/puffs_and_wind_vectors_initial.png')
     else:
-        d = data[data.tidx==tidx].query(q)
+        try:
+            d = data[data.tidx==tidx].query(q)
+        except Exception as e:
+            raise ValueError(f"Error occurred while querying data for tidx {tidx}: {e}; query: {q}")
     return d.concentration.sum()
 
 def cleanup_log_dir(log_dir):
