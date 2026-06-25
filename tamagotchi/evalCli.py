@@ -46,14 +46,23 @@ def evaluate_agent(actor_critic, env, args):
         for venv.fixed_x in [4.0, 6.0, 8.0]:
           for venv.fixed_time_offset in args.time_offsets: # time_offset(s)
             env.reset()
-
-            # Figure out extent of plume in y-direction
-            Z = venv.get_abunchofpuffs()
+            Yqs = [np.nan, np.nan]
             X_mean, X_var = venv.fixed_x, 0.5 # fixed_x +/- band
-            Z = pd.DataFrame(Z)
-            Yqs = Z.query("(x >= (@X_mean - @X_var)) and (x <= (@X_mean + @X_var))")['y'].quantile([0.0,1.0]).to_numpy()
-            y_min, y_max = Yqs[0], Yqs[1]
+            # resample the plume up to 3 time if there's nan in Yqs
+            for _ in range(3):
+                if np.isnan(Yqs).any():
+                    Z = venv.get_abunchofpuffs()
+                    Z = pd.DataFrame(Z)
+                    Yqs = Z.query("(x >= (@X_mean - @X_var)) and (x <= (@X_mean + @X_var))")['y'].quantile([0.0,1.0]).to_numpy()
+                    if not _:
+                        print(f"[{_}] venv {venv.fixed_x}, {venv.fixed_time_offset}: {Z['y'].min()}, {Z['y'].max()}, Yqs: {Yqs}")
+                else:
+                    break
 
+            y_min, y_max = Yqs[0], Yqs[1]
+            if np.isnan(y_min) or np.isnan(y_max):
+                raise ValueError(f"Failed to determine plume extent. {venv.fixed_x}, {venv.fixed_time_offset}")
+            
             y_stray = 0.5
             # y coordinate depends on the dataset
             if ('switch' in args.dataset) or ('noisy' in args.dataset):
@@ -79,7 +88,9 @@ def evaluate_agent(actor_critic, env, args):
         grid = pd.concat(grids).to_numpy() # Stack
         args.test_episodes = grid.shape[0]  # TODO HACK test_episodes never used. Take this out or make functional.
         print(f"Using fixed evaluation sequence [time, angle, loc_y]... ({args.test_episodes} episodes) ")
-
+        # check for nans
+        if np.isnan(grid).any():
+            raise ValueError("Found NaN values in the evaluation grid.")
     if args.perturb_RNN_by:
         if args.perturb_RNN_by:
             if args.perturb_RNN_by == 'subspace' or args.perturb_RNN_by == 'nullspace':
@@ -292,7 +303,7 @@ def eval_loop(args, actor_critic, test_sparsity=True):
         # x = np.linspace(0.9, 0.1, 5)
         # y = np.array([0.05, 0.01, 0.005, 0.001, 0.0005])
         # z = np.concatenate((x,y))
-        z = np.linspace(0.7, 0.1, 4)
+        z = np.linspace(0.7, 0.1, 4)[:-1]
         # for birthx in np.arange(0.9, 0.1, -0.05):
         for birthx in z:
             birthx = round(birthx, 4)
