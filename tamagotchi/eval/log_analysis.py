@@ -681,6 +681,9 @@ def get_traj_df_tmp(episode_log,
     elif act.shape[1] == 3:
         act.columns = ['T_par', 'T_perp', 'tau']
         traj_df['angular_velocity'] = [record[0]['ang_vel'] for record in episode_log['infos']]
+        traj_df['T_par'] = act['T_par']
+        traj_df['T_perp'] = act['T_perp']
+        traj_df['tau'] = act['tau']
     traj_df['stray_distance'] = [record[0]['stray_distance'] for record in episode_log['infos']]
     # Observation derived
     traj_df['odor_raw'] = obs['odor'] # added for open loop perturbation analysis - do not rectify
