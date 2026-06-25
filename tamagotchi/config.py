@@ -121,32 +121,32 @@ env = {
 # rigid-body dynamics with substeps. SI units; defaults give a ~1 mg fly with
 # boosted thrust reaching ~2 m/s in still air. control_rate is taken from the
 # env's own dt (1/env_dt), and wind is supplied by the plume data (not modeled here).
-# force_physics = {
-# 	# control limits (thrust forces / yaw torque)
-# 	'T_para_max':   6.0e-5,    # N, parallel (forward/back, body frame)
-# 	'T_perp_max':   2.0e-5,    # N, perpendicular (lateral, body frame)
-# 	'tau_max':      3.0e-10,   # N*m, yaw torque (ccw positive)
-# 	# translation
-# 	'mass':         1.0e-6,    # kg
-# 	'drag':         3.0e-5,    # N*s/m, linear drag acting on airspeed
-# 	# rotation
-# 	'inertia':      5.0e-13,   # kg*m^2
-# 	'k_rot':        2.0e-11,   # N*m*s, rotational drag
-# 	# numerics
-# 	'physics_substeps': 4,     # zero-order-hold substeps per env step
-# }
+force_physics = {
+	'T_para_max':   6.0e-5,    # N, parallel (forward/back, body frame)
+	# control limits (thrust forces / yaw torque)
+	'T_perp_max':   2.0e-5,    # N, perpendicular (lateral, body frame)
+	'tau_max':      3.0e-10,   # N*m, yaw torque (ccw positive)
+	# translation
+	'mass':         1.0e-6,    # kg
+	'drag':         3.0e-5,    # N*s/m, linear drag acting on airspeed
+	# rotation
+	'inertia':      5.0e-13,   # kg*m^2
+	'k_rot':        2.0e-11,   # N*m*s, rotational drag
+	# numerics
+	'physics_substeps': 4,     # zero-order-hold substeps per env step
+}
 
 # drone numbers - turned on mannually 
-force_physics = {
-    'T_para_max':   6.0e-5,    # fwd v_ss = 2.0 m/s (unchanged)
-    'T_perp_max':   2.0e-5,    # lat v_ss = 0.67 m/s (unchanged)
-    'tau_max':      8.0e-11,   # yaw_rate_ss = 229 deg/s  (was 859; drone max 238)
-    'mass':         6.0e-6,    # peak lin accel = 10 m/s² (was 60; drone 6–18)
-    'drag':         3.0e-5,
-    'inertia':      1.0e-12,   # peak ang accel = 4584 deg/s² (was 34k; drone 3.6–5.4k)
-    'k_rot':        2.0e-11,
-    'physics_substeps': 4,
-}
+# force_physics = {
+#     'T_para_max':   3.0e-5,    # fwd v_ss = 2.0 m/s (unchanged)
+#     'T_perp_max':   2.0e-5,    # lat v_ss = 0.67 m/s (unchanged)
+#     'tau_max':      8.0e-11,   # yaw_rate_ss = 229 deg/s  (was 859; drone max 238)
+#     'mass':         6.0e-6,    # peak lin accel = 10 m/s² (was 60; drone 6–18)
+#     'drag':         3.0e-5,
+#     'inertia':      1.0e-12,   # peak ang accel = 4584 deg/s² (was 34k; drone 3.6–5.4k)
+#     'k_rot':        2.0e-11,
+#     'physics_substeps': 4,
+# }
 
 
 # for data_utils.plot_artifacts
