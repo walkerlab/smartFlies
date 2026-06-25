@@ -12,6 +12,7 @@ import sys
 import numpy as np
 
 import argparse
+import hashlib
 import json
 from setproctitle import setproctitle as ptitle
 
@@ -157,9 +158,13 @@ def get_args():
         help="Action space: 'air_vel_angvel' (forward air speed + angular velocity, wind drifts the agent), "
              "'ground_vel_angvel' (forward ground speed + angular velocity, no wind drift), "
              "or 'force' (body-frame thrust + yaw torque, rigid-body dynamics integrated from config.force_physics)")
+    parser.add_argument('--stage_name', type=str, default='',
+        help='name identifying this training stage; triggers staged training when non-empty')
+    parser.add_argument('--resume_from', type=str, default='',
+        help='path to parent stage checkpoint (.chkpt.pt) to load weights from at fresh stage start')
     args = parser.parse_args()
-    assert len(args.dataset) == len(args.qvar) 
-    assert len(args.dataset) == len(args.diff_max) 
+    assert len(args.dataset) == len(args.qvar)
+    assert len(args.dataset) == len(args.diff_max)
     assert len(args.dataset) == len(args.diff_min) 
     # args.cuda = not args.no_cuda and 
     cuda_available = torch.cuda.is_available()
