@@ -8,7 +8,6 @@ import socket
 MACHINE = socket.gethostname().lower()
 curr_wd = os.getcwd()
 # datadir = '/src/data/performance_plot_data_code/collection_1/'
-# datadir = '/src/data/performance_plot_data_code/lawrence/' # for running Toha comparison experiments
 if 'gscratch' in curr_wd and 'walkerlab' in curr_wd:
     datadir = '/gscratch/walkerlab/jqhu/smartFlies/data/published_results/reproduce/'
 elif 'gscratch' in curr_wd and 'portia' in curr_wd:
@@ -17,6 +16,7 @@ elif '/src' in curr_wd:
     datadir = '/src/data/published_results/reproduce/'
 else:
 	raise ValueError(f'Unrecognized gscratch path: {curr_wd}')
+# datadir = '/src/data/performance_plot_data_code/lawrence/' # for running Toha comparison experiments
 
 # print(f'Using datadir: {datadir}', flush=True)
 # if MACHINE == 'mycroft':
@@ -97,7 +97,7 @@ env = {
 	# 'reset_offset_tmax': 25.00, # seconds
 	# 'homed_radius': 0.2, # meters
 	# 'stray_distance': 2.0, # meters
-    'odor_threshold': 0.0001, # arbit units
+    'odor_threshold': 0.0001 if 'performance_plot_data_code' not in curr_wd else 1e-8, # arbit units
     # 'odor_threshold': 1e-8, # arbit units
 	'arena_bounds': {
 		'x_min':-5, 
