@@ -89,10 +89,9 @@ def visualize_single_episode(data_puffs, data_wind, traj_df,
     episode_idx, zoom=1, t_val=None, title_text=None, output_fname=None, 
     show=True, colorby=None, vmin=0, vmax=1, plotsize=None, xlims=None, ylims=None, legend=True,
     invert_colors=False, kwargs={}):
+    scatter_size = 15
     if 'scatter_size' in kwargs.keys():
-        if kwargs['scatter_size'] is None:
-            scatter_size = 15
-        else:
+        if kwargs['scatter_size'] is not None:
             scatter_size = kwargs['scatter_size']
 
     plotsize = (8,8) if plotsize is None else plotsize
@@ -227,23 +226,173 @@ def visualize_single_episode(data_puffs, data_wind, traj_df,
     return fig, ax
 
 
+def visualize_single_episode_no_subset(data_puffs, data_wind, traj_df,
+    episode_idx=None, title_text=None, output_fname=None,
+    show=True, colorby=None, vmin=0, vmax=1, plotsize=None, xlims=None, ylims=None, legend=True,
+    invert_colors=False, kwargs={}):
+    """Like visualize_single_episode, but performs NO data subsetting.
+
+    Assumes the caller has already sliced the data:
+      - data_puffs : exactly the puff rows for the single time-slice to draw
+      - data_wind  : exactly the wind rows for that same time-slice
+      - traj_df    : exactly the single episode's trajectory rows
+    No filtering by t_val / episode is done here; the inputs are plotted as-is.
+    """
+    scatter_size = 15
+    if kwargs.get('scatter_size') is not None:
+        scatter_size = kwargs['scatter_size']
+
+    plotsize = (8, 8) if plotsize is None else plotsize
+
+    if 'subplot_spec' in kwargs.keys():
+        fig = kwargs['figure']
+        ax = fig.add_subplot(kwargs['subplot_spec'])
+    else:
+        fig = plt.figure(figsize=plotsize)
+        ax = fig.add_subplot(111)
+
+    aspect_ratio = kwargs.get('aspect_ratio', False)
+
+    # --- wind vector (mean over the passed wind rows, direction only) ---
+    color = 'white' if invert_colors else 'black'
+    v_x, v_y = data_wind.wind_x.mean(), data_wind.wind_y.mean()
+    norm = np.sqrt(v_x ** 2 + v_y ** 2)
+    if norm < 1e-8:
+        v_x, v_y = 0.0, 0.0
+    else:
+        v_x, v_y = v_x / norm, v_y / norm
+    wx, wy = -0.15, 0.6
+    ax.quiver(wx, wy, v_x, v_y, color=color, scale=5, scale_units='xy', angles='xy', width=0.01)
+    ax.scatter(wx, wy, s=500, facecolors='none', edgecolors=color, linestyle='--')
+
+    # --- puffs (all passed rows) ---
+    alphas = data_puffs.concentration.values.astype(float)
+    alphas /= np.max(alphas)  # 0...1
+    alphas = np.power(alphas, 1 / 8)
+    alphas = np.clip(alphas, 0.2, 0.4)
+    distance_from_source = np.sqrt(data_puffs.x ** 2 + data_puffs.y ** 2)
+    alphas *= 2.5 / distance_from_source
+    alphas = np.clip(alphas, 0.05, 0.4)
+
+    rgba_colors = np.zeros((data_puffs.shape[0], 4))
+    rgba_colors[:, 0:3] = matplotlib.colors.to_rgba('gray')[:3]
+    rgba_colors[:, 3] = alphas
+
+    if kwargs.get('scatter_size_factor') is not None:
+        k = kwargs['scatter_size_factor']
+    else:
+        bbox = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+        k = 6250 * ((bbox.width / 8.0) ** 2)
+    s = k * (data_puffs.radius) ** 2
+    ax.scatter(data_puffs.x, data_puffs.y, s=s, facecolor=rgba_colors, edgecolor='none')
+
+    ax.patch.set_facecolor('none')
+    ax.set_aspect(aspect_ratio if aspect_ratio else 'equal')
+
+    # Crosshair at source
+    if invert_colors:
+        ax.plot([0, 0], [-0.3, +0.3], 'w-', linestyle=":", lw=2)
+        ax.plot([-0.3, +0.3], [0, 0], 'w-', linestyle=":", lw=2)
+    else:
+        ax.plot([0, 0], [-0.3, +0.3], 'k-', linestyle=":", lw=2)
+        ax.plot([-0.3, +0.3], [0, 0], 'k-', linestyle=":", lw=2)
+
+    # Handle custom colorby
+    if colorby is not None and type(colorby) is not str:
+        colors = colorby  # assumes that colorby is a series
+        colorby = 'custom'
+
+    # Line + start marker for trajectory
+    ax.plot(traj_df.iloc[:, 0], traj_df.iloc[:, 1], c='black', lw=0.5)
+    ax.scatter(traj_df.iloc[0, 0], traj_df.iloc[0, 1], c='black',
+        edgecolor='black', marker='o', s=100)
+
+    # Scatter plot for odor/regime etc.
+    if colorby is None:
+        colors = [config.traj_colormap['off'] if x <= config.env['odor_threshold'] else config.traj_colormap['on'] for x in traj_df['odor_eps_log']]
+        cm = plt.cm.get_cmap('winter')
+        ax.scatter(traj_df.iloc[:, 0], traj_df.iloc[:, 1],
+            c=colors, s=scatter_size, cmap=cm, vmin=vmin, vmax=vmax, alpha=1.0)
+    elif colorby == 'complete':
+        colors = traj_df.index / len(traj_df)
+        cm = plt.cm.get_cmap('winter')
+        ax.scatter(traj_df.iloc[:, 0], traj_df.iloc[:, 1],
+            c=colors, s=scatter_size, cmap=cm, vmin=vmin, vmax=vmax, alpha=1.0)
+    elif colorby == 'regime':
+        colors = [config.regime_colormap[x] for x in traj_df['regime'].to_list()]
+        ax.scatter(traj_df.iloc[:, 0], traj_df.iloc[:, 1],
+            c=colors, s=scatter_size, cmap=None, vmin=vmin, vmax=vmax, alpha=1.0)
+    elif colorby == 'custom':
+        cm = plt.cm.get_cmap('winter')
+        ax.scatter(traj_df.iloc[:, 0], traj_df.iloc[:, 1],
+            c=colors, s=scatter_size, cmap=cm, vmin=vmin, vmax=vmax, alpha=1.0)
+
+    if xlims is not None:
+        ax.set_xlim(xlims[0], xlims[1])
+    if ylims is not None:
+        ax.set_ylim(ylims[0], ylims[1])
+
+    ax.set_xlabel('Arena length [m]')
+    ax.set_ylabel('Arena width [m]')
+    if title_text is not None:
+        ax.set_title(title_text)
+    if legend:
+        handles, labels = ax.get_legend_handles_labels()
+        patch1 = mpatches.Patch(color=config.traj_colormap['off'], label='Off plume')
+        patch2 = mpatches.Patch(color=config.traj_colormap['on'], label='On plume')
+        handles.extend([patch1, patch2])
+        if 'fontsize' in kwargs.keys():
+            ax.legend(handles=handles, loc='upper right', fontsize=kwargs['fontsize'])
+        else:
+            ax.legend(handles=handles, loc='upper right')
+    if invert_colors:
+        ax.set_facecolor('black')
+        for spine in ax.spines.values():
+            spine.set_color('white')
+        ax.xaxis.label.set_color('white')
+        ax.yaxis.label.set_color('white')
+        ax.tick_params(axis='x', colors='white')
+        ax.tick_params(axis='y', colors='white')
+        fig.set_facecolor('black')
+    if output_fname is not None:
+        if output_fname.endswith('.pdf'):
+            plt.savefig(output_fname, bbox_inches='tight', format='pdf', dpi=300)
+        else:
+            plt.savefig(output_fname, bbox_inches='tight')
+    if show:
+        plt.show()
+    return fig, ax
+
+
 def animate_single_episode(
-    data_puffs, data_wind, traj_df, 
+    data_puffs, data_wind, traj_df,
     t_vals, t_vals_all,
-    episode_idx, outprefix, fprefix, zoom, 
-    colorby=None, plotsize=None, legend=True, invert_colors=False, scatter_size=None):
-    
-    n_tvals = len(t_vals) 
+    episode_idx, outprefix, fprefix, zoom,
+    colorby=None, plotsize=None, legend=True, invert_colors=False, scatter_size=None,
+    xlims=None, ylims=None, sample_hz=5, playback_fps=25):
+
+    n_tvals = len(t_vals)
     if n_tvals == 0:
-       print("n_tvals == 0!") 
-    output_fnames = [] 
+       print("n_tvals == 0!")
+    output_fnames = []
     skipped_frames = 0
     if not os.path.exists(f'{outprefix}/tmp/'):
         os.makedirs(f'{outprefix}/tmp/')
-        
+
+    # Subsample which trajectory timesteps get rendered: keep `sample_hz` frames per
+    # simulated second (the sim runs at ~1/dt steps/sec). This is independent of the
+    # mp4 playback rate (`playback_fps`), so the video is time-compressed.
+    stride = 1
+    if sample_hz is not None and len(t_vals) > 1:
+        dt = float(np.median(np.diff(t_vals)))
+        step_hz = (1.0 / dt) if dt > 0 else sample_hz
+        stride = max(1, int(round(step_hz / sample_hz)))
+
     t_val_min = None
     for t_idx in tqdm.tqdm(range(n_tvals), disable=True): # NOTE: disable tqdm progress bar to reduce log clutter
-        traj_df_subset = traj_df.iloc[:t_idx+1,:] # feed trajectory incrementally 
+        if t_idx % stride != 0: # subsample to sample_hz frames per trajectory second
+            continue
+        traj_df_subset = traj_df.iloc[:t_idx+1,:] # feed trajectory incrementally
         t_val = t_vals[t_idx]
         if t_val_min is None:
             t_val_min = t_val
@@ -268,6 +417,8 @@ def animate_single_episode(
             plotsize=plotsize,
             legend=legend,
             invert_colors=invert_colors,
+            xlims=xlims,
+            ylims=ylims,
             kwargs={'scatter_size':scatter_size}
             )
         # release memory from matplotlib
@@ -281,10 +432,10 @@ def animate_single_episode(
         print("No valid frames!")
         return
 
-    clips = [ImageClip(f).set_duration(0.08) for f in output_fnames] # 
+    clips = [ImageClip(f).set_duration(1.0/playback_fps) for f in output_fnames] #
     concat_clip = concatenate_videoclips(clips, method="compose")
     fanim = f"{outprefix}/{fprefix}_ep{episode_idx:03d}.mp4"
-    concat_clip.write_videofile(fanim, fps=15, verbose=False, logger=None)
+    concat_clip.write_videofile(fanim, fps=playback_fps, verbose=False, logger=None)
     # fanim = f"{outprefix}/{fprefix}_ep{episode_idx:03d}.gif"
     # concat_clip.write_gif(fanim, fps=30, verbose=False, logger=None)
     print("Saved", fanim)
@@ -314,6 +465,10 @@ def visualize_episodes(episode_logs,
                        image_type='png',
                        scatter_size=None,
                        fontsize=None,
+                       xlims=None,
+                       ylims=None,
+                       sample_hz=5,
+                       playback_fps=25,
                        ):
 
     # Trim/preprocess loaded dataset!
@@ -388,24 +543,27 @@ def visualize_episodes(episode_logs,
             data_puffs = data_puffs_all.query("time <= @t_val_end + 1")
 
         t_vals = [record[0]['t_val'] for record in ep_log['infos']]
-        ylims = xlims = None
-        if zoom == 0:
+        # Caller-supplied limits (e.g. arena sized from init-conditions x0/y0) take
+        # precedence; otherwise fall back to the adaptive zoom==0 behavior.
+        ep_xlims, ep_ylims = xlims, ylims
+        if ep_xlims is None and ep_ylims is None and zoom == 0:
             print("adaptive ylims")
-            xlims = [-0.5, 10.1]
-            ylims = [ traj_df['loc_y'].min() - 0.25, traj_df['loc_y'].max() + 0.25 ]
-        fig, ax = visualize_single_episode(data_puffs, data_wind, 
-            traj_df, episode_idx_title, zoom, t_val_end, 
+            ep_xlims = [-0.5, 10.1]
+            ep_ylims = [ traj_df['loc_y'].min() - 0.25, traj_df['loc_y'].max() + 0.25 ]
+        fig, ax = visualize_single_episode(data_puffs, data_wind,
+            traj_df, episode_idx_title, zoom, t_val_end,
             title_text, output_fname, colorby=colorby,
-            vmin=vmin, vmax=vmax, plotsize=plotsize, 
-            xlims=xlims, ylims=ylims, legend=legend, invert_colors=invert_colors, kwargs={'scatter_size':scatter_size,'fontsize':fontsize})
+            vmin=vmin, vmax=vmax, plotsize=plotsize,
+            xlims=ep_xlims, ylims=ep_ylims, legend=legend, invert_colors=invert_colors, kwargs={'scatter_size':scatter_size,'fontsize':fontsize})
         figs.append(fig)
         axs.append(ax)
 
         if animate:
             print("Animating episode:", episode_idx_title)
-            animate_single_episode(data_puffs, data_wind, traj_df, 
-                t_vals, t_vals_all, episode_idx_title, outprefix, 
-                fprefix, zoom, colorby=colorby, plotsize=plotsize, legend=legend, invert_colors=invert_colors)
+            animate_single_episode(data_puffs, data_wind, traj_df,
+                t_vals, t_vals_all, episode_idx_title, outprefix,
+                fprefix, zoom, colorby=colorby, plotsize=plotsize, legend=legend, invert_colors=invert_colors,
+                xlims=ep_xlims, ylims=ep_ylims, sample_hz=sample_hz, playback_fps=playback_fps)
 
     return figs, axs
 
