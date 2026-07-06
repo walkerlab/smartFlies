@@ -1373,6 +1373,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  saccade=False, 
                  double_drift=False,
                  action_physics=None, # or 'ground_vel_angvel': agent commands ground velocity instead of air velocity
+                 obs_mask = [],
                  **kwargs):
         '''
         soft_reset_button: bool or None; button never turns on if None, otherwise it will be set to True when step() fails.
@@ -1423,6 +1424,18 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                                     shape=(3,), dtype=np.float32) # [(apparent/ambient) wind x, y, odor]
         
         self.saccade = saccade # PEv3 - saccade action
+        if obs_mask:
+            obs_size = self.observation_space.shape[0]
+            mask_arr = np.zeros(obs_size, dtype=bool)
+            for idx in obs_mask:
+                mask_arr[idx] = True
+            self.obs_mask = mask_arr
+            new_obs_size = int(obs_size - mask_arr.sum())
+            self.observation_space = spaces.Box(low=-1, high=+1,
+                                        shape=(new_obs_size,), dtype=np.float32)
+            print(f"[DEBUG] PEv3 obs_mask indices {obs_mask} -> bool mask {mask_arr}; obs_space reduced {obs_size}->{new_obs_size}")
+        else:
+            self.obs_mask = []
 
         # convert obs_noise to radians
         # if self.obs_noise:
@@ -1841,7 +1854,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.haltere:
             # Add haltere gyroscopic feedback
             observation = np.append(observation, [self.air_acc, self.ang_acc])
-        
+        if len(self.obs_mask):
+            observation = observation[~self.obs_mask]
         return observation
 
     def reset(self):
@@ -2452,6 +2466,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         haltere=args.haltere,
                         saccade=args.saccade,
                         action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
+                        obs_mask=getattr(args, 'obs_mask', []),
                         )
             else:
                 # bkw compat before cleaning up TC hack. Useful when evalCli
