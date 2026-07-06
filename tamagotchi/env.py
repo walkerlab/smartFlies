@@ -1794,6 +1794,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         
         if self.odor_scaling:
             odor_observation *= self.odorx # Random scaling to improve generalization 
+        # TODO rm this line - is this for Toha experiments
+        if 0 < odor_observation < 1e-3:
+            odor_observation = 1
         if self.verbose > 1:
             print(f"odor_observation: {odor_observation} at tidx {self.tidx} for agent location {self.agent_location} with rotate_by {self.rotate_by}") 
         odor_observation = 0.0 if odor_observation < config.env['odor_threshold'] else odor_observation
