@@ -367,6 +367,8 @@ def calc_time_since_last_wind_change(eps_df):
     assert len(t_val_dt) == 1, f"t_val_dt is not constant: {t_val_dt}"
     t_val_dt = t_val_dt.pop()
     # first row is always nan - fill with 0
+    if 'wind_angle_ground_theta_dt1' not in eps_df.columns:
+        eps_df['wind_angle_ground_theta_dt1'] = eps_df['wind_angle_ground_theta'].diff().fillna(0)
     eps_df['wind_angle_ground_theta_dt1'].iloc[0] = 0
     # calculate time since last change in wind direction 
     time_since_last_wind_change = []
@@ -379,6 +381,19 @@ def calc_time_since_last_wind_change(eps_df):
     
     eps_df = eps_df.assign(time_since_last_wind_change = time_since_last_wind_change)
     return eps_df
+
+
+def add_wind_odor_regime(df):
+    # standalone function instead of being a method - returns the column instead of adding directly. 
+    odor_wind_regime = pd.Series('NA', index=df.index)
+    odor_wind_regime[(df['wind_regime']=='anemometric') & (df['regime']=='TRACK')] = 'anemometric, on plume'
+    odor_wind_regime[(df['wind_regime']=='anemometric') & (df['regime']!='TRACK')] = 'anemometric, off plume'
+    odor_wind_regime[(df['wind_regime']=='tracking') & (df['regime']=='TRACK')] = 'tracking, on plumes'
+    odor_wind_regime[(df['wind_regime']=='tracking') & (df['regime']!='TRACK')] = 'tracking, off plume'
+    print("Annotation of odor-wind regimes:")
+    print(f"{odor_wind_regime.value_counts()}")
+    return odor_wind_regime
+
 
 def get_traj_df(episode_log, 
     extended_metadata: bool = False, 
@@ -408,7 +423,7 @@ def get_traj_df(episode_log,
 
     # squash_action=True only needed for old log files 
     # (this is now done in evalCli itself, during creation of episode_log)
-
+    print("[WARNING] using an old version of get_traj_df ")
     # Basic trajectory (x, y)
     trajectory = episode_log['trajectory']
     traj_df = pd.DataFrame(trajectory)  
@@ -677,9 +692,12 @@ def get_traj_df_tmp(episode_log,
         act.columns = ['step', 'turn']
         traj_df['step'] = act['step']
         traj_df['turn'] = act['turn']
-        traj_df['angular_velocity'] = [record[0]['ang_vel'] for record in episode_log['infos']]
+        # traj_df['angular_velocity'] = [record[0]['ang_vel'] for record in episode_log['infos']]
     elif act.shape[1] == 3:
         act.columns = ['T_par', 'T_perp', 'tau']
+        traj_df['T_par'] = act['T_par']
+        traj_df['T_perp'] = act['T_perp']
+        traj_df['tau'] = act['tau']
         traj_df['angular_velocity'] = [record[0]['ang_vel'] for record in episode_log['infos']]
     traj_df['stray_distance'] = [record[0]['stray_distance'] for record in episode_log['infos']]
     # Observation derived

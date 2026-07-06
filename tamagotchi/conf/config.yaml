@@ -7,6 +7,7 @@
 defaults:
   - OU_exploration: "off"
   - path: glados
+  - physics: fly
   - _self_
 
 # Training variant: "base" (default), "wind_obsver_v1", or "wind_obsver_v2"

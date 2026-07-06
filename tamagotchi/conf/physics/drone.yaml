@@ -1,0 +1,11 @@
+# Physics coefficients for the 'force' action_physics mode — ~6 mg drone model.
+# Tuned for drone dynamics: peak lin accel ~10 m/s², yaw_rate_ss ~229 deg/s.
+
+T_para_max: 3.0e-5    # N, fwd v_ss = 2.0 m/s
+T_perp_max: 2.0e-5    # N, lat v_ss = 0.67 m/s
+tau_max: 8.0e-11      # N*m, yaw_rate_ss = 229 deg/s
+mass: 6.0e-6          # kg, peak lin accel = 10 m/s²
+drag: 3.0e-5          # N*s/m
+inertia: 1.0e-12      # kg*m^2, peak ang accel = 4584 deg/s²
+k_rot: 2.0e-11        # N*m*s
+physics_substeps: 4   # zero-order-hold substeps per env step

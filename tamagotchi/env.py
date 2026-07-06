@@ -1,5 +1,8 @@
 ##### from plume/plume_env.py  ##### from plume/plume_env.py  ##### from plume/plume_env.py
-from .data_util import load_plume, get_concentration_at_tidx, rotate_wind, rotate_puffs, rotate_wind_optimized, rotate_puffs_optimized
+try:
+    from data_util import load_plume, get_concentration_at_tidx, rotate_wind, rotate_puffs, rotate_wind_optimized, rotate_puffs_optimized
+except ImportError:
+    from .data_util import load_plume, get_concentration_at_tidx, rotate_wind, rotate_puffs, rotate_wind_optimized, rotate_puffs_optimized
 try:
     import config as config
 except ImportError:
@@ -40,7 +43,7 @@ class PlumeEnvironment(gym.Env):
   """
   def __init__(self, 
     t_val_min=60.00, 
-    sim_steps_max=300, # steps
+    sim_steps_max=300,
     reset_offset_tmax=30, # seconds; max secs for initial offset from t_val_min
     dataset='constantx5b5',
     move_capacity=2.0, # Max agent speed in m/s
@@ -730,8 +733,8 @@ class PlumeEnvironment_v2(gym.Env):
   
   """
   def __init__(self, 
-    t_val_min=60.00, 
-    sim_steps_max=300, # steps
+    t_val_min=60.00,
+    sim_steps_max=300,
     reset_offset_tmax=30, # seconds; max secs for initial offset from t_val_min
     dataset='constantx5b5',
     move_capacity=2.0, # Max agent speed in m/s
@@ -1370,6 +1373,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  saccade=False, 
                  double_drift=False,
                  action_physics=None, # or 'ground_vel_angvel': agent commands ground velocity instead of air velocity
+                 obs_mask = [],
                  **kwargs):
         '''
         soft_reset_button: bool or None; button never turns on if None, otherwise it will be set to True when step() fails.
@@ -1420,6 +1424,18 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                                     shape=(3,), dtype=np.float32) # [(apparent/ambient) wind x, y, odor]
         
         self.saccade = saccade # PEv3 - saccade action
+        if obs_mask:
+            obs_size = self.observation_space.shape[0]
+            mask_arr = np.zeros(obs_size, dtype=bool)
+            for idx in obs_mask:
+                mask_arr[idx] = True
+            self.obs_mask = mask_arr
+            new_obs_size = int(obs_size - mask_arr.sum())
+            self.observation_space = spaces.Box(low=-1, high=+1,
+                                        shape=(new_obs_size,), dtype=np.float32)
+            print(f"[DEBUG] PEv3 obs_mask indices {obs_mask} -> bool mask {mask_arr}; obs_space reduced {obs_size}->{new_obs_size}")
+        else:
+            self.obs_mask = []
 
         # convert obs_noise to radians
         # if self.obs_noise:
@@ -1527,8 +1543,14 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             elif self.rotate_by == 0:
                 x_new = x
                 y_new = -y if self.mirror else y
+
             else:
-                raise ValueError(f"Unsupported rotation angle: {self.rotate_by}. Supported: [0, 90, 180, -90]")
+                theta = np.deg2rad(self.rotate_by)
+                c, s = np.cos(theta), np.sin(theta)
+                x_new = c * x - s * y
+                y_new = s * x + c * y
+                if self.mirror:
+                    x_new = -x_new
 
             puffs['x'] = x_new
             puffs['y'] = y_new
@@ -1835,7 +1857,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.haltere:
             # Add haltere gyroscopic feedback
             observation = np.append(observation, [self.air_acc, self.ang_acc])
-        
+        if len(self.obs_mask):
+            observation = observation[~self.obs_mask]
         return observation
 
     def reset(self):
@@ -2446,6 +2469,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         haltere=args.haltere,
                         saccade=args.saccade,
                         action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
+                        obs_mask=getattr(args, 'obs_mask', []),
                         )
             else:
                 # bkw compat before cleaning up TC hack. Useful when evalCli
@@ -2676,7 +2700,7 @@ class SubprocVecEnv(SubprocVecEnv_):
                             for remote_idx, status in self.remote_directory.items():
                                 if status['deployed'] == False and status['wind_direction'] == new_wind_direction:
                                     self.swap(i, remote_idx)
-                                    print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
+                                    # print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
                                     swapped = True
                                     break
                     
@@ -2716,7 +2740,7 @@ class SubprocVecEnv(SubprocVecEnv_):
                 for remote_idx, status in self.remote_directory.items():
                     if status['deployed'] == False and status['wind_direction'] == new_wind_direction:
                         self.swap(i_deployed, remote_idx)
-                        print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
+                        # print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
                         break
             
         return self.reset()

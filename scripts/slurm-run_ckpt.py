@@ -5,17 +5,11 @@
 # updates. On requeue the script restarts with the same args; if that file exists, training
 # resumes automatically from the last saved checkpoint (no load_jobid logic needed).
 #
-# Cancel all your jobs: squeue -u $USER -h | awk '{print $1}' | xargs scancel
-
-# python3 scripts/slurm-run_ckpt.py \
-#   --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ \
-#   --stage_name noisy \
-#   --substr 4deaf7e9 \
-#   --override "action_physics=force OU_exploration=off experiment_name=force_physics_uncertainty 'r_shaping=[step,missed_time_cost,rotate_by,birthx_cl_last,cosine]' loc_algo=linear_precise num_env_steps=7200000 precise_max=[1] precise_max=[6] variant=wind_obsver_v1 'dataset=[noisy_jitterx5b5]' path.curriculum_name=060226_noisy_jitter" 
+# Cancel all your ckpt jobs: squeue -u $USER -h | grep ckpt-all | awk '{print $1}' | xargs scancel
 
 
 '''
-python3 /gscratch/portia/jqhu/work/active_sensing/smartFlies/scripts/slurm-run_ckpt.py --dry_run --config config_control_noCL --n_seeds 30 --override "action_physics=force OU_exploration=off experiment_name=CTL_noCL 'r_shaping=[step,missed_time_cost,rotate_by]' num_env_steps=10800000 variant=wind_obsver_v1"
+python3 /gscratch/portia/jqhu/work/active_sensing/smartFlies/scripts/slurm-run_ckpt.py --dry_run --config config_control_noCL --n_seeds 30 dry_run--override "action_physics=force OU_exploration=off experiment_name=CTL_noCL 'r_shaping=[step,missed_time_cost,rotate_by]' num_env_steps=10800000 variant=wind_obsver_v1"
 '''
 
 import argparse
@@ -75,8 +69,6 @@ def submit(
 #SBATCH --verbose
 #SBATCH --open-mode=append
 #SBATCH -o {OUTFILES_DIR}/slurm-%A_%a.out
-#SBATCH --mail-type=ALL
-#SBATCH --mail-user=jqhu@uw.edu
 #SBATCH --nodelist={gpu_resource}
 #SBATCH --requeue
 #SBATCH --signal=B:USR1@120
@@ -97,14 +89,15 @@ python3 -u -m tamagotchi.main_hydra \\
 
     print('Submitting job with script:')
     print(script)
-    safe_override = re.sub(r'[^A-Za-z0-9_\-]', '_', override)[:60]
+    safe_override = re.sub(r'[^A-Za-z0-9_\-]', '_', override)[-60:]
     script_path = os.path.join(OUTFILES_DIR, f'submit_{config_name}_{safe_override}.sh')
     if not dry_run:
-        print(f'Dry run: Would create script at {script_path}')
         with open(script_path, 'w') as f:
             f.write(script)
         job_id = slurm_submit(script_path)
         print(f'Submitted job {job_id}')
+    else:
+        print(f'Dry run: Would create script at {script_path}')
 
 
 def main():
@@ -142,8 +135,28 @@ def main():
                              '(e.g. a hash "4deaf7e9" to pin a specific run)')
     parser.add_argument('--dry_run', action='store_true', default=False,
                         help='Print the commands that would be executed without actually submitting the jobs')
+    parser.add_argument('--sweep_config', type=str, default='',
+                        help='Prefix to match curriculum configs in tamagotchi/conf/curriculum/ '
+                             '(e.g. "sweep_const" matches all sweep_const_*.json files). '
+                             'Each matched config is submitted as a separate job with '
+                             'path.curriculum_name=<config_name> appended to the override.')
 
     args = parser.parse_args()
+
+    CURRICULUM_DIR = os.path.join(PROJECT_DIR, 'tamagotchi/conf/curriculum')
+
+    # Expand sweep_config into a list of curriculum names to iterate over.
+    # If not set, use a single sentinel so the loop below runs exactly once.
+    if args.sweep_config:
+        matched = sorted(glob.glob(os.path.join(CURRICULUM_DIR, f'{args.sweep_config}*.json')))
+        if not matched:
+            print(f'Error: no curriculum configs found matching prefix "{args.sweep_config}" '
+                  f'in {CURRICULUM_DIR}', file=sys.stderr)
+            sys.exit(1)
+        curriculum_names = [os.path.splitext(os.path.basename(f))[0] for f in matched]
+        print(f'sweep_config matched {len(curriculum_names)} configs: {curriculum_names}')
+    else:
+        curriculum_names = [None]  # sentinel: no curriculum override
 
     submit_kwargs = dict(
         config_name=args.config,
@@ -156,43 +169,47 @@ def main():
         dry_run=args.dry_run
     )
 
-    if args.from_folder:
-        if not args.stage_name:
-            print('Error: --stage_name is required when --from_folder is used', file=sys.stderr)
-            sys.exit(1)
-        # Discover seed checkpoints: plume_seed-N-HASH.pt (or .chkpt.pt for older runs)
-        pattern = os.path.join(args.from_folder, 'weights', 'plume_seed-*.pt')
-        pt_files = sorted(glob.glob(pattern))
-        pt_files = [f for f in pt_files
-                    if re.search(r'seed-\d+-[0-9a-f]{8}(\.chkpt)?\.pt$', f)
-                    and not f.endswith('_vecNormalize.pkl')
-                    and (not args.substr or args.substr in os.path.basename(f))]
-        if not pt_files:
-            print(f'No seed checkpoints found in {args.from_folder}/weights/', file=sys.stderr)
-            sys.exit(1)
-        if args.dry_run:
-            print('Dry run mode: found following checkpoints:')
-            print('\n'.join(pt_files))
-        for pt_file in pt_files:
-            stem = os.path.splitext(os.path.basename(pt_file))[0]  # plume_seed-22-4deaf7e9 or .chkpt
-            outsuffix = stem.replace('plume_', '', 1).replace('.chkpt', '')  # seed-22-4deaf7e9
-            seed_n = int(outsuffix.split('-')[1])
-            seed_override = (
-                f'outsuffix={outsuffix} '
-                f'resume_from={pt_file} '
-                f'stage_name={args.stage_name} '
-                f'seed={seed_n} '
-                f'{args.override}'
-            ).strip()
-            submit(override=seed_override, **submit_kwargs)
+    for curriculum_name in curriculum_names:
+        curriculum_suffix = f' path.curriculum_name={curriculum_name}' if curriculum_name else ''
+
+        if args.from_folder:
+            if not args.stage_name:
+                print('Error: --stage_name is required when --from_folder is used', file=sys.stderr)
+                sys.exit(1)
+            # Discover seed checkpoints: plume_seed-N-HASH.pt (or .chkpt.pt for older runs)
+            pattern = os.path.join(args.from_folder, 'weights', 'plume_seed-*.pt')
+            pt_files = sorted(glob.glob(pattern))
+            pt_files = [f for f in pt_files
+                        if re.search(r'seed-\d+-[0-9a-f]{8}(_stage_[0-9a-f]{8})?(\.chkpt)?\.pt$', f)
+                        and not f.endswith('_vecNormalize.pkl')
+                        and (not args.substr or args.substr in os.path.basename(f))]
+            if not pt_files:
+                print(f'No seed checkpoints found in {args.from_folder}/weights/', file=sys.stderr)
+                sys.exit(1)
             if args.dry_run:
-                break  # just show the first one in dry run
-    else:
-        for seed in range(args.seed_from, args.seed_from + args.n_seeds):
-            seed_override = f'{args.override} seed={seed}'.strip()
-            submit(override=seed_override, **submit_kwargs)
-            if args.dry_run:
-                break  # just show the first one in dry run
+                print('Dry run mode: found following checkpoints:')
+                print('\n'.join(pt_files))
+            for pt_file in pt_files:
+                stem = os.path.splitext(os.path.basename(pt_file))[0]  # plume_seed-22-4deaf7e9 or .chkpt
+                outsuffix = stem.replace('plume_', '', 1).replace('.chkpt', '')  # seed-22-4deaf7e9
+                seed_n = int(outsuffix.split('-')[1])
+                seed_override = (
+                    f'outsuffix={outsuffix} '
+                    f'resume_from={pt_file} '
+                    f'stage_name={args.stage_name} '
+                    f'seed={seed_n} '
+                    f'{args.override}'
+                    f'{curriculum_suffix}'
+                ).strip()
+                submit(override=seed_override, **submit_kwargs)
+                if args.dry_run:
+                    break  # just show the first one in dry run
+        else:
+            for seed in range(args.seed_from, args.seed_from + args.n_seeds):
+                seed_override = f'{args.override} seed={seed}{curriculum_suffix}'.strip()
+                submit(override=seed_override, **submit_kwargs)
+                if args.dry_run:
+                    break  # just show the first one in dry run
 
 
 if __name__ == '__main__':
