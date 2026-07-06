@@ -11,7 +11,6 @@ import pandas as pd
 import argparse
 import glob
 import datetime
-import mlflow
 
 def parse_summary_files(fnames, BASE_DIR):
     counts_df = []
