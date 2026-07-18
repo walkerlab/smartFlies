@@ -1374,6 +1374,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  double_drift=False,
                  action_physics=None, # or 'ground_vel_angvel': agent commands ground velocity instead of air velocity
                  obs_mask = [],
+                 odor_01 = False,
                  **kwargs):
         '''
         soft_reset_button: bool or None; button never turns on if None, otherwise it will be set to True when step() fails.
@@ -1397,6 +1398,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.double_drift = double_drift
         self.action_physics = action_physics
         self.now_init_long = 0.0 # long-axis init coordinate set directly by curriculum
+        self.odor_01 = odor_01 # PEv3
         print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}, self.mirror: {self.mirror}, haltere: {self.haltere}, self.action_physics: {self.action_physics} {action_physics}")
         if self.action_physics == 'ground_vel_angvel':
             # 3-dim action: [vel_x_ego, vel_y_ego, turn], all in [0, 1]
@@ -1816,9 +1818,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         
         if self.odor_scaling:
             odor_observation *= self.odorx # Random scaling to improve generalization 
-        # TODO rm this line - is this for Toha experiments
-        if 0 < odor_observation < 1e-3:
-            odor_observation = 1
+        if self.odor_01:
+            odor_observation = 1.0 if odor_observation > 0 else 0.0 # binary odor detection
         if self.verbose > 1:
             print(f"odor_observation: {odor_observation} at tidx {self.tidx} for agent location {self.agent_location} with rotate_by {self.rotate_by}") 
         odor_observation = 0.0 if odor_observation < config.env['odor_threshold'] else odor_observation
@@ -2470,6 +2471,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         saccade=args.saccade,
                         action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
                         obs_mask=getattr(args, 'obs_mask', []),
+                        odor_01=getattr(args, 'odor_01', False)
                         )
             else:
                 # bkw compat before cleaning up TC hack. Useful when evalCli
