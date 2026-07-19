@@ -510,7 +510,7 @@ def plot_puffs(data, t_val, ax=None, fig=None, show=True, scatter_size_factor=No
         plt.show()
     return ax
 
-def plot_puffs_and_wind_vectors(data_puffs, data_wind, t_val, ax=None, fig=None, fname='', plotsize=(10,10), aspect_ratio=False, show=True, invert_colors=False):
+def plot_puffs_and_wind_vectors(data_puffs, data_wind, t_val, ax=None, fig=None, fname='', plotsize=(10,10), aspect_ratio=False, show=True, invert_colors=False, wind_vector=True):
     if fig is None:
         fig = plt.figure(figsize=plotsize)
     if ax is None:
