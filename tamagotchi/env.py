@@ -1375,6 +1375,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  action_physics=None, # or 'ground_vel_angvel': agent commands ground velocity instead of air velocity
                  obs_mask = [],
                  odor_01 = False,
+                 action_delay_const=None, # seconds; first-order lag on actions (EMA). None = off
                  **kwargs):
         '''
         soft_reset_button: bool or None; button never turns on if None, otherwise it will be set to True when step() fails.
@@ -1414,6 +1415,24 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.physics_coeff = config.force_physics  # access all coeffs as self.physics_coeff['key']
             self.ang_vel = 0.0  # angular velocity (rad/s), persists across steps
             print(f"[DEBUG] PEv3 using force action physics; action space shape: {self.action_space.shape}; coeffs: {self.physics_coeff}")
+        self.action_delay_const = action_delay_const
+        if self.action_delay_const is not None:
+            assert self.action_delay_const > 0
+            self.action_alpha = 1.0 - np.exp(-self.dt / self.action_delay_const)  # dt-invariant EMA coeff
+            act_dim = self.action_space.shape[0]
+            self.null_action = np.array([0.0, 0.5, 0.5], dtype=np.float64)
+            self.action_applied = self.null_action.copy()
+            # Compatibility guard: these options mix commanded vs applied action semantics
+            incompatible = []
+            if self.action_feedback: incompatible.append("action_feedback")
+            if any(k in self.r_shaping for k in ("turn", "move")): incompatible.append("r_shaping 'turn'/'move'")
+            if self.haltere: incompatible.append("haltere")
+            if self.flipping: incompatible.append("flipping")
+            if incompatible:
+                raise ValueError(f"action_delay_const={self.action_delay_const} is incompatible with: "
+                                f"{', '.join(incompatible)}. Disable these or set action_delay_const=None.")
+            print(f"[DEBUG] PEv3 action EMA lag: tau={self.action_delay_const}s, dt={self.dt}, alpha={self.action_alpha:.4f}")
+        
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                         shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
@@ -1870,6 +1889,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             return self.soft_reset()
         if not self.loc_algo == self.angle_algo == self.time_algo == 'fixed': # Only sample rotate_by when in training. These three algos are used for eval. 
             self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
+        if self.action_delay_const is not None:
+            self.action_applied = self.null_action.copy()
         if self.haltere:
             self.air_acc = 0.0 # reset acceleration
             self.ang_acc = 0.0 # reset angular acceleration
@@ -1922,12 +1943,13 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         
         # print(f'[soft_reset] resample {self.stray_distance} {self.agent_angle}', flush=True)
 
-        
+        if self.action_delay_const is not None:
+            self.action_applied = self.null_action.copy()
         self.air_velocity = np.array([0, 0])
         self.ambient_wind = self.get_current_wind_xy() 
         observation = self.sense_environment()
         self.found_plume = True if observation[2] > 0. else False 
-
+    
         if len(observation) == 7 or self.haltere:
             observation[5:] = 0 # course direction to 0
         if self.haltere:
@@ -2016,6 +2038,11 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.squash_action: # always true in training and eval. Bkw compt for Sat's older logs in visualization scripts... Not touching this yet.
             action = (np.tanh(action) + 1)/2
         action = np.clip(action, 0.0, 1.0)
+
+        # --- first-order actuator lag (EMA toward commanded action) ---
+        if self.action_delay_const is not None:
+            self.action_applied += self.action_alpha * (np.asarray(action, dtype=np.float64) - self.action_applied)
+            action = self.action_applied.copy()
 
         if self.action_physics == 'ground_vel_angvel':
             # action[0]: forward [0,1]; action[1]: lateral [0,1] -> [-1,1] (0.5=no lateral); action[2]: turn [0,1]
@@ -2471,7 +2498,8 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         saccade=args.saccade,
                         action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
                         obs_mask=getattr(args, 'obs_mask', []),
-                        odor_01=getattr(args, 'odor_01', False)
+                        odor_01=getattr(args, 'odor_01', False),
+                        action_delay_const=getattr(args, 'action_delay_const', None)
                         )
             else:
                 # bkw compat before cleaning up TC hack. Useful when evalCli
@@ -2500,6 +2528,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                     stray_max=args.stray_max,
                     obs_noise=args.obs_noise,
                     act_noise=args.act_noise,
+                    action_delay_const=args.action_delay_const,
                     action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
                     seed=args.seed
                     )
