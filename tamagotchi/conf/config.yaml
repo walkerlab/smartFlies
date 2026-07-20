@@ -48,6 +48,12 @@ eval_episodes: 20
 eval_interval: null
 rnn_type: VRNN
 hidden_size: 64
+# Auxiliary wind-head architecture (wind_obsver_v1). One of:
+#   default              - wind heads read from hidden_actor; policy does NOT see wind
+#   separate_wind_head   - wind heads read from RNN output x; policy does NOT see wind
+#   wind_cond_policy      - wind belief [mu, logvar] fed into actor+critic; PPO grads flow through wind heads
+#   wind_cond_policy_detached - same, but wind belief detached (heads train on aux loss only)
+auxiliary_arch: default
 betadist: false
 stacking: 0
 masking: null

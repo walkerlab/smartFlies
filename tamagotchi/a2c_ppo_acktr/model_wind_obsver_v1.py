@@ -2,7 +2,6 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from tamagotchi.a2c_ppo_acktr.gnODE import GNODE
 from tamagotchi.a2c_ppo_acktr.distributions import Bernoulli, Categorical, DiagGaussian, BetaCustom, FixedNormal
 from tamagotchi.a2c_ppo_acktr.utils import init
 
@@ -189,10 +188,6 @@ class NNBase(nn.Module):
 
         self._hidden_size = hidden_size
         self._recurrent = recurrent
-        if hidden_size == 16:
-            layer_size = 250
-        elif hidden_size == 2:
-            layer_size = 2000
 
         if recurrent:
             print("hidden_size", hidden_size)
@@ -202,26 +197,14 @@ class NNBase(nn.Module):
             elif rnn_type == 'GRU':
                 print("Using GRU")
                 self.rnn = nn.GRU(recurrent_input_size, hidden_size)
-            elif rnn_type == 'GNODE':
-                print("Using GNODE")
-                self.rnn = GNODE(recurrent_input_size, hidden_size, layer_size)
-            
-            if rnn_type == 'GNODE':
-                for name, param in self.rnn.named_parameters():
-                        if 'bias' in name:
-                            nn.init.constant_(param, 0) 
-                        elif 'weight' in name:
-                            if len(param.shape) == 2:  # Linear layer
-                                fan_in = param.shape[1]
-                                nn.init.trunc_normal_(param, mean=0.0, std=np.sqrt(1.414/fan_in))
-            else:
-                for name, param in self.rnn.named_parameters():
-                    if 'bias' in name:
-                        nn.init.constant_(param, 0) 
-                    elif 'weight' in name:
-                        # nn.init.orthogonal_(param)
-                        # nn.init.normal_(param, mean=0.0, std=1./hidden_size)
-                        nn.init.normal_(param, mean=0.0, std=1./np.sqrt(hidden_size))
+
+            for name, param in self.rnn.named_parameters():
+                if 'bias' in name:
+                    nn.init.constant_(param, 0) 
+                elif 'weight' in name:
+                    # nn.init.orthogonal_(param)
+                    # nn.init.normal_(param, mean=0.0, std=1./hidden_size)
+                    nn.init.normal_(param, mean=0.0, std=1./np.sqrt(hidden_size))
 
 
     @property
@@ -300,51 +283,97 @@ class NNBase(nn.Module):
         return x, hxs
 
 class MLPBase(NNBase):
-    def __init__(self, num_inputs, recurrent=False, hidden_size=64, rnn_type='GRU'):
+    def __init__(self, num_inputs, recurrent=False, hidden_size=64, rnn_type='GRU', auxiliary_arch='default'):
         super(MLPBase, self).__init__(recurrent, num_inputs, hidden_size, rnn_type)
+
+        self.arch = auxiliary_arch
+        self.wind_belief_dim = 4  # wind_mu (2) + wind_logvar (2)
 
         if recurrent:
             num_inputs = hidden_size
 
+        # actor/critic consume [x, wind_mu, wind_logvar] in the conditioned archs
+        if self.arch in ('wind_cond_policy', 'wind_cond_policy_detached'):
+            ac_input_dim = num_inputs + self.wind_belief_dim
+        else:
+            ac_input_dim = num_inputs
+
         init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
-                               constant_(x, 0), np.sqrt(2))
+                            constant_(x, 0), np.sqrt(2))
 
         self.actor1 = nn.Sequential(
-            init_(nn.Linear(num_inputs, hidden_size)), nn.Tanh())
+            init_(nn.Linear(ac_input_dim, hidden_size)), nn.Tanh())
         self.actor = nn.Sequential(
             init_(nn.Linear(hidden_size, hidden_size)), nn.Tanh())
 
         self.critic1 = nn.Sequential(
-            init_(nn.Linear(num_inputs, hidden_size)), nn.Tanh())
+            init_(nn.Linear(ac_input_dim, hidden_size)), nn.Tanh())
         self.critic = nn.Sequential(
             init_(nn.Linear(hidden_size, hidden_size)), nn.Tanh())
 
         self.critic_linear = init_(nn.Linear(hidden_size, 1))
-        
-        # Wind prediction heads
-        self.wind_mu_head = nn.Linear(hidden_size, 2)       # [cosθ, sinθ]
-        self.wind_logvar_head = nn.Linear(hidden_size, 2)   # per-dim log-variance
 
+        # Wind prediction heads always read from the RNN hidden state (num_inputs)
+        self.wind_mu_head = nn.Linear(num_inputs, 2)
+        self.wind_logvar_head = nn.Linear(num_inputs, 2)
 
-        self.train() # tells your model that you are training the model not eval().
-    
+        self.train()  
     def forward(self, inputs, rnn_hxs, masks, input_masks = None):
         x = inputs
         if self.is_recurrent:
             x, rnn_hxs = self._forward_rnn(x, rnn_hxs, masks, input_masks=input_masks)
+        if self.arch == 'default':
+            hx1_critic = self.critic1(x)
+            hx1_actor = self.actor1(x)
+            hidden_critic = self.critic(hx1_critic)
+            hidden_actor = self.actor(hx1_actor)
+            value = self.critic_linear(hidden_critic)
+            
+            # ➕ wind belief from hidden_actor
+            wind_mu = self.wind_mu_head(hidden_actor)
+            wind_logvar = self.wind_logvar_head(hidden_actor)
+            
+        elif self.arch == 'separate_wind_head':
+            hx1_critic = self.critic1(x)
+            hx1_actor = self.actor1(x)
+            hidden_critic = self.critic(hx1_critic)
+            hidden_actor = self.actor(hx1_actor)
+            value = self.critic_linear(hidden_critic)
 
-        hx1_critic = self.critic1(x)
-        hx1_actor = self.actor1(x)
-        hidden_critic = self.critic(hx1_critic)
-        hidden_actor = self.actor(hx1_actor)
+            # ➕ wind belief from hidden state of the network, not from hidden_actor
+            wind_mu = self.wind_mu_head(x)
+            wind_logvar = self.wind_logvar_head(x)
+            
+        elif self.arch == 'wind_cond_policy_detached':
+            # feed predictions into the actor-critic; detach so PPO gradients
+            # don't flow back through the wind heads (they train only on the aux loss)
+            wind_mu = self.wind_mu_head(x)
+            wind_logvar = self.wind_logvar_head(x)
 
-        value = self.critic_linear(hidden_critic)
-        
-        # ➕ wind belief from hidden_actor
-        wind_mu = self.wind_mu_head(hidden_actor)
-        wind_logvar = self.wind_logvar_head(hidden_actor)
+            x_aug = torch.cat([x, wind_mu.detach(), wind_logvar.detach()], dim=-1)
 
-        
+            hx1_critic = self.critic1(x_aug)
+            hx1_actor = self.actor1(x_aug)
+            hidden_critic = self.critic(hx1_critic)
+            hidden_actor = self.actor(hx1_actor)
+
+            value = self.critic_linear(hidden_critic)
+
+        elif self.arch == 'wind_cond_policy':
+            # feed predictions into the actor-critic; PPO gradients flow back
+            # through the wind heads (and into the RNN via them)
+            wind_mu = self.wind_mu_head(x)
+            wind_logvar = self.wind_logvar_head(x)
+
+            x_aug = torch.cat([x, wind_mu, wind_logvar], dim=-1)
+
+            hx1_critic = self.critic1(x_aug)
+            hx1_actor = self.actor1(x_aug)
+            hidden_critic = self.critic(hx1_critic)
+            hidden_actor = self.actor(hx1_actor)
+
+            value = self.critic_linear(hidden_critic)
+
         activities = {
             'rnn_hxs': rnn_hxs,
             'hx1_actor': hx1_actor,
