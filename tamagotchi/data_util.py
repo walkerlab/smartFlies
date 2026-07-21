@@ -414,7 +414,7 @@ def plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=False, win
     ax.quiver(x, y, v_x, v_y, color=color, scale=5, scale_units='xy', angles='xy', width=0.01)
 
     # Draw wind circle
-    ax.scatter([cx], [cy], s=900,
+    ax.scatter([x], [y], s=900,
                facecolors='none',
                edgecolors=color,
                linestyle='--',
