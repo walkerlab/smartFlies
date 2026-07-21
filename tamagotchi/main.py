@@ -162,6 +162,9 @@ def get_args():
         help='name identifying this training stage; triggers staged training when non-empty')
     parser.add_argument('--resume_from', type=str, default='',
         help='path to parent stage checkpoint (.chkpt.pt) to load weights from at fresh stage start')
+    parser.add_argument('--auxiliary_arch', type=str, default='default',
+        choices=['default'],
+        help='wind-head architecture for MLPBase - reject all but default since this pipeline does not have auxiliary wind-heads')
     args = parser.parse_args()
     assert len(args.dataset) == len(args.qvar)
     assert len(args.dataset) == len(args.diff_max)

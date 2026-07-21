@@ -405,13 +405,19 @@ def plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=False, win
         v_x, v_y = 0.0, 0.0  # avoid division by zero / NaN (no rows at t_val)
     else:
         v_x, v_y = v_x / norm, v_y / norm
-    
-    # Arrow location
-    x, y = -0.15, 0.6
+
+    # Indicator placement/size in axes fraction (independent of data limits)
+    cx, cy = 0.12, 0.8   # circle center (top-left corner)
+    L = 0.032             # arrow half-length
     color = 'white' if invert_colors else 'black'
 
-    # Draw wind vector (quiver automatically handles direction signs)
-    ax.quiver(x, y, v_x, v_y, color=color, scale=5, scale_units='xy', angles='xy', width=0.01)
+    if not wind_vector:
+        return ax
+
+    # Draw wind vector as an arrow through the circle center
+    ax.annotate('', xy=(cx + v_x * L, cy + v_y * L), xytext=(cx, cy),
+                xycoords='axes fraction', textcoords='axes fraction',
+                arrowprops=dict(arrowstyle='-|>', color=color, lw=2), zorder=6)
 
     # Draw wind circle
     ax.scatter([x], [y], s=900,
@@ -509,6 +515,151 @@ def plot_puffs(data, t_val, ax=None, fig=None, show=True, scatter_size_factor=No
     if show:
         plt.show()
     return ax
+
+def plot_agent_traj(traj_df, t_val, ax, ep_idx=None, seed=None, **kwargs):
+    """Plot agent trajectory up to t_val, coloring dots by on/off plume state.
+
+    Args:
+        traj_df: DataFrame with columns t_val, loc_x, loc_y, odor_eps_log (or similar).
+                 Filter to a single episode before calling, or pass ep_idx/seed to filter here.
+        t_val:   Current animation time; only steps up to this time are drawn.
+        ax:      Matplotlib axes to draw on.
+        ep_idx:  If provided, filter traj_df to rows where ep_idx == ep_idx.
+        seed:    If provided, additionally filter to rows where seed == seed.
+    """
+    df = traj_df.copy()
+    if ep_idx is not None:
+        df = df[df['ep_idx'] == ep_idx]
+    if seed is not None:
+        df = df[df['seed'] == seed]
+
+    df = df[df['t_val'] <= t_val]
+    if df.empty:
+        return ax
+
+    # Trail line
+    linecolor = config.traj_colormap['off']
+    ax.plot(df['loc_x'], df['loc_y'], c=linecolor, lw=0.5, zorder=2)
+
+    # Per-step scatter colored by odor state
+    if 'odor_eps_log' in df.columns:
+        colors = [
+            config.traj_colormap['off'] if x <= config.env['odor_threshold']
+            else config.traj_colormap['on']
+            for x in df['odor_eps_log']
+        ]
+    else:
+        colors = linecolor
+
+    fontsize = kwargs.get('fontsize', None)
+    scatter_kw = dict(s=4, zorder=3, linewidths=0)
+    ax.scatter(df['loc_x'], df['loc_y'], c=colors, **scatter_kw)
+
+    # Mark start
+    ax.scatter(df['loc_x'].iloc[0], df['loc_y'].iloc[0],
+               c='black', s=20, zorder=4, marker='o')
+
+    ax.set_xlabel('Arena length [m]')
+    ax.set_ylabel('Arena width [m]')
+    return ax
+
+
+def make_animation_update(time_values, data_puffs, data_wind, traj_df,
+                          ax, ep_idx=None, seed=None,
+                          xlim=(-2, 12), ylim=(-5, 5)):
+    """Return an update(i) closure suitable for FuncAnimation.
+
+    Precomputes per-frame lookups (closest wind time, puff slices, trajectory
+    cumulative colors) so the hot loop does minimal work.
+
+    Args:
+        time_values: 1-D array of timestamps, one per animation frame.
+        data_puffs:  Puff dataframe (pre-filtered to the episode time range).
+        data_wind:   Wind dataframe.
+        traj_df:     Agent trajectory dataframe (filtered or full).
+        ax:          Axes to draw on (cleared each frame).
+        ep_idx:      Episode index passed through to plot_agent_traj.
+        seed:        Seed passed through to plot_agent_traj.
+        xlim/ylim:   Axis limits as (min, max) tuples.
+    """
+    fig = ax.figure
+
+    # --- precompute closest wind time for every frame (vectorized) -----------
+    wind_times = np.sort(data_wind['time'].unique())
+    idx = np.searchsorted(wind_times, time_values, side='left')
+    idx = np.clip(idx, 1, len(wind_times) - 1)
+    left_t = wind_times[idx - 1]
+    right_t = wind_times[idx]
+    closest_t_arr = np.where(
+        np.abs(time_values - left_t) <= np.abs(time_values - right_t),
+        left_t, right_t
+    )
+
+    # --- precompute puff slices grouped by time (O(1) dict lookup per frame) -
+    puffs_by_time = {t: grp for t, grp in data_puffs.groupby('time')}
+
+    # --- precompute scatter size factor once (avoids canvas call per frame) --
+    fig.canvas.draw()
+    bbox = ax.get_window_extent().transformed(fig.dpi_scale_trans.inverted())
+    k = 6250 * ((bbox.width / 8.0) ** 2)
+
+    # --- precompute trajectory for this episode, sorted by t_val -------------
+    ep_traj = traj_df.copy()
+    if ep_idx is not None:
+        ep_traj = ep_traj[ep_traj['ep_idx'] == ep_idx]
+    if seed is not None:
+        ep_traj = ep_traj[ep_traj['seed'] == seed]
+    ep_traj = ep_traj.sort_values('t_val').reset_index(drop=True)
+    traj_times = ep_traj['t_val'].values
+
+    odor_threshold = config.env['odor_threshold']
+    color_on = config.traj_colormap['on']
+    color_off = config.traj_colormap['off']
+    if 'odor_eps_log' in ep_traj.columns:
+        traj_colors = np.where(
+            ep_traj['odor_eps_log'].values > odor_threshold,
+            color_on, color_off
+        )
+    else:
+        traj_colors = np.full(len(ep_traj), color_off)
+
+    def update(i):
+        ax.clear()
+        closest_t = closest_t_arr[i]
+
+        # wind vector
+        plot_wind_vectors(data_puffs, data_wind, closest_t, ax)
+
+        # puffs — pass pre-sliced group and cached scatter size
+        puff_slice = puffs_by_time.get(closest_t)
+        if puff_slice is not None:
+            plot_puffs(puff_slice, closest_t, ax, show=False,
+                       scatter_size_factor=k)
+
+        # trajectory up to current time via searchsorted
+        end = int(np.searchsorted(traj_times, closest_t, side='right'))
+        if end > 0:
+            df_slice = ep_traj.iloc[:end]
+            c_slice = traj_colors[:end]
+            ax.plot(df_slice['loc_x'], df_slice['loc_y'],
+                    c=color_off, lw=0.5, zorder=2)
+            ax.scatter(df_slice['loc_x'], df_slice['loc_y'],
+                       c=c_slice, s=4, zorder=3, linewidths=0)
+            ax.scatter(df_slice['loc_x'].iloc[0], df_slice['loc_y'].iloc[0],
+                       c='black', s=20, zorder=4, marker='o')
+
+        ax.set_title(f'ep={ep_idx} seed={seed} t={closest_t:.2f}s')
+        ax.set_xlabel('Arena length [m]')
+        ax.set_ylabel('Arena width [m]')
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
+        ax.plot([0, 0],[-0.3,+0.3],'k-', linestyle = ":", lw=2) # manuscript white background, black lines
+        ax.plot([-0.3,+0.3],[0, 0],'k-', linestyle = ":", lw=2)
+
+
+    return update
+
+
 
 def plot_puffs_and_wind_vectors(data_puffs, data_wind, t_val, ax=None, fig=None, fname='', plotsize=(10,10), aspect_ratio=False, show=True, invert_colors=False, wind_vector=True):
     if fig is None:

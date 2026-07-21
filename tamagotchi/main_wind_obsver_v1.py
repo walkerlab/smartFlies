@@ -92,6 +92,9 @@ def get_args():
     parser.add_argument('--weight_decay', type=float, default=0.)
     parser.add_argument('--rnn_type', type=str, default=None)
     parser.add_argument('--hidden_size', type=int, default=64)
+    parser.add_argument('--auxiliary_arch', type=str, default='default',
+        choices=['default', 'separate_wind_head', 'wind_cond_policy', 'wind_cond_policy_detached'],
+        help='wind-head architecture for MLPBase (see config.yaml for descriptions)')
     parser.add_argument('--betadist', type=bool, default=False)
     parser.add_argument('--stacking', type=int, default=0)
     parser.add_argument('--masking', type=str, default=None)
@@ -417,6 +420,7 @@ def main(args=None):
                         'recurrent': args.recurrent_policy,
                         'rnn_type': args.rnn_type,
                         'hidden_size': args.hidden_size,
+                        'auxiliary_arch': getattr(args, 'auxiliary_arch', 'default'),
                         },
             args=args)
         actor_critic.to(device)
