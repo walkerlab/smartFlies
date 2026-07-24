@@ -571,14 +571,6 @@ class PlumeEnvironment(gym.Env):
     is_outofbounds = self.get_oob()
     done = bool(is_home or is_outofbounds or is_outoftime)
 
-    # Autocurricula
-    # 0.999**1000 = 0.37
-    # 0.998**1000 = 0.16
-    # 0.997**1000 = 0.05
-    # 0.996**1000 = 0.02
-    # 0.995**1000 = 0.007
-    # 0.99**400 = 0.02
-    # 0.95**100 = 0.006
     if is_home and self.auto_movex:
         self.movex = 1 + 0.95*(self.movex - 1)
     if is_home and self.auto_reward:
@@ -1829,8 +1821,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         
         if self.odor_scaling:
             odor_observation *= self.odorx # Random scaling to improve generalization 
-        # if 0 < odor_observation < 1e-3:
-        #     odor_observation *= 1000 # tmp for Toha experiment 
+        if 0 < odor_observation:
+            odor_observation *= 1000 # tmp for Toha experiment 
         if self.odor_01:
             odor_observation = 1.0 if odor_observation > 0 else 0.0 # binary odor detection
         if self.verbose > 1:

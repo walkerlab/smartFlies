@@ -54,15 +54,16 @@ def load_init_conditions(csv_file):
         print(f"[DEBUG] PEv3: fixed_df angles {repeated_df['file'].values}", flush=True)
     # Convert to numpy array
     if repeated_df.shape[1] != 5:
-        out_ndarry = repeated_df[['loc_y', 'angle', 'loc_x', 'time', 'file']].to_numpy() # column order follows the prev. convention
+        out_ndarry = repeated_df[['loc_y', 'angle', 'loc_x', 't_move', 'file']].to_numpy() # column order follows the prev. convention
     else:
-        out_ndarry = repeated_df[['loc_y', 'angle', 'loc_x', 'time', 'file']].to_numpy() # column order follows the prev. convention
+        out_ndarry = repeated_df[['loc_y', 'angle', 'loc_x', 't_move', 'file']].to_numpy() # column order follows the prev. convention
 
     return out_ndarry
 
 
 ### UTILITY ###
 def evaluate_agent(actor_critic, env, args):
+    actor_critic.ou_sigma_current = getattr(args, 'ou_sigma', 0.0) if getattr(args, 'ou_eval', False) else 0.0
     num_tests = 0
     reward_total_sum = 0
     episode_logs = []
@@ -84,7 +85,12 @@ def evaluate_agent(actor_critic, env, args):
         args.test_episodes = grid.shape[0]  # TODO HACK test_episodes never used. Take this out or make functional.
         print(f"Using fixed evaluation sequence [time, angle, loc_y]... ({args.test_episodes} episodes) ")
 
-
+    # print(f"grid shape: {grid.shape}, grid: {grid}", flush=True)
+    # for i, g in enumerate(grid):
+        # print(f"{i}, grid row: {g}", flush=True)
+    
+    eps_to_log = range(args.test_episodes)[:2] # first 2 eps
+    print(f"Logging the last 11 episodes: {eps_to_log}", flush=True)
     for i_episode in range(args.test_episodes):
         if args.fixed_eval:
             venv.fixed_y = grid[i_episode, 0] # meters
@@ -94,6 +100,9 @@ def evaluate_agent(actor_critic, env, args):
             venv.t_val_max = venv.t_val_min + venv.reset_offset_tmax + 1.0*venv.episode_steps_max/venv.fps + 1.00
             venv.set_dataset(grid[i_episode, 4]) # read in the dataset file
 
+        logging = False
+        if i_episode in eps_to_log:
+            logging = True
 
         recurrent_hidden_states = torch.zeros(1, 
                     actor_critic.recurrent_hidden_state_size, device=args.device)
@@ -113,7 +122,9 @@ def evaluate_agent(actor_critic, env, args):
             else:
                 raise ValueError(f"Unsupported value for args.perturb_along_subspace {args.perturb_along_subspace}.")
         obs = env.reset()
-
+        ou_state = actor_critic._zero_ou_state(obs) if getattr(args, 'ou_eval', False) else None
+        if logging:
+            print(f"E{i_episode} obs: {obs}")
         reward_sum = 0    
         ep_step = 0
         trajectory = []
@@ -125,11 +136,14 @@ def evaluate_agent(actor_critic, env, args):
 
         while True:
             with torch.no_grad():
-                value, action, _, recurrent_hidden_states, activity = actor_critic.act(
+                value, action, _, recurrent_hidden_states, activity, ou_state_new = actor_critic.act(
                     obs, 
                     recurrent_hidden_states, 
                     masks, 
-                    deterministic=True)
+                    deterministic=True,
+                    ou_state=ou_state)
+                if getattr(args, 'ou_eval', False):
+                    ou_state = ou_state_new
                 if args.perturb_along_subspace:
                     if os.path.isfile(args.perturb_along_subspace):
                         recurrent_hidden_states = agent_analysis.perturb_rnn_activity(recurrent_hidden_states, orthogonal_basis, sigma_noise, 'subspace')
@@ -139,7 +153,12 @@ def evaluate_agent(actor_critic, env, args):
                         raise ValueError(f"Unsupported value for args.perturb_along_subspace {args.perturb_along_subspace}.")
                     
             obs, reward, done, info = env.step(action)
+            if logging and ep_step % 200 == 0:
+                print(f"E{i_episode} step {ep_step} obs: {obs}, action: {action}, reward: {reward}, done: {done}, info: {info}")
+                
             masks.fill_(0.0 if done else 1.0)
+            if done and getattr(args, 'ou_eval', False):
+                ou_state.zero_()
 
             if args.device != 'cpu':
                 _obs = obs.to("cpu").numpy()
@@ -339,7 +358,7 @@ def eval_loop(args, actor_critic, test_sparsity=True):
                     device=args.device,
                     args=args,
                     allow_early_resets=False)
-
+                
                 episode_logs, episode_summaries = evaluate_agent(actor_critic, env, args)
 
                 fname3 = f"{args.abs_out_dir}/{args.dataset}_{birthx}.pkl"
@@ -405,7 +424,7 @@ if __name__ == "__main__":
 
     parser.add_argument('--fixed_eval', action='store_true', default=False)
     parser.add_argument('--test_sparsity', action='store_true', default=False)
-    parser.add_argument('--device', default="cuda:0")
+    parser.add_argument('--device', default="cpu")
     
     # env related
     parser.add_argument('--diffusionx',  type=float, default=1.0)
@@ -415,6 +434,10 @@ if __name__ == "__main__":
     parser.add_argument('--perturb_along_subspace', type=str, default=False, help='a file that stores a orthogonal basis, where the first vector is the wind encoding subspace')
     parser.add_argument('--no_vec_norm_stats', action='store_true', default=False, help='an agent that is trained without storing vecNormalize stats, or did not use it during training')
     parser.add_argument('--out_dir', type=str, default='eval')
+    parser.add_argument('--ou_sigma', type=float, default=0.0,
+        help='OU diffusion scale for eval ablations when ou_eval is true')
+    parser.add_argument('--ou_eval', type=bool, default=False,
+        help='enable OU noise during evaluation ablations; off by default')
     parser.add_argument('--init_conditions', type=str, default=False, help='a csv file that stores the initial conditions for the agent. for testing toha')
     parser.add_argument('--verbose', type=int, default=0, help='verbose for the env obj')
     parser.add_argument('--t_val_min', type=int, default=60, help='where to start loading the plume data from in seconds')
@@ -450,7 +473,7 @@ if __name__ == "__main__":
     args.flipping = False
     args.odor_scaling = False
     args.qvar = 0.0
-    args.stray_max = 50.0 # 121525 - enlarge for toha's large arena - inits up to 27m from nearest - just gonna turn off oob for now (turn on by adding oob to r_shaping)
+    args.stray_max = 20.0 # 121525 - enlarge for toha's large arena - inits up to 27m from nearest - just gonna turn off oob for now (turn on by adding oob to r_shaping)
     args.birthx_max = 1.0
     args.masking = None
     args.stride = 1
@@ -478,5 +501,6 @@ if __name__ == "__main__":
         actor_critic, obs_rms, optimizer_state_dict = torch.load(args.model_fname, map_location=torch.device(args.device), weights_only=False)
     except ValueError:
         actor_critic, obs_rms = torch.load(args.model_fname, map_location=torch.device(args.device), weights_only=False)
-        
+    actor_critic.configure_ou(args)
+    actor_critic.eval()
     eval_loop(args, actor_critic, test_sparsity=args.test_sparsity)
