@@ -226,10 +226,14 @@ def main():
 
     # Step. 4: inherit subset of args when relevant
     agent_setting = ['if_vec_norm', 'if_train_actor_std', 'rnn_type', 'variant']
-    env_setting = ['apparent_wind', 'action_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'visual_feedback']
+    env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'visual_feedback', 'odor_01', 'action_delay_const', 'env_dt', 'stray_max', 'haltere', 'saccade', 'obs_mask']
     # env_setting = ['apparent_wind', 'action_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'rotate_by', 'visual_feedback'] # just keep rotate_by off for now
     #'ou_eval' set to true
     args = apply_configs(args, train_cfg, keys=agent_setting + env_setting)
+    if train_cfg.get('action_physics') == 'force' and 'force_physics' not in train_cfg:
+        print("\n[WARNING] Training JSON has action_physics='force' but no 'force_physics' coefficients "
+              "(run predates persisting them). Eval will use the hardcoded defaults in config.py, "
+              "which may not match what training used.")
     print("\n" + "=" * 100)
     print("Proceeding to evaluation with args:")
     print(args)

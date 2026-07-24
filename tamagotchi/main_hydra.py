@@ -26,7 +26,6 @@ adam_smoke("") # something about the import order causes a weird interaction - i
 from tamagotchi import main as base_main
 from tamagotchi import main_wind_obsver_v1
 from tamagotchi import main_wind_obsver_v2
-from tamagotchi import config as tamagotchi_config
 
 def _auto_outsuffix(cfg_dict: dict) -> str:
     """Build a unique per-job outsuffix: seed-{seed}-{hash}, hash over the full override string."""
@@ -43,10 +42,13 @@ def _auto_outsuffix(cfg_dict: dict) -> str:
 def run(cfg: DictConfig) -> None:
     cfg_dict = OmegaConf.to_container(cfg, resolve=True)
 
-    # Inject physics subconfig into the tamagotchi.config module so env.py reads the
-    # Hydra-managed values via config.force_physics rather than the hardcoded fallback.
+    # Rename the physics subconfig to force_physics so it rides along in args: env.py
+    # passes args.force_physics into PlumeEnvironment_v3, and it gets persisted in
+    # _args.json for eval to reconstruct. (Setting config.force_physics here does NOT
+    # work: env.py imports 'config' as a separate module object, and SubprocVecEnv
+    # workers re-import modules fresh anyway.)
     if isinstance(cfg_dict.get("physics"), dict):
-        tamagotchi_config.force_physics = cfg_dict.pop("physics")
+        cfg_dict["force_physics"] = cfg_dict.pop("physics")
 
     # Hydra changes cwd; resolve save/log dirs relative to original cwd so reruns land in the same place.
     orig_cwd = hydra.utils.get_original_cwd()

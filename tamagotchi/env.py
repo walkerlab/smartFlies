@@ -1360,6 +1360,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  obs_mask = [],
                  odor_01 = False,
                  action_delay_const=None, # seconds; first-order lag on actions (EMA). None = off
+                 force_physics=None, # dict of coefficients for action_physics=='force'; None falls back to config.force_physics
                  **kwargs):
         '''
         soft_reset_button: bool or None; button never turns on if None, otherwise it will be set to True when step() fails.
@@ -1396,7 +1397,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             #   a[1]: perp thrust       (0.5=no lateral, 0=full-left, 1=full-right)
             #   a[2]: yaw torque        (0.5=no torque, 0=full-CW, 1=full-CCW)
             self.action_space = spaces.Box(low=0.0, high=1.0, shape=(3,), dtype=np.float32)
-            self.physics_coeff = config.force_physics  # access all coeffs as self.physics_coeff['key']
+            # Coefficients must be passed in explicitly (envs are built in subprocesses,
+            # so a module-global set by the launcher would not survive into workers).
+            self.physics_coeff = force_physics if force_physics is not None else config.force_physics
             self.ang_vel = 0.0  # angular velocity (rad/s), persists across steps
             print(f"[DEBUG] PEv3 using force action physics; action space shape: {self.action_space.shape}; coeffs: {self.physics_coeff}")
         self.action_delay_const = action_delay_const
@@ -2483,6 +2486,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         haltere=args.haltere,
                         saccade=args.saccade,
                         action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
+                        force_physics=getattr(args, 'force_physics', None),
                         obs_mask=getattr(args, 'obs_mask', []),
                         odor_01=getattr(args, 'odor_01', False),
                         action_delay_const=getattr(args, 'action_delay_const', None)
