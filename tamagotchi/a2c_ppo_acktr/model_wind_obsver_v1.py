@@ -322,6 +322,8 @@ class MLPBase(NNBase):
         x = inputs
         if self.is_recurrent:
             x, rnn_hxs = self._forward_rnn(x, rnn_hxs, masks, input_masks=input_masks)
+        # set to default if does not exist
+        self.arch = 'default' if not hasattr(self, 'arch') else self.arch
         if self.arch == 'default':
             hx1_critic = self.critic1(x)
             hx1_actor = self.actor1(x)
