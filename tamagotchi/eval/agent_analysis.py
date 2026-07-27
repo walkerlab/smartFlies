@@ -185,7 +185,6 @@ def visualize_single_episode(data_puffs, data_wind, traj_df,
     if xlims is not None:
         ax.set_xlim(xlims[0], xlims[1])
     if ylims is not None:
-        print(ylims)
         ax.set_ylim(ylims[0], ylims[1])
 
     ax.set_xlabel('Arena length [m]')
