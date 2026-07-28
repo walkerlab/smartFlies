@@ -10,10 +10,6 @@ os.environ["CUDA_VISIBLE_DEVICES"]=""
 
 import torch
 import argparse
-import os
-import sys
-import numpy as np
-import torch
 from natsort import natsorted
 
 import traceback
@@ -21,13 +17,12 @@ import traceback
 import matplotlib 
 matplotlib.use("Agg")
 
-
+import pandas as pd
 import numpy as np
 # import glob
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import agent_analysis
-import os
 import log_analysis
 import arch_utils as archu
 import sklearn.decomposition as skld
@@ -42,11 +37,26 @@ def smart_outprefix(model_dir, dataset, out_reldir):
 
 def post_eval(args):
     is_recurrent = True
-    selected_df = log_analysis.get_selected_df(args.model_dir, 
+    # When the eval mixed per-row datasets (init-conditions CSV) but saved everything
+    # under one placeholder name, the logs carry no per-episode dataset. Build an
+    # episode-index -> real-dataset map from the CSV (row order == episode order).
+    init_dataset_map = None
+    init_xy_map = None
+    if args.init_conditions:
+        init_df = pd.read_csv(args.init_conditions)
+        init_dataset_map = {i: str(v) for i, v in enumerate(init_df.iloc[:, 0])}
+        # cols: puff_f, x0, y0, ... -> map episode index to its start position so the
+        # arena (x/y limits) can be sized to span the source (origin) and start point.
+        init_xy_map = {i: (float(x), float(y))
+                       for i, (x, y) in enumerate(zip(init_df.iloc[:, 1], init_df.iloc[:, 2]))}
+        print(f"[post_eval] Loaded init-conditions dataset map for "
+              f"{len(init_dataset_map)} episodes from {args.init_conditions}")
+    selected_df = log_analysis.get_selected_df(args.model_dir,
                                   args.use_datasets, 
-                                  n_episodes_home=60, 
-                                  n_episodes_other=60,
+                                  n_episodes_home=600, 
+                                  n_episodes_other=600,
                                   oob_only=False,
+                                  balanced = False,
                                   min_ep_steps=0)
     # Generate common PCA
     h_episodes = []
@@ -103,23 +113,41 @@ def post_eval(args):
                     extended_metadata=False, 
                     squash_action=squash_action)
         traj_df['ep_idx'] = row['idx']
+        # row['dataset'] is just the .pkl filename label; the episode may have been
+        # run against a different plume (e.g. per-row datasets from an init-conditions CSV).
+        # Resolve the real plume for plume-loading/zoom: prefer the init-conditions CSV map
+        # (by episode index), then the episode's recorded info['dataset'], then the label.
         dataset = row['dataset']
+        if init_dataset_map is not None:
+            dataset = init_dataset_map.get(row['idx'], dataset)
+        else:
+            dataset = row['log']['infos'][0][0].get('dataset', dataset)
         outcome = row['outcome']
         fprefix = f'{row["dataset"]}_{outcome}'
-        OUTPREFIX = smart_outprefix(args.model_dir, dataset, args.out_reldir)
+        OUTPREFIX = smart_outprefix(args.model_dir, row['dataset'], args.out_reldir)
+
+        # Arena limits sized from the init-conditions start position (x0, y0): span the
+        # source (origin) and the start point, with a margin. y kept symmetric so the
+        # arena is robust to per-episode plume flips (flipx).
+        xlims = ylims = None
+        if init_xy_map is not None and row['idx'] in init_xy_map:
+            x0, y0 = init_xy_map[row['idx']]
+            m = args.arena_margin
+            xlims = [min(0.0, x0) - m, max(0.0, x0) + m]
+            ylims = [-(abs(y0) + m), abs(y0) + m]
 
         try:
             # Need to regenerate since no guarantee present already?
-            zoom = 1 if 'constant' in dataset else 2    
-            zoom = 4 if ('constant' in dataset) and ('HOME' not in outcome) else zoom 
-            # zoom = 0 
+            zoom = 1 if 'constant' in dataset else 2
+            zoom = 4 if ('constant' in dataset) and ('HOME' not in outcome) else zoom
+            # zoom = 0
             zoom = 3 if args.walking else zoom
             # zoom = 'toha' # for plotting traj for toha whose arena is big!
-            agent_analysis.visualize_episodes(episode_logs=[row['log']], 
+            agent_analysis.visualize_episodes(episode_logs=[row['log']],
                                               traj_df=traj_df,
                                               episode_idxs=[row['idx']],
-                                              zoom=zoom, 
-                                              dataset=row['dataset'],
+                                              zoom=zoom,
+                                              dataset=dataset,
                                               animate=True,
                                               fprefix=fprefix,
                                               diffusionx=args.diffusionx,
@@ -128,7 +156,10 @@ def post_eval(args):
                                               legend=False,
                                               invert_colors=args.invert_colors,
                                               image_type=args.image_type,
-                                             )    
+                                              xlims=xlims,
+                                              ylims=ylims,
+                                              sample_hz=args.fps,
+                                             )
             if args.animate:
                 if args.viz_sensory_angles:
                     agent_analysis.animate_visual_feedback_angles_1episode(traj_df, OUTPREFIX, fprefix, row['idx'])
@@ -195,12 +226,27 @@ def post_eval(args):
                         extended_metadata=False, 
                         squash_action=squash_action)
             
+            # Resolve real plume: prefer init-conditions CSV map (by episode index), then
+            # info['dataset'], then strip the sparsity suffix off the filename label
+            # (row['dataset'] is "dataset_sparsity").
             dataset = "_".join(row['dataset'].split('_')[:-1])
+            if init_dataset_map is not None:
+                dataset = init_dataset_map.get(row['idx'], dataset)
+            else:
+                dataset = row['log']['infos'][0][0].get('dataset', dataset)
             outcome = row['outcome']
-            
+
             fprefix = f'{row["dataset"]}_{outcome}'
             print("dataset",dataset)
             OUTPREFIX = smart_outprefix(args.model_dir, row['dataset'], args.out_reldir) # row['dataset']: dataset_sparsity
+
+            # Arena limits sized from init-conditions start position (x0, y0); see main loop.
+            xlims = ylims = None
+            if init_xy_map is not None and row['idx'] in init_xy_map:
+                x0, y0 = init_xy_map[row['idx']]
+                m = args.arena_margin
+                xlims = [min(0.0, x0) - m, max(0.0, x0) + m]
+                ylims = [min(0.0, y0) - m, abs(y0) + m]
 
             try:
                 # Need to regenerate since no guarantee present already?
@@ -222,7 +268,10 @@ def post_eval(args):
                                                     title_text=False, # not supported anyway
                                                     legend=False,
                                                     invert_colors=args.invert_colors,
-                                                    )    
+                                                    xlims=xlims,
+                                                    ylims=ylims,
+                                                    sample_hz=args.fps,
+                                                    )
                 if args.viz_sensory_angles:
                     agent_analysis.animate_visual_feedback_angles_1episode(traj_df, OUTPREFIX, fprefix, row['idx'])
                 if args.viz_neural_activity:
@@ -271,8 +320,19 @@ if __name__ == "__main__":
     parser.add_argument('--viz_sensory_angles', type=bool, default=False, help='Visualize sensory angles - only head direction and drift direction at the moment')
     parser.add_argument('--viz_neural_activity', type=bool, default=False, help='Visualize neural population activity of the RNN')
     parser.add_argument('--viz_eigen_values', type=bool, default=False, help='Visualize the eigen spectrum of the RNN population activity')
-    parser.add_argument('--use_datasets', type=str,  nargs='+', 
+    parser.add_argument('--use_datasets', type=str,  nargs='+',
                         default=['constantx5b5', 'switch45x5b5', 'noisy3x5b5'])
+    parser.add_argument('--init_conditions', type=str, default=None,
+                        help='init-conditions CSV used for the eval. When the eval mixed '
+                             'per-row datasets but saved under a single placeholder name, '
+                             'this maps each episode index to its real plume for plume-loading, '
+                             'and sizes the arena from each episode start (x0, y0).')
+    parser.add_argument('--fps', type=int, default=5,
+                        help='Sampling rate: frames rendered per simulated/trajectory second '
+                             '(sim runs at ~25 steps/sec). The mp4 itself plays at a fixed 25 fps, '
+                             'so the video is time-compressed.')
+    parser.add_argument('--arena_margin', type=float, default=1.0,
+                        help='Margin (in arena units) added around x0/y0 when sizing the arena from init_conditions.')
 
     args = parser.parse_args()
     print(args)
