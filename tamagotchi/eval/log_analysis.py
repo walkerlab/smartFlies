@@ -660,7 +660,12 @@ def get_traj_df_tmp(episode_log,
         traj_df['ego_course_direction_y'] = ego_course_direction_y
         traj_df['ego_course_direction_theta'] = egocentric_course_direction_theta # calculated from info and normed to 0-1
         traj_df['allo_ground_velocity'] = allo_ground_velocity
-        traj_df['raw_ego_course_direction'] = [ record[0]['egocentric_course_direction'][0] for record in episode_log['infos']]
+        traj_df['raw_ego_course_direction'] = [ record[0]['egocentric_course_direction'] for record in episode_log['infos']]
+        traj_df['ego_course_direction_zeta'] = np.arctan2(
+            traj_df['raw_ego_course_direction'].apply(lambda x: x[1]),
+            traj_df['raw_ego_course_direction'].apply(lambda x: x[0])
+        )
+        traj_df['ego_course_direction_zeta_deg'] = np.rad2deg(traj_df['ego_course_direction_zeta'])
         traj_df['agent_angle_x_obs'] = obs['agent_angle_x']
         traj_df['agent_angle_y_obs'] = obs['agent_angle_y']
         traj_df['ego_course_direction_x_obs'] = obs['ego_course_direction_x']
