@@ -420,7 +420,7 @@ def plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=False, win
                 arrowprops=dict(arrowstyle='-|>', color=color, lw=2), zorder=6)
 
     # Draw wind circle
-    ax.scatter([x], [y], s=900,
+    ax.scatter([cx], [cx], s=900,
                facecolors='none',
                edgecolors=color,
                linestyle='--',
