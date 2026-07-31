@@ -13,6 +13,7 @@ defaults:
 # Training variant: "base" (default), "wind_obsver_v1", or "wind_obsver_v2"
 variant: base
 experiment_name: default # should be overridden by CLI - acts as both suffix of save dir and wandb run name
+plot_every_n_updates: 1
 
 # PPO / optimizer
 algo: ppo
@@ -33,7 +34,7 @@ ppo_epoch: 10
 num_mini_batch: 4
 clip_param: 0.2
 log_interval: 1
-save_interval: 100
+save_interval: 1
 no_cuda: false
 use_proper_time_limits: false
 recurrent_policy: true
@@ -63,6 +64,7 @@ dataset: [constantx5b5]
 num_env_steps: 3000000
 qvar: [1.5]
 birthx: 0.7
+birthx_upper: 0
 diff_max: [0.8]
 diff_min: [0.3]
 precise_max: [8.0]
@@ -95,6 +97,7 @@ action_feedback: false
 squash_action: true
 flipping: false
 odor_scaling: true
+odor_01: false
 stray_max: 2.0
 test_episodes: 50
 viz_episodes: 10
