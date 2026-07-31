@@ -732,11 +732,12 @@ def training_loop(agent, envs, args, device, actor_critic,
         ##############################################################################################################
         for step in range(args.num_steps):
             with torch.no_grad():
-                value, action, action_log_prob, recurrent_hidden_states, activities = actor_critic.act(
-                    rollouts.obs[step], 
+                value, action, action_log_prob, recurrent_hidden_states, activities, ou_state = actor_critic.act(
+                    rollouts.obs[step],
                     rollouts.recurrent_hidden_states[step],
                     rollouts.observer_hidden_states[step], # wind obsver v2 modification: pass in wind observer hidden states
-                    rollouts.masks[step])
+                    rollouts.masks[step],
+                    ou_state=rollouts.ou_states[step])
             obs, reward, done, infos = envs.step(action)
             if j % plot_every_n_updates == 0:
                 traj_storage.add_step(infos)
@@ -772,7 +773,8 @@ def training_loop(agent, envs, args, device, actor_critic,
             # wind obsver v1 modification: insert wind into rollouts
             rollouts.insert(obs, recurrent_hidden_states, action, action_log_prob,
                             value, reward, masks, bad_masks,
-                            wind_targets=wind_dirs)
+                            wind_targets=wind_dirs,
+                            ou_state=ou_state)
         ##############################################################################################################
         # UPDATE AGENT 
         ##############################################################################################################
