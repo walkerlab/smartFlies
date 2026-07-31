@@ -1091,10 +1091,11 @@ class PlumeEnvironment_v2(gym.Env):
     # print("puff_number_all", self.data_puffs['puff_number'].nunique())
     # Dynamic birthx for each episode
     self.puff_density = 1
-    if self.birthx < 0.99:
-        puff_density = np.clip(np.random.uniform(low=self.birthx, high=1.0), 0.0, 1.0)
+    if self.birthx != 1:
         if self.birthx_upper:
-            puff_density = np.clip(np.random.uniform(low=self.birthx, high=self.birthx+self.birthx_upper), 0.0, 1.0)
+            puff_density = np.random.uniform(low=self.birthx, high=self.birthx+self.birthx_upper)
+        else:
+            puff_density = np.random.uniform(low=self.birthx, high=1.0)
         self.puff_density = puff_density
         # print("puff_density", self.puff_density)
         drop_idxs = self.data_puffs['puff_number'].unique()
@@ -1827,8 +1828,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         
         if self.odor_scaling:
             odor_observation *= self.odorx # Random scaling to improve generalization 
-        if 0 < odor_observation:
-            odor_observation *= 1000 # tmp for Toha experiment 
+        # if 0 < odor_observation:
+        #     odor_observation *= 1000 # tmp for Toha experiment 
         if self.odor_01:
             odor_observation = 1.0 if odor_observation > 0 else 0.0 # binary odor detection
         if self.verbose > 1:
@@ -2489,6 +2490,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         haltere=args.haltere,
                         saccade=args.saccade,
                         action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
+                        birthx_upper=getattr(args, 'birthx_upper', 0),
                         force_physics=getattr(args, 'force_physics', None),
                         obs_mask=getattr(args, 'obs_mask', []),
                         odor_01=getattr(args, 'odor_01', False),
