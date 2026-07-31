@@ -318,11 +318,17 @@ def main(args=None):
     # Weight loading: priority (a) stage chkpt > (b) resume_from (fresh stage) > (c) scratch
     resume_from = getattr(args, 'resume_from', '') or ''
     args.is_fresh_stage = False
+    args.resume_update = None  # update index of the loaded checkpoint (from sidecar json)
 
     if os.path.isfile(args.chkpt_fpath):
         print("Loading stage checkpoint from", args.chkpt_fpath)
         actor_critic, optimizer_state_dict, curriculum_vars = load_model(args, curriculum_vars)
         actor_critic.base.rnn.flatten_parameters()
+        meta_path = args.chkpt_fpath.replace('.pt', '_update.json')
+        if os.path.isfile(meta_path):
+            with open(meta_path) as f:
+                args.resume_update = int(json.load(f)['update'])
+            print(f"Resume update index from {meta_path}: {args.resume_update}")
     elif args.staged_training and resume_from and os.path.isfile(resume_from):
         print("Fresh stage start — loading parent weights from", resume_from)
         args.model_fpath = resume_from

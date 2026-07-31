@@ -764,13 +764,14 @@ class PlumeEnvironment_v2(gym.Env):
     verbose=0,
     apparent_wind=False,
     apparent_wind_allo=False, # deprecated!
+    birthx_upper=0, 
     ):
     super(PlumeEnvironment_v2, self).__init__()
 
     np.random.seed(seed)    
     self.arguments = locals()
     print("PlumeEnvironment:", self.arguments)
-    
+    self.birthx_upper = birthx_upper
     self.verbose = verbose
     self.venv = self
     self.walking = walking
@@ -1092,6 +1093,8 @@ class PlumeEnvironment_v2(gym.Env):
     self.puff_density = 1
     if self.birthx < 0.99:
         puff_density = np.clip(np.random.uniform(low=self.birthx, high=1.0), 0.0, 1.0)
+        if self.birthx_upper:
+            puff_density = np.clip(np.random.uniform(low=self.birthx, high=self.birthx+self.birthx_upper), 0.0, 1.0)
         self.puff_density = puff_density
         # print("puff_density", self.puff_density)
         drop_idxs = self.data_puffs['puff_number'].unique()

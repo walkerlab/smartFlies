@@ -4,13 +4,14 @@ import itertools
 import torch
 import pandas as pd
 import os
+import json
 from collections import deque
 from tamagotchi.a2c_ppo_acktr.storage import RolloutStorage
 # from tamagotchi.eval import eval_lite
 import data_util as utils
 from env import get_vec_normalize
 import matplotlib.pyplot as plt
-import mlflow
+# import mlflow
 
 def get_index_by_dataset(envs, dataset):
     """Get indices of the remotes that loaded the provided dataset."""
@@ -616,7 +617,18 @@ def training_loop(agent, envs, args, device, actor_critic,
     
     # See if a chkpt was loaded
     training_log = training_log if training_log is not None else [] # check pointing if there's any train logs that exist
-    last_chkpt_update = len(training_log) # the number of updates already done in case of checkpointing
+    # Resume position: prefer the update index stored alongside the checkpoint (single
+    # source of truth — the CSV may contain rows from updates lost to preemption).
+    resume_update = getattr(args, 'resume_update', None)
+    if resume_update is not None:
+        last_chkpt_update = resume_update + 1
+        n_before = len(training_log)
+        training_log = [r for r in training_log if r['update'] <= resume_update]
+        if len(training_log) < n_before:
+            print(f"Dropped {n_before - len(training_log)} training-log rows recorded after "
+                  f"checkpointed update {resume_update} (lost to preemption)")
+    else:
+        last_chkpt_update = len(training_log) # legacy fallback: no sidecar next to checkpoint
     eval_log = eval_log if eval_log is not None else []
     # track trajectories for plotting
     best_mean = 0.0
@@ -824,6 +836,14 @@ def training_loop(agent, envs, args, device, actor_critic,
             if args.if_vec_norm:
                 vecNormalize_state_fname = args.model_fpath.replace(".pt", "_vecNormalize.pkl")
                 envs.venv.save(vecNormalize_state_fname)
+
+            # Record the update index this checkpoint corresponds to (atomic write) so a
+            # preemption resume restarts from the checkpointed update, not the CSV length.
+            meta_path = args.model_fpath.replace('.pt', '_update.json')
+            meta_tmp = meta_path + '.tmp'
+            with open(meta_tmp, 'w') as f:
+                json.dump({'update': j, 'stage_offset': 0}, f)
+            os.replace(meta_tmp, meta_path)
 
             current_mean = np.median(episode_rewards)
             if current_mean >= best_mean:
