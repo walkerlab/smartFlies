@@ -25,7 +25,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv as SubprocVecEnv_
 from stable_baselines3.common.vec_env.vec_normalize import \
     VecNormalize as VecNormalize_
 import multiprocessing as mp
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from typing import Any, Callable, List, Optional, Sequence, Tuple, Type, Union
 from stable_baselines3.common.vec_env.base_vec_env import (
     CloudpickleWrapper,
@@ -1364,6 +1364,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  obs_mask = [],
                  odor_01 = False,
                  action_delay_const=None, # seconds; first-order lag on actions (EMA). None = off
+                 action_latency=None,       # seconds；None = off
                  force_physics=None, # dict of coefficients for action_physics=='force'; None falls back to config.force_physics
                  **kwargs):
         '''
@@ -1406,12 +1407,14 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.physics_coeff = force_physics if force_physics is not None else config.force_physics
             self.ang_vel = 0.0  # angular velocity (rad/s), persists across steps
             print(f"[DEBUG] PEv3 using force action physics; action space shape: {self.action_space.shape}; coeffs: {self.physics_coeff}")
+        
+        # Action delay (first-order lag on actions and/or action feedback)
         self.action_delay_const = action_delay_const
         if self.action_delay_const is not None:
             assert self.action_delay_const > 0
             self.action_alpha = 1.0 - np.exp(-self.dt / self.action_delay_const)  # dt-invariant EMA coeff
             act_dim = self.action_space.shape[0]
-            self.null_action = np.array([0.0, 0.5, 0.5], dtype=np.float64)
+            self.null_action = np.array([0.0, 0.5, 0.5], dtype=np.float64) # TODO fix this for kinematics model
             self.action_applied = self.null_action.copy()
             # Compatibility guard: these options mix commanded vs applied action semantics
             incompatible = []
@@ -1423,7 +1426,30 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                 raise ValueError(f"action_delay_const={self.action_delay_const} is incompatible with: "
                                 f"{', '.join(incompatible)}. Disable these or set action_delay_const=None.")
             print(f"[DEBUG] PEv3 action EMA lag: tau={self.action_delay_const}s, dt={self.dt}, alpha={self.action_alpha:.4f}")
-        
+            
+        self.action_latency = action_latency
+        if self.action_latency is not None:
+            self.now_latency = np.random.uniform(self.action_latency - 0.05, self.action_latency + 0.05) # randomize latency for each episode
+            self.latency_steps = int(round(self.now_latency / self.dt))
+            assert self.latency_steps >= 1
+            # init null action 
+            if self.action_space.shape[0] == 3:
+                self._null_action = np.array([0.0, 0.5, 0.5])
+            else:
+                self._null_action = np.array([0.0, 0.5])
+            self.action_buffer = deque(
+                [self._null_action.copy()] * self.latency_steps,
+                maxlen=self.latency_steps)
+            print(f"[DEBUG] PEv3 action transport delay {self.action_latency:.2f} +- 0.05s: "
+                f"{self.now_latency}s = {self.latency_steps} steps @ dt={self.dt}")
+            incompatible = []
+            if self.action_feedback: incompatible.append("action_feedback")
+            if any(k in self.r_shaping for k in ("turn", "move")): incompatible.append("r_shaping 'turn'/'move'")
+            if self.haltere: incompatible.append("haltere")
+            if self.flipping: incompatible.append("flipping")
+            if incompatible:
+                raise ValueError(f"action_delay_const={self.action_delay_const} is incompatible with: "
+                                f"{', '.join(incompatible)}. Disable these or set action_delay_const=None.")
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                         shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
@@ -1898,7 +1924,13 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.ang_vel = 0.0
             self.ground_velocity = np.array([0.0, 0.0])
             self.air_velocity = np.array([0.0, 0.0])
-
+        # action latency buffer randomization 
+        if self.action_latency is not None:
+            self.now_latency = np.random.uniform(self.action_latency-0.05, self.action_latency+0.05) # randomize latency for each episode
+            self.latency_steps = int(self.now_latency / self.dt)
+            self.action_buffer = deque(
+                [self._null_action.copy()] * self.latency_steps,
+                maxlen=self.latency_steps)
         observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
         if len(observation) == 7 or self.haltere:
             observation[5:] = 0 # course direction to 0
@@ -1907,6 +1939,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         return observation
 
     def soft_reset(self):
+        raise Warning("soft_reset() is deprecated. Use reset() instead.")
         # Return an array with [wind x, y, odor, air vel x, y, egocentric course direction x, y]
             # Wind can either be relative wind or apparent wind, depending on the setting
             # print(f'reset() called; self.birthx = {self.birthx}', flush=True)
@@ -1939,6 +1972,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.action_delay_const is not None:
             self.action_applied = self.null_action.copy()
         self.air_velocity = np.array([0, 0])
+        self.now_latency = np.random.uniform(self.action_latency-0.05, self.action_latency+0.05) # randomize latency for each episode
+        self.latency_steps = int(round(self.now_latency / self.dt))
         self.ambient_wind = self.get_current_wind_xy() 
         observation = self.sense_environment()
         self.found_plume = True if observation[2] > 0. else False 
@@ -2031,7 +2066,19 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.squash_action: # always true in training and eval. Bkw compt for Sat's older logs in visualization scripts... Not touching this yet.
             action = (np.tanh(action) + 1)/2
         action = np.clip(action, 0.0, 1.0)
+        if self.squash_action:
+            action = (np.tanh(action) + 1) / 2
+        action = np.clip(action, 0.0, 1.0)
 
+        # --- action delay: store current action, retrieve action from latency_steps ago ---
+        if self.action_latency is not None:
+            self.action_commanded = action.copy()
+            delayed = self.action_buffer.popleft()
+            self.action_buffer.append(action.copy())
+            action = delayed
+            # print(f"[DEBUG] now action: {self.action_commanded}\n")
+            # print(f"[DEBUG] delayed: {delayed}\n")
+            # print(f"[DEBUG] action buffer: {list(self.action_buffer)}\n")
         # --- first-order actuator lag (EMA toward commanded action) ---
         if self.action_delay_const is not None:
             self.action_applied += self.action_alpha * (np.asarray(action, dtype=np.float64) - self.action_applied)
@@ -2494,7 +2541,8 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         force_physics=getattr(args, 'force_physics', None),
                         obs_mask=getattr(args, 'obs_mask', []),
                         odor_01=getattr(args, 'odor_01', False),
-                        action_delay_const=getattr(args, 'action_delay_const', None)
+                        action_delay_const=getattr(args, 'action_delay_const', None),
+                        action_latency=getattr(args, 'action_latency', None),
                         )
             else:
                 # bkw compat before cleaning up TC hack. Useful when evalCli
@@ -2524,6 +2572,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                     obs_noise=args.obs_noise,
                     act_noise=args.act_noise,
                     action_delay_const=args.action_delay_const,
+                    action_latency=getattr(args, 'action_latency', None),
                     action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
                     seed=args.seed
                     )
