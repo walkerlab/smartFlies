@@ -1464,15 +1464,10 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.action_latency is not None:
             self.latency_steps = int(round(self.action_latency / self.dt)) + np.random.randint(-1, 2)  # add jitter of +-1 step
             assert self.latency_steps >= 1
-            # init null action 
-            if self.action_space.shape[0] == 3:
-                self._null_action = np.array([0.0, 0.5, 0.5])
-            else:
-                self._null_action = np.array([0.0, 0.5])
             self.action_buffer = deque(
                 [self._null_action.copy()] * self.latency_steps,
                 maxlen=self.latency_steps)
-            print(f"[DEBUG] PEv3 action transport delay {self.action_latency:.2f} +- 0.05s: "
+            print(f"[DEBUG] PEv3 action transport delay {self.action_latency:.2f}s +- dt: "
                 f"{self.action_latency}s = {self.latency_steps} steps @ dt={self.dt}")
             incompatible = []
             if self.action_feedback: incompatible.append("action_feedback")
@@ -1480,8 +1475,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             if self.haltere: incompatible.append("haltere")
             if self.flipping: incompatible.append("flipping")
             if incompatible:
-                raise ValueError(f"action_delay_const={self.action_delay_const} is incompatible with: "
-                                f"{', '.join(incompatible)}. Disable these or set action_delay_const=None.")
+                raise ValueError(f"action_latency={self.action_latency}s is incompatible with: "
+                                f"{', '.join(incompatible)}. Disable these or set action_latency=None.")
             if self.obs_delayed_actions:
                 max_delay_steps = int(round((self.action_latency) / self.dt)) + 1
                 obs_size = self.observation_space.shape[0] + max_delay_steps * act_dim
@@ -1928,7 +1923,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if not self.loc_algo == self.angle_algo == self.time_algo == 'fixed': # Only sample rotate_by when in training. These three algos are used for eval. 
             self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
         if self.action_delay_const is not None:
-            self.action_applied = self.null_action.copy()
+            self.action_applied = self._null_action.copy()
         if self.haltere:
             self.air_acc = 0.0 # reset acceleration
             self.ang_acc = 0.0 # reset angular acceleration
@@ -1945,7 +1940,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.air_velocity = np.array([0.0, 0.0])
         # action latency buffer randomization 
         if self.action_latency is not None:
-            self.latency_steps = int(self.action_latency / self.dt) + np.random.randint(-1, 2) # random +- 1 step latency
+            self.latency_steps = int(round(self.action_latency / self.dt)) + np.random.randint(-1, 2) # random +- 1 step latency
             self.action_buffer = deque(
                 [self._null_action.copy()] * self.latency_steps,
                 maxlen=self.latency_steps)
@@ -1991,7 +1986,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         # print(f'[soft_reset] resample {self.stray_distance} {self.agent_angle}', flush=True)
 
         if self.action_delay_const is not None:
-            self.action_applied = self.null_action.copy()
+            self.action_applied = self._null_action.copy()
         self.air_velocity = np.array([0, 0])
         self.now_latency = np.random.uniform(self.action_latency-0.05, self.action_latency+0.05) # randomize latency for each episode
         self.latency_steps = int(round(self.now_latency / self.dt)) + np.random.randint(-1, 2)  # add jitter of +-1 step
