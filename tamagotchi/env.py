@@ -1408,48 +1408,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.ang_vel = 0.0  # angular velocity (rad/s), persists across steps
             print(f"[DEBUG] PEv3 using force action physics; action space shape: {self.action_space.shape}; coeffs: {self.physics_coeff}")
         
-        # Action delay (first-order lag on actions and/or action feedback)
-        self.action_delay_const = action_delay_const
-        if self.action_delay_const is not None:
-            assert self.action_delay_const > 0
-            self.action_alpha = 1.0 - np.exp(-self.dt / self.action_delay_const)  # dt-invariant EMA coeff
-            act_dim = self.action_space.shape[0]
-            self.null_action = np.array([0.0, 0.5, 0.5], dtype=np.float64) # TODO fix this for kinematics model
-            self.action_applied = self.null_action.copy()
-            # Compatibility guard: these options mix commanded vs applied action semantics
-            incompatible = []
-            if self.action_feedback: incompatible.append("action_feedback")
-            if any(k in self.r_shaping for k in ("turn", "move")): incompatible.append("r_shaping 'turn'/'move'")
-            if self.haltere: incompatible.append("haltere")
-            if self.flipping: incompatible.append("flipping")
-            if incompatible:
-                raise ValueError(f"action_delay_const={self.action_delay_const} is incompatible with: "
-                                f"{', '.join(incompatible)}. Disable these or set action_delay_const=None.")
-            print(f"[DEBUG] PEv3 action EMA lag: tau={self.action_delay_const}s, dt={self.dt}, alpha={self.action_alpha:.4f}")
-            
-        self.action_latency = action_latency
-        if self.action_latency is not None:
-            self.now_latency = np.random.uniform(self.action_latency - 0.05, self.action_latency + 0.05) # randomize latency for each episode
-            self.latency_steps = int(round(self.now_latency / self.dt))
-            assert self.latency_steps >= 1
-            # init null action 
-            if self.action_space.shape[0] == 3:
-                self._null_action = np.array([0.0, 0.5, 0.5])
-            else:
-                self._null_action = np.array([0.0, 0.5])
-            self.action_buffer = deque(
-                [self._null_action.copy()] * self.latency_steps,
-                maxlen=self.latency_steps)
-            print(f"[DEBUG] PEv3 action transport delay {self.action_latency:.2f} +- 0.05s: "
-                f"{self.now_latency}s = {self.latency_steps} steps @ dt={self.dt}")
-            incompatible = []
-            if self.action_feedback: incompatible.append("action_feedback")
-            if any(k in self.r_shaping for k in ("turn", "move")): incompatible.append("r_shaping 'turn'/'move'")
-            if self.haltere: incompatible.append("haltere")
-            if self.flipping: incompatible.append("flipping")
-            if incompatible:
-                raise ValueError(f"action_delay_const={self.action_delay_const} is incompatible with: "
-                                f"{', '.join(incompatible)}. Disable these or set action_delay_const=None.")
         if self.visual_feedback:
             self.observation_space = spaces.Box(low=-1, high=+1,
                                         shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
@@ -1474,10 +1432,63 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print(f"[DEBUG] PEv3 obs_mask indices {obs_mask} -> bool mask {mask_arr}; obs_space reduced {obs_size}->{new_obs_size}")
         else:
             self.obs_mask = []
-
-        # convert obs_noise to radians
-        # if self.obs_noise:
-            # self.obs_noise = np.deg2rad(self.obs_noise)
+        ################################################
+        # handles delay
+        ################################################
+        
+        act_dim = self.action_space.shape[0]
+        if act_dim == 3:
+            self._null_action = np.array([0.0, 0.5, 0.5], dtype=np.float64)
+        else:
+            self._null_action = np.array([0.0, 0.5], dtype=np.float64)
+        # Action delay (first-order lag on actions and/or action feedback)
+        self.action_delay_const = action_delay_const
+        if self.action_delay_const is not None:
+            assert self.action_delay_const > 0
+            self.action_alpha = 1.0 - np.exp(-self.dt / self.action_delay_const)  # dt-invariant EMA coeff
+            self.action_applied = self._null_action.copy()
+            # Compatibility guard: these options mix commanded vs applied action semantics
+            incompatible = []
+            if self.action_feedback: incompatible.append("action_feedback")
+            if any(k in self.r_shaping for k in ("turn", "move")): incompatible.append("r_shaping 'turn'/'move'")
+            if self.haltere: incompatible.append("haltere")
+            if self.flipping: incompatible.append("flipping")
+            if incompatible:
+                raise ValueError(f"action_delay_const={self.action_delay_const} is incompatible with: "
+                                f"{', '.join(incompatible)}. Disable these or set action_delay_const=None.")
+            print(f"[DEBUG] PEv3 action EMA lag: tau={self.action_delay_const}s, dt={self.dt}, alpha={self.action_alpha:.4f}")
+        
+        # Action latency (fixed transport delay on actions)
+        self.action_latency = action_latency
+        self.obs_delayed_actions = True if self.action_latency is not None else False # always on for now
+        if self.action_latency is not None:
+            self.latency_steps = int(round(self.action_latency / self.dt)) + np.random.randint(-1, 2)  # add jitter of +-1 step
+            assert self.latency_steps >= 1
+            # init null action 
+            if self.action_space.shape[0] == 3:
+                self._null_action = np.array([0.0, 0.5, 0.5])
+            else:
+                self._null_action = np.array([0.0, 0.5])
+            self.action_buffer = deque(
+                [self._null_action.copy()] * self.latency_steps,
+                maxlen=self.latency_steps)
+            print(f"[DEBUG] PEv3 action transport delay {self.action_latency:.2f} +- 0.05s: "
+                f"{self.now_latency}s = {self.latency_steps} steps @ dt={self.dt}")
+            incompatible = []
+            if self.action_feedback: incompatible.append("action_feedback")
+            if any(k in self.r_shaping for k in ("turn", "move")): incompatible.append("r_shaping 'turn'/'move'")
+            if self.haltere: incompatible.append("haltere")
+            if self.flipping: incompatible.append("flipping")
+            if incompatible:
+                raise ValueError(f"action_delay_const={self.action_delay_const} is incompatible with: "
+                                f"{', '.join(incompatible)}. Disable these or set action_delay_const=None.")
+            if self.obs_delayed_actions:
+                max_delay_steps = int(round((self.action_latency) / self.dt)) + 1
+                obs_size = self.observation_space.shape[0] + max_delay_steps * act_dim
+                self.observation_space = spaces.Box(low=-1, high=+1,
+                                                    shape=(obs_size,), dtype=np.float32)
+                print(f"[DEBUG] PEv3 action history in obs: {max_delay_steps} steps "
+                    f"x {act_dim} dims -> obs_space {obs_size}")
 
         self.rewards = {
             'tick': -50/self.episode_steps_max, # prev. 5*tick penalty per step; so 5*-10 == 50; 50/299 = 0.17
@@ -1898,6 +1909,14 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             observation = np.append(observation, [self.air_acc, self.ang_acc])
         if len(self.obs_mask):
             observation = observation[~self.obs_mask]
+        if self.obs_delayed_actions:
+            hist = list(self.action_buffer)  # oldest -> newest
+            pad = (int(round(self.action_latency / self.dt)) + 1) - len(hist) # Max delay steps - current buffer length
+            assert pad >= 0, f"pad {pad} < 0; action_buffer length {len(hist)}; latency_steps {int(round(self.action_latency / self.dt)) + 1}"
+            if pad: 
+                hist = [self._null_action.copy()] * pad + hist
+            hist_arr = np.concatenate(hist).astype(np.float32) * 2.0 - 1.0  # [0,1] -> [-1,1]
+            observation = np.append(observation, hist_arr)
         return observation
 
     def reset(self):
@@ -1931,9 +1950,12 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.action_buffer = deque(
                 [self._null_action.copy()] * self.latency_steps,
                 maxlen=self.latency_steps)
+
         observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
-        if len(observation) == 7 or self.haltere:
-            observation[5:] = 0 # course direction to 0
+        if self.visual_feedback:
+            observation[5:7] = 0
+        elif self.haltere:
+            observation[5:] = 0
 
         self.init_angle = self.agent_angle
         return observation
@@ -2065,9 +2087,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print("step action:", action, action.shape)
         if self.squash_action: # always true in training and eval. Bkw compt for Sat's older logs in visualization scripts... Not touching this yet.
             action = (np.tanh(action) + 1)/2
-        action = np.clip(action, 0.0, 1.0)
-        if self.squash_action:
-            action = (np.tanh(action) + 1) / 2
         action = np.clip(action, 0.0, 1.0)
 
         # --- action delay: store current action, retrieve action from latency_steps ago ---
