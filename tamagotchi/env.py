@@ -1473,7 +1473,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                 [self._null_action.copy()] * self.latency_steps,
                 maxlen=self.latency_steps)
             print(f"[DEBUG] PEv3 action transport delay {self.action_latency:.2f} +- 0.05s: "
-                f"{self.now_latency}s = {self.latency_steps} steps @ dt={self.dt}")
+                f"{self.action_latency}s = {self.latency_steps} steps @ dt={self.dt}")
             incompatible = []
             if self.action_feedback: incompatible.append("action_feedback")
             if any(k in self.r_shaping for k in ("turn", "move")): incompatible.append("r_shaping 'turn'/'move'")
@@ -1945,8 +1945,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.air_velocity = np.array([0.0, 0.0])
         # action latency buffer randomization 
         if self.action_latency is not None:
-            self.now_latency = np.random.uniform(self.action_latency-0.05, self.action_latency+0.05) # randomize latency for each episode
-            self.latency_steps = int(self.now_latency / self.dt)
+            self.latency_steps = int(self.action_latency / self.dt) + np.random.randint(-1, 2) # random +- 1 step latency
             self.action_buffer = deque(
                 [self._null_action.copy()] * self.latency_steps,
                 maxlen=self.latency_steps)
@@ -1995,7 +1994,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.action_applied = self.null_action.copy()
         self.air_velocity = np.array([0, 0])
         self.now_latency = np.random.uniform(self.action_latency-0.05, self.action_latency+0.05) # randomize latency for each episode
-        self.latency_steps = int(round(self.now_latency / self.dt))
+        self.latency_steps = int(round(self.now_latency / self.dt)) + np.random.randint(-1, 2)  # add jitter of +-1 step
         self.ambient_wind = self.get_current_wind_xy() 
         observation = self.sense_environment()
         self.found_plume = True if observation[2] > 0. else False 
