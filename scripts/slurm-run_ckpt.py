@@ -14,6 +14,7 @@ python3 /gscratch/portia/jqhu/work/active_sensing/smartFlies/scripts/slurm-run_c
 
 import argparse
 import glob
+import hashlib
 import os
 import re
 import subprocess
@@ -23,7 +24,8 @@ PROJECT_DIR = '/gscratch/portia/jqhu/work/active_sensing/smartFlies/'
 OUTFILES_DIR = os.path.join(PROJECT_DIR, 'scripts/slurm_outfiles')
 
 GPU_CONFIGS = {
-    'all':  'g[3040-3047,3050-3057,3060-3067,3070-3077,3080-3087,3090-3097,3091-3113,3115-3132]',
+    'all':  'g[3043-3047,3050-3054,3057,3060-3067,3070-3077,3080-3087,3090-3137]',
+    # 'all':  'g[3043-3047,3050-3054,3057,3060-3067,3070-3077,3080-3087,3090-3113,3115-3132]',
     'a100': 'g[3040-3047,3050-3057,3060-3067,3070-3077,3080-3087]',
     'l40s': 'g[3091-3113,3115-3132]',
     'h200': 'g[3125-3132]',
@@ -89,7 +91,7 @@ python3 -u -m tamagotchi.main_hydra \\
 
     print('Submitting job with script:')
     print(script)
-    safe_override = re.sub(r'[^A-Za-z0-9_\-]', '_', override)[-60:]
+    safe_override = hashlib.md5(override.encode()).hexdigest()[:8]
     script_path = os.path.join(OUTFILES_DIR, f'submit_{config_name}_{safe_override}.sh')
     if not dry_run:
         with open(script_path, 'w') as f:
@@ -130,6 +132,10 @@ def main():
     parser.add_argument('--stage_name', type=str, default='',
                         help='Short label for this continuation stage (e.g. "morewind"); '
                              'required when --from_folder is used')
+    parser.add_argument('--separate_wandb', action='store_true', default=False,
+                        help='Give each stage its own wandb run (outsuffix + stage hash) '
+                             'instead of resuming the parent run; use when branching '
+                             'multiple alternative stages off one parent')
     parser.add_argument('--substr', type=str, default='',
                         help='Only load checkpoints whose filename contains this substring '
                              '(e.g. a hash "4deaf7e9" to pin a specific run)')
@@ -140,6 +146,10 @@ def main():
                              '(e.g. "sweep_const" matches all sweep_const_*.json files). '
                              'Each matched config is submitted as a separate job with '
                              'path.curriculum_name=<config_name> appended to the override.')
+    parser.add_argument('--sweep_outsuffix', action='store_true', default=False,
+                        help='When using --sweep_config, append a short hash of the curriculum '
+                             'name to outsuffix so each (seed, curriculum) pair gets a unique '
+                             'run instead of colliding on the same outsuffix.')
 
     args = parser.parse_args()
 
@@ -171,6 +181,7 @@ def main():
 
     for curriculum_name in curriculum_names:
         curriculum_suffix = f' path.curriculum_name={curriculum_name}' if curriculum_name else ''
+        cl_hash = hashlib.md5(curriculum_name.encode()).hexdigest()[:6] if (curriculum_name and args.sweep_outsuffix) else ''
 
         if args.from_folder:
             if not args.stage_name:
@@ -182,22 +193,30 @@ def main():
             pt_files = [f for f in pt_files
                         if re.search(r'seed-\d+-[0-9a-f]{8}(_stage_[0-9a-f]{8})?(\.chkpt)?\.pt$', f)
                         and not f.endswith('_vecNormalize.pkl')
-                        and (not args.substr or args.substr in os.path.basename(f))]
+                        and (not args.substr or args.substr in os.path.basename(f))
+                        # Skip already-staged checkpoints unless --substr explicitly targets
+                        # one — prevents resubmissions from nesting _stage_X_stage_Y runs.
+                        and ('_stage_' in args.substr or '_stage_' not in os.path.basename(f))]
             if not pt_files:
                 print(f'No seed checkpoints found in {args.from_folder}/weights/', file=sys.stderr)
                 sys.exit(1)
             if args.dry_run:
                 print('Dry run mode: found following checkpoints:')
                 print('\n'.join(pt_files))
-            for pt_file in pt_files:
+            for i, pt_file in enumerate(pt_files):
                 stem = os.path.splitext(os.path.basename(pt_file))[0]  # plume_seed-22-4deaf7e9 or .chkpt
                 outsuffix = stem.replace('plume_', '', 1).replace('.chkpt', '')  # seed-22-4deaf7e9
+                print(f'Found checkpoint {pt_file}, submitting continuation with outsuffix={outsuffix}')
+                if cl_hash:
+                    outsuffix = f'{outsuffix}-cl{cl_hash}'
                 seed_n = int(outsuffix.split('-')[1])
+                separate_wandb = '++wandb_run_per_stage=true ' if args.separate_wandb else ''
                 seed_override = (
                     f'outsuffix={outsuffix} '
                     f'resume_from={pt_file} '
                     f'stage_name={args.stage_name} '
                     f'seed={seed_n} '
+                    f'{separate_wandb}'
                     f'{args.override}'
                     f'{curriculum_suffix}'
                 ).strip()

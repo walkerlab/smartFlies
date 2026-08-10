@@ -14,6 +14,7 @@ import numpy as np
 import argparse
 import hashlib
 import json
+import re
 from setproctitle import setproctitle as ptitle
 
 import tamagotchi.data_util as utils
@@ -243,7 +244,10 @@ def set_up_staged_training(args):
         return
 
     args.staged_training = True
-    h_input = stage_name + getattr(args, 'outsuffix', '')
+    # Strip the seed so all seeds of one stage command share the same group hash:
+    # "seed-2-6c3046e0" -> "6c3046e0"
+    seedless = re.sub(r'^seed-\d+-', '', getattr(args, 'outsuffix', ''))
+    h_input = stage_name + seedless
     args.stage_hash = hashlib.sha1(h_input.encode()).hexdigest()[:8]
     args.stage_checkpoint_suffix = f'_stage_{args.stage_hash}'
     print(f"Staged training: stage_name={stage_name}, stage_hash={args.stage_hash}")
@@ -491,7 +495,11 @@ def main(args=None):
     is_branch_off = (args.staged_training and args.parent_experiment_name
                      and own_experiment != args.parent_experiment_name)
     experiment_name = own_experiment
-    run_name = args.outsuffix   # same for all stages — identifies the wandb run
+    # Default: same run_name for all stages (staged continuation resumes the parent's
+    # wandb run). With wandb_run_per_stage=true, each stage gets its own run instead —
+    # needed when branching multiple alternative stages off one parent.
+    run_name = args.outsuffix + (args.stage_checkpoint_suffix
+                                 if getattr(args, 'wandb_run_per_stage', False) else '')
 
     print(f"[staged training check] save_dir       = {args.save_dir}")
     print(f"[staged training check] chkpt_fpath    = {args.chkpt_fpath}")
