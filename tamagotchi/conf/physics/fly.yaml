@@ -1,11 +1,91 @@
-# Physics coefficients for the 'force' action_physics mode — ~1 mg fly model.
-# SI units. Thrust reaches ~2 m/s steady-state in still air.
+# # Physics coefficients for the 'force' action_physics mode — ~1 mg fly model.
+# Kinematic constraints
+# TODO pass these into the kinematics model
+max_forward_airspeed: 0.90       # m/s
+# Fuller et al. 2014 [FREE FLIGHT]:
+# ~0.15-0.20 m/s upwind groundspeed maintained in steady headwind.
+# With max modeled headwind = 0.7 m/s -> required airspeed ~0.85-0.90 m/s.
+# Rohrseitz & Fry 2011 [FREE FLIGHT]: saturation airspeed = 1.1577 +/- 0.2055 m/s.
 
-T_para_max: 6.0e-5    # N, parallel (forward/back, body frame)
-T_perp_max: 2.0e-5    # N, perpendicular (lateral, body frame)
-tau_max: 3.0e-10      # N*m, yaw torque (ccw positive)
-mass: 1.0e-6          # kg
-drag: 3.0e-5          # N*s/m, linear drag on airspeed
-inertia: 5.0e-13      # kg*m^2
-k_rot: 2.0e-11        # N*m*s, rotational drag
-physics_substeps: 4   # zero-order-hold substeps per env step
+max_forward_accel: 2.90          # m/s^2
+# van Breugel, Suver & Dickinson 2014 [FREE FLIGHT]:
+# maximum forward accelerations up to ~2.9 m/s^2.
+
+max_smooth_yaw_rate: 500         # deg/s
+# Mronz & Lehmann 2008 [FREE FLIGHT]:
+# aggressive smooth optomotor turning around 500 deg/s;
+# saccades separately classified at >1000 deg/s.
+
+max_smooth_yaw_accel: 1550       # deg/s^2
+# DERIVED, not directly reported as a maximum.
+# Cellini, Salem & Mongeau 2022 [MAGNETIC TETHER, SMOOTH YAW]:
+# fitted intact-fly yaw dynamics have pole C/I = 3.1 s^-1.
+# 3.1 s^-1 * 500 deg/s = 1550 deg/s^2.
+
+T_para_max: 2.90e-6     # N
+                         # From max forward acceleration ~2.9 m/s^2 measured in
+                         # freely flying D. melanogaster (van Breugel et al., 2014;
+                         # similar ~2.5 m/s^2 reported by Rohrseitz & Fry).
+                         # With mass = 1 mg: F = ma = 2.9e-6 N.
+                         # [FREE FLIGHT]
+
+T_perp_max: 1.30e-6     # N
+                         # Sugiura & Dickinson (2009) directly measured peak
+                         # body-frame sideslip force = 0.8 +/- 0.5 uN.
+                         # 1.3 uN = mean + 1 SD, used here as a permissive upper cap.
+                         # Fly was fixed against body roll, so this reflects direct
+                         # aerodynamic side-force generation rather than tilted lift.
+                         # [RIGID TETHER]
+
+tau_max: 3.0e-10        # N*m
+                         # Chosen as an upper-envelope yaw torque.
+                         # Hesselberg & Lehmann (2009) measured free-flight angular
+                         # acceleration = 24.0 +/- 7.28 x 10^3 deg/s^2.
+                         # With I = 5e-13, this tau_max gives ~34.4 x 10^3 deg/s^2,
+                         # i.e. somewhat above the reported mean, appropriate as a cap.
+                         # NOTE: their angular-acceleration statistic includes flight
+                         # bouts containing saccades; it is not a smooth-turn-only cap.
+                         # [FREE FLIGHT]
+
+mass: 1.0e-6            # kg
+                         # Representative ~1 mg adult D. melanogaster body mass.
+                         # Comparable to masses used/measured in free-flight studies;
+                         # e.g. Mronz & Lehmann used ~1.24 mg in their force analysis.
+                         # Rounded to 1 mg for the model.
+                         # [BIOLOGICAL / FREE-FLIGHT STUDY SCALE]
+
+drag: 3.22e-6           # N*s/m
+                         # MODEL-DERIVED, not directly measured drag coefficient.
+                         # T_para_max / drag = 0.90 m/s terminal forward airspeed.
+                         # 0.90 m/s is chosen from ~0.15-0.20 m/s maintained upwind
+                         # groundspeed + max modeled headwind of 0.7 m/s.
+                         # Groundspeed compensation is supported by David (1982) and
+                         # Fuller et al. (2014).
+                         # [FREE FLIGHT -> MODEL-DERIVED PARAMETER]
+inertia: 5.2e-13       # kg*m^2
+                        # Drosophila yaw moment of inertia used in yaw-dynamics
+                        # studies; Salem et al. (2023) explicitly use
+                        # 5.2e-13 kg*m^2 as 1x native Drosophila yaw inertia.
+                        # [MORPHOLOGICAL / MECHANICAL ESTIMATE]
+
+k_rot: 1.61e-12        # N*m*s
+                        # Effective damping for NON-SACCADIC smooth yaw.
+                        # Salem et al. (2022) fit intact flies' smooth yaw
+                        # optomotor dynamics with a first-order pole:
+                        # C/I = 3.1 s^-1.
+                        # Thus C = I*3.1 = 1.61e-12 N*m*s.
+                        # [MAGNETIC TETHER; SMOOTH OPTOMOTOR TURNING]
+
+tau_max: 1.41e-11      # N*m
+                        # Chosen so terminal smooth yaw rate is 500 deg/s:
+                        # tau_max/k_rot = 8.73 rad/s = 500 deg/s.
+                        # 500 deg/s is an upper-envelope smooth turning rate
+                        # observed during free-flight optomotor tracking
+                        # (Mronz & Lehmann, 2008).
+                        # [FREE FLIGHT RATE + MODEL-DERIVED TORQUE]
+
+# env_dt = 0.04:
+physics_substeps: 4
+
+# env_dt = 0.10:
+# physics_substeps: 10
