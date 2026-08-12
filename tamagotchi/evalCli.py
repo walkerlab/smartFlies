@@ -242,7 +242,7 @@ def eval_loop(args, actor_critic, test_sparsity=True):
                 allow_early_resets=False,
                 **kwargs
                 )
-
+            env.eval() # stops vecNormalize from updating its stats, if it is being used.
             if 'switch' in args.dataset: 
                 venv = env.unwrapped.envs[0].venv
                 venv.qvar = 0.0
@@ -325,6 +325,8 @@ def eval_loop(args, actor_critic, test_sparsity=True):
                     device=args.device,
                     args=args,
                     allow_early_resets=False)
+                # TODO rethink for Toha exp
+                env.eval() # stops vecNormalize from updating its stats, if it is being used.
 
                 episode_logs, episode_summaries = evaluate_agent(actor_critic, env, args)
 
@@ -401,9 +403,10 @@ if __name__ == "__main__":
     parser.add_argument('--diffusionx',  type=float, default=1.0)
     parser.add_argument('--obs_noise',  type=float, default=0.0)
     parser.add_argument('--apparent_wind', type=bool, default=False)
-    parser.add_argument('--visual_feedback', type=bool, default=False)
-    parser.add_argument('--saccade', type=bool, default=False) # need to know from user 
-    parser.add_argument('--haltere', type=bool, default=False) # may be detected from input space
+    parser.add_argument('--env_version', type=str, default='v3', help="'v3' selects PlumeEnvironment_v3")
+    parser.add_argument('--obs_mask', type=int, nargs='*', default=[],
+        help='observation channel indices to zero out (shape is unchanged): '
+             '0 wind_x, 1 wind_y, 2 odor, 3 head_x, 4 head_y, 5 course_x, 6 course_y')
     parser.add_argument('--flip_ventral_optic_flow', type=bool, default=False) # for eval to see the behavioral impact of flipping course direction perception.
     parser.add_argument('--perturb_RNN_by_ortho_set', type=str, default=False, help='a file that stores an orthogonal basis, where the first vector is the wind encoding subspace')
     parser.add_argument('--perturb_RNN_by', type=str, default=False, help='set to "subspace" to perturb hidden states along the wind encoding subspace')

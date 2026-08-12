@@ -1354,10 +1354,7 @@ class PlumeEnvironment_v2(gym.Env):
 
 class PlumeEnvironment_v3(PlumeEnvironment_v2):
     def __init__(self, flip_ventral_optic_flow=False,
-                 rotate_by=None, 
-                 soft_reset=False, 
-                 haltere=False, 
-                 saccade=False, 
+                 rotate_by=None,
                  double_drift=False,
                  action_physics=None, # or 'ground_vel_angvel': agent commands ground velocity instead of air velocity
                  obs_mask = [], # indices of observation channels to zero out; does NOT change obs space shape
@@ -1365,13 +1362,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  action_delay_const=None, # seconds; first-order lag on actions (EMA). None = off
                  action_latency=None,       # seconds；None = off
                  obs_delayed_actions=False, # if True, obs includes last action (delayed by action_latency) as part of observation
-                 force_physics=None, # dict of coefficients for action_physics=='force'; None falls back to config.force_physics
+                 force_physics=None, # dict of coefficients required by action_physics=='force'
                  **kwargs):
-        '''
-        soft_reset_button: bool or None; button never turns on if None, otherwise it will be set to True when step() fails.
-        '''
         super(PlumeEnvironment_v3, self).__init__(**kwargs)
-        self.soft_reset_button = False if soft_reset else None # button to trigger soft reset - set true when failed in step(), unless it's None which never gets turned on
         self.flip_ventral_optic_flow = flip_ventral_optic_flow
         if self.verbose > 0:
             print("PlumeEnvironment_v3")
@@ -1383,12 +1376,12 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.sample_rotate_by()
         self.stray_distance_init = 0 # stray distance at reset
         self.stray_steps = 0 # how many steps of OOB? env fail at 10!
-        self.haltere = haltere # PEv3 - haltere feedback
         self.double_drift = double_drift
         self.action_physics = action_physics
         self.now_init_long = 0.0 # long-axis init coordinate set directly by curriculum
         self.odor_01 = odor_01 # PEv3
-        print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}, self.mirror: {self.mirror}, haltere: {self.haltere}, self.action_physics: {self.action_physics} {action_physics}")
+        self.ang_vel = 0.0 # angular velocity (rad/s); integrated by 'force' physics, left at 0 otherwise
+        print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}, self.mirror: {self.mirror}, self.action_physics: {self.action_physics} {action_physics}")
         if self.action_physics == 'ground_vel_angvel':
             # 3-dim action: [vel_x_ego, vel_y_ego, turn], all in [0, 1]
             # vel_x: forward speed (0=stop, 1=full); vel_y: lateral (0.5=center, 0=full-left, 1=full-right); turn: same as air_vel_angvel
@@ -1402,18 +1395,32 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.action_space = spaces.Box(low=0.0, high=1.0, shape=(3,), dtype=np.float32)
             # Coefficients must be passed in explicitly (envs are built in subprocesses,
             # so a module-global set by the launcher would not survive into workers).
-            self.physics_coeff = force_physics if force_physics is not None else config.force_physics
-            self.ang_vel = 0.0  # angular velocity (rad/s), persists across steps
-            print(f"[DEBUG] PEv3 using force action physics; action space shape: {self.action_space.shape}; coeffs: {self.physics_coeff}")
-        
+            if force_physics is None:
+                raise ValueError("action_physics='force' requires explicit force_physics coefficients. "
+                                 "With hydra pass physics=<fly|drone|drone_low_acc|...> (see conf/physics/); "
+                                 "otherwise pass force_physics=<dict> into the env.")
+            self.physics_coeff = force_physics
+            pc = self.physics_coeff
+            # Logged for the record: physics_substeps is chosen per physics yaml against env_dt.
+            print(f"[DEBUG] PEv3 using force action physics; action space shape: {self.action_space.shape}; "
+                  f"tau_lin={pc['mass']/pc['drag']:.4g}s, tau_rot={pc['inertia']/pc['k_rot']:.4g}s, "
+                  f"sub_dt={self.dt/pc['physics_substeps']:.4g}s; coeffs: {self.physics_coeff}")
+
+        # Options below only ever worked with the legacy 2-dim air-velocity physics; fail loudly
+        # rather than silently ignoring them under the 3-dim action modes.
+        if self.walking:
+            raise ValueError("walking is not supported by PlumeEnvironment_v3 - wind advection is part "
+                             "of the action physics. Set walking=False or use PlumeEnvironment_v2.")
+        if self.flipping and self.action_space.shape[0] == 3:
+            raise ValueError(f"flipping is incompatible with action_physics={self.action_physics!r}: the "
+                             "arena flip is only applied to the 2-dim turn action, so the lateral/torque "
+                             "channels would stay unmirrored. Set flipping=False.")
+
         # Observation layout is fixed; whether the agent actually receives a channel is decided by obs_mask.
         obs_channels = ['wind_x', 'wind_y', 'odor', 'head_x', 'head_y', 'course_x', 'course_y']
-        if self.haltere:
-            obs_channels = obs_channels + ['air_acc', 'ang_acc']
         self.observation_space = spaces.Box(low=-1, high=+1,
                                     shape=(len(obs_channels),), dtype=np.float32)
 
-        self.saccade = saccade # PEv3 - saccade action
         # obs_mask zeroes channels in place - it never changes the observation shape, so every
         # index-based reader downstream (reward odor reads, info dict, reset zeroing) stays valid.
         if obs_mask is not None and len(obs_mask):
@@ -1454,8 +1461,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # Compatibility guard: these options mix commanded vs applied action semantics
             incompatible = []
             if self.action_feedback: incompatible.append("action_feedback")
-            if any(k in self.r_shaping for k in ("turn", "move")): incompatible.append("r_shaping 'turn'/'move'")
-            if self.haltere: incompatible.append("haltere")
             if self.flipping: incompatible.append("flipping")
             if incompatible:
                 raise ValueError(f"action_delay_const={self.action_delay_const} is incompatible with: "
@@ -1477,8 +1482,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                 f"action_buffer shape: {len(self.action_buffer)} x {act_dim}")
             incompatible = []
             if self.action_feedback: incompatible.append("action_feedback")
-            if any(k in self.r_shaping for k in ("turn", "move")): incompatible.append("r_shaping 'turn'/'move'")
-            if self.haltere: incompatible.append("haltere")
             if self.flipping: incompatible.append("flipping")
             if incompatible:
                 raise ValueError(f"action_latency={self.action_latency}s is incompatible with: "
@@ -1829,7 +1832,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
     def sense_environment(self):
         '''
         Return an array with [wind x, y, odor, allocentric head direction x, y, egocentric course direction x, y]
-        if self.haltere, then [wind x, y, odor, allocentric head direction x, y, egocentric course direction x, y, acc. and ang. acc.]
         '''
         if (self.verbose > 1) and (self.episode_step >= self.episode_steps_max): # Debug mode
             pprint(vars(self))
@@ -1904,9 +1906,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.verbose > 1:
             print('observation', observation)
 
-        if self.haltere:
-            # Add haltere gyroscopic feedback
-            observation = np.append(observation, [self.air_acc, self.ang_acc])
         if len(self.obs_mask):
             # Zero in place - shape is preserved so downstream index-based readers stay valid
             observation[self.obs_mask] = 0.0
@@ -1923,28 +1922,18 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
     def reset(self):
         # Return an array with [wind x, y, odor, air vel x, y, egocentric course direction x, y]
             # Wind can either be relative wind or apparent wind, depending on the setting
-        if self.soft_reset_button: # gets turned on when failed in step()
-            self.soft_reset_button = False # reset the button
-            return self.soft_reset()
-        if not self.loc_algo == self.angle_algo == self.time_algo == 'fixed': # Only sample rotate_by when in training. These three algos are used for eval. 
+        if not self.loc_algo == self.angle_algo == self.time_algo == 'fixed': # Only sample rotate_by when in training. These three algos are used for eval.
             self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
         if self.action_delay_const is not None:
             self.action_applied = self._null_action.copy()
-        if self.haltere:
-            self.air_acc = 0.0 # reset acceleration
-            self.ang_acc = 0.0 # reset angular acceleration
-            self.move_action_last = 0
-            self.turn_action_last = 0
-            self.move_action_now = 0
-            self.turn_action_now = 0
-            # print(f"[DEBUG RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_action_last: {self.move_action_last}, turn_action_last: {self.turn_action_last}")
 
-        if self.action_physics == 'force':
-            # Zero out the integrator state at the start of each episode.
-            self.ang_vel = 0.0
-            self.ground_velocity = np.array([0.0, 0.0])
-            self.air_velocity = np.array([0.0, 0.0])
-        # action latency buffer randomization 
+        # Zero out the velocity state at the start of each episode. Under 'force' this is the
+        # integrator state; under the other modes it is recomputed each step, but it must not carry
+        # the previous episode's value into the first observation.
+        self.ang_vel = 0.0
+        self.ground_velocity = np.array([0.0, 0.0])
+        self.air_velocity = np.array([0.0, 0.0])
+        # action latency buffer randomization
         if self.action_latency is not None:
             self.latency_steps = int(round(self.action_latency / self.dt)) + np.random.randint(-1, 2) # random +- 1 step latency
             self.action_buffer = deque(
@@ -1952,109 +1941,33 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                 maxlen=self.latency_steps)
 
         observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
-        # Course direction is undefined before the agent has moved; haltere accelerations start at rest.
-        # Bounded slices only - an open-ended one would also wipe the appended action history.
+        # Course direction is undefined before the agent has moved.
+        # Bounded slice only - an open-ended one would also wipe the appended action history.
         observation[5:7] = 0
-        if self.haltere:
-            observation[7:9] = 0
 
         self.init_angle = self.agent_angle
         return observation
 
-    def soft_reset(self):
-        raise Warning("soft_reset() is deprecated. Use reset() instead.")
-        # Return an array with [wind x, y, odor, air vel x, y, egocentric course direction x, y]
-            # Wind can either be relative wind or apparent wind, depending on the setting
-            # print(f'reset() called; self.birthx = {self.birthx}', flush=True)
-        self.episode_reward = 0
-        self.episode_step = 0 # skip_steps already done during loading
-        self.t_val = self.t_vals[self.episode_step + self.step_offset]
-        self.tidx = self.tidxs[self.episode_step + self.step_offset] # Use tidx when possible
-
-        
-        self.agent_location_last = self.agent_location_init
-        self.agent_location_init = self.agent_location_init
-        self.agent_location = self.agent_location_init
-
-
-        self.stray_distance = self.get_stray_distance()
-        self.stray_distance_last = self.stray_distance
-        self.agent_angle = self.get_initial_angle(self.angle_algo)
-        self.init_angle = self.agent_angle
-
-        # print(f'[soft_reset] keep the same {self.t_val} {self.tidx} \
-        #     {self.tidx_min_episode} {self.tidx_max_episode} \
-        #     {self.data_puffs.shape} {self.puff_density} \
-        #     {self.agent_location_last} {self.agent_location_init} \
-        #     {self.agent_location} {self.odorx} \
-        #     {self.agent_location_last} {self.agent_location_init} \
-        #     {self.agent_location} {self.odorx}', flush=True)
-        
-        # print(f'[soft_reset] resample {self.stray_distance} {self.agent_angle}', flush=True)
-
-        if self.action_delay_const is not None:
-            self.action_applied = self._null_action.copy()
-        self.air_velocity = np.array([0, 0])
-        self.now_latency = np.random.uniform(self.action_latency-0.05, self.action_latency+0.05) # randomize latency for each episode
-        self.latency_steps = int(round(self.now_latency / self.dt)) + np.random.randint(-1, 2)  # add jitter of +-1 step
-        self.ambient_wind = self.get_current_wind_xy() 
-        observation = self.sense_environment()
-        self.found_plume = True if observation[2] > 0. else False 
-    
-        if len(observation) == 7 or self.haltere:
-            observation[5:] = 0 # course direction to 0
-        if self.haltere:
-            # print(f"[DEBUG SOFT_RESET] Before reset - air_acc: {getattr(self, 'air_acc', 'unset'):.4f}, ang_acc: {getattr(self, 'ang_acc', 'unset'):.4f}")
-            self.air_acc = 0.0 # reset acceleration
-            self.ang_acc = 0.0 # reset angular acceleration
-            self.move_action_last = 0
-            self.turn_action_last = 0
-            self.move_action_now = 0
-            self.turn_action_now = 0
-            # print(f"[DEBUG SOFT_RESET] After reset - air_acc: {self.air_acc:.4f}, ang_acc: {self.ang_acc:.4f}, move_action_last: {self.move_action_last}, turn_action_last: {self.turn_action_last}")
-            
-        return observation
-    
     def turn_action_to_turn_amount(self, action, radian=True):
         """
-        Maps action [0,1] to angular velocity 
-        0.5 = no turn, 80% range for smooth turning, 20% for saccades
-        
+        Maps action [0,1] to a per-step turn amount; 0.5 = no turn.
+
         Args:
             action: float [0,1], where 0.5 = no turn
-            radian: bool, if True returns rad/s, if False returns deg/s
-            
+            radian: bool, if True returns radians, if False returns degrees
+
         Returns:
-            Angular velocity in rad/s (if radian=True) or deg/s (if radian=False)
-            
-        Limits from Eatai Roth et al (2012):
-        - Smooth turning: ±200 deg/s (±3.491 rad/s)
-        - Saccadic turning: ±1800 deg/s (±31.416 rad/s)
+            Turn amount for this step, in radians (if radian=True) or degrees (if radian=False)
         """
-        saccade = True
-        if self.saccade:
-            # Calculate angular velocity in radians/second directly
-            if action <= 0.1:  # Saccadic clockwise
-                angular_vel_rad = -31.416 + (action / 0.1) * 27.925  # [-31.416, -3.491] rad/s
-            elif action <= 0.5:  # Smooth clockwise  
-                angular_vel_rad = -3.491 + ((action - 0.1) / 0.4) * 3.491  # [-3.491, 0] rad/s
-                saccade = False  # No saccade, just smooth turn
-            elif action <= 0.9:  # Smooth counter-clockwise
-                angular_vel_rad = ((action - 0.5) / 0.4) * 3.491  # [0, 3.491] rad/s
-                saccade = False  # No saccade, just smooth turn
-            else:  # Saccadic counter-clockwise
-                angular_vel_rad = 3.491 + ((action - 0.9) / 0.1) * 27.925  # [3.491, 31.416] rad/s
-        else:
-            # Simple linear mapping, work directly in radians
-            angular_vel_rad = self.turn_capacity * (action - 0.5)
-            saccade = False  # No saccade, just smooth turn
-        
+        # Simple linear mapping, work directly in radians
+        angular_vel_rad = self.turn_capacity * (action - 0.5)
+
         if radian:
-            return angular_vel_rad * self.turnx * self.dt, saccade
+            return angular_vel_rad * self.turnx * self.dt
         else:
             # Convert to degrees only if requested
             angular_vel_deg = np.rad2deg(angular_vel_rad)
-            return angular_vel_deg * self.turnx * self.dt, saccade
+            return angular_vel_deg * self.turnx * self.dt
 
     def step(self, action):
         """
@@ -2079,13 +1992,15 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.episode_step == 1:
             self.stray_distance_init = self.stray_distance_last # stray distance at reset
         
-        if self.haltere:
-            self.move_action_last = self.move_action_now
-            self.turn_action_last = self.turn_action_now
-
         # Handle action
         if self.verbose > 1:
             print("step action:", action, action.shape)
+        # Guard against a policy/env action-space mismatch: without this a 3-dim policy stepping an
+        # env built for 2-dim physics silently drops action[2] and runs the wrong dynamics.
+        act_dim = np.asarray(action).shape[0]
+        assert act_dim == self.action_space.shape[0], (
+            f"action has {act_dim} dims but action_physics={self.action_physics!r} expects "
+            f"{self.action_space.shape[0]}")
         if self.squash_action: # always true in training and eval. Bkw compt for Sat's older logs in visualization scripts... Not touching this yet.
             action = (np.tanh(action) + 1)/2
         action = np.clip(action, 0.0, 1.0)
@@ -2128,7 +2043,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # Agent commands body-frame thrust [T_par, T_per] + yaw torque (tau). The env
             # integrates rigid-body dynamics (semi-implicit Euler, zero-order hold) over
             # physics_substeps, with linear drag on the airspeed (ground velocity - wind).
-            # Coefficients stored in self.physics_coeff (loaded from config.force_physics at init).
+            # Coefficients stored in self.physics_coeff (required at init; see conf/physics/).
             pc = self.physics_coeff
             T_par = float(action[0]) * pc['T_para_max']                       # [0,1] -> [0, T_para_max]
             T_per = (float(action[1]) - 0.5) * 2.0 * pc['T_perp_max']         # [0,1] -> [-T_perp_max, T_perp_max]
@@ -2156,10 +2071,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.air_velocity = vel - self.ambient_wind  # Rel_wind = Amb_wind - Air_vel
         else:
             # Turn/Update orientation and move to new location
-            turn_amount, if_saccade = self.turn_action_to_turn_amount(turn_action, radian=True) # in radians
-            if if_saccade:
-                move_action *= 0.5 # slow movement during saccade
-            # print(f"[DEBUG] PEv3 turn_amount: {np.rad2deg(turn_amount):.4f}, turn_action: {turn_action:.4f}, if_saccade: {if_saccade}, move_action: {move_action:.4f}")
+            turn_amount = self.turn_action_to_turn_amount(turn_action, radian=True) # in radians
+            # print(f"[DEBUG] PEv3 turn_amount: {np.rad2deg(turn_amount):.4f}, turn_action: {turn_action:.4f}, move_action: {move_action:.4f}")
 
             new_angle_radians = old_angle_radians + turn_amount
             self.agent_angle = [ np.cos(new_angle_radians), np.sin(new_angle_radians) ]
@@ -2188,8 +2101,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                 agent_move_y = self.agent_angle[1]*self.move_capacity*self.movex*move_action*self.dt
                 wind_drift_x = self.ambient_wind[0]*self.dt
                 wind_drift_y = self.ambient_wind[1]*self.dt
-                if self.walking:
-                    wind_drift_x = wind_drift_y = 0
                 self.agent_location = [
                 self.agent_location[0] + agent_move_x + wind_drift_x,
                 self.agent_location[1] + agent_move_y + wind_drift_y,
@@ -2199,30 +2110,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                 self.ground_velocity = (np.array(self.agent_location) - self.agent_location_last)/self.dt
         # print(f"[DEBUG] PEv3 step: air_velocity: {self.air_velocity}, ambient_wind: {self.ambient_wind}, agent_location: {self.agent_location}")
         # print(f"[DEBUG] PEv3 step: ground_velocity: {self.ground_velocity}")
-
-        if self.haltere and self.action_physics != 'force': # For now, only calculate haltere feedback with non-force physics for simplicity. Can add later if needed.
-            self.move_action_now = move_action
-            self.turn_action_now = turn_action
-            self.move_dt = self.move_action_now - self.move_action_last
-            self.turn_dt = new_angle_radians - old_angle_radians
-            self.turn_dt = ((self.turn_dt + np.pi) % (2*np.pi)) - np.pi # normalize to [-pi, pi]
-
-            # self.turn_amount_now = turn_amount
-            # self.saccadic_turn_dt = self.turn_amount_now - self.turn_amount_last # track by amount gives the same value as turn_dt
-            # print(f"[DEBUG ACCEL CALC] saccadic_turn_dt {self.saccadic_turn_dt:.4f} turn_dt: {self.turn_dt:.4f}\n")
-
-            # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: move_action_last: {self.move_action_last:.4f}, move_action_now: {self.move_action_now:.4f}, move_dt: {self.move_dt:.4f}\n")
-            # print(f"[DEBUG ACCEL CALC] Step {self.episode_step}: old_angle: {old_angle_radians:.4f}, new_angle: {new_angle_radians:.4f}, turn_dt: {self.turn_dt:.4f}\n")
-            
-            air_vel_change = self.move_dt * self.move_capacity * self.movex
-            angular_vel_change = self.turn_dt
-            self.air_acc = air_vel_change / self.dt # Air Speed Acceleration in m/s^2
-            self.ang_acc = angular_vel_change / self.dt # Angular acceleration in rad/s^2
-            
-            # print(f"[DEBUG ACCEL RESULT] Step {self.episode_step}: air_acc: {self.air_acc:.4f} m/s^2, ang_acc: {self.ang_acc:.4f} rad/s^2\n")
-            
-            if self.verbose > 1:
-                print(f"haltere acc: {self.air_acc:.2f}, ang_acc: {self.ang_acc:.2f}, move_dt: {self.move_dt:.2f}, turn_dt: {self.turn_dt:.2f}\n")
 
         ### ----------------- End conditions / Is the trial over ----------------- ### 
         is_home = np.linalg.norm(self.agent_location) <= self.homed_radius 
@@ -2312,12 +2199,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             end_reward = radial_distance_decrease - self.stray_distance
             reward += end_reward
 
-        if 'turn' in self.r_shaping and self.action_physics != 'force':
-            reward -= 0.05*np.abs(2*(turn_action - 0.5))
-
-        if 'move' in self.r_shaping and self.action_physics != 'force':
-            reward -= 0.05*np.abs(move_action)
-
         if 'found' in self.r_shaping:
             if self.found_plume is False and observation[2] > 0.:
                 # print("found_plume")
@@ -2332,11 +2213,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             "OOB" if is_outofbounds else \
             "OOT" if is_outoftime else \
             "NA"    
-        if self.soft_reset_button is not None:
-            self.soft_reset_button = False if done_reason == "HOME" else True
-            
         info = {
-            'soft_reset_button': self.soft_reset_button, # send in info so SubprocVecEnv can decide if to switch deploted workers
             'rotate_by': self.rotate_by, # PEv3 - rotate the data by this angle (in degrees) before using it
             'mirror': self.mirror, # PEv3 - rotate the data by this angle (in degrees) before using it
             't_val':self.t_val, 
@@ -2358,8 +2235,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             'odor_obs': observation[2],
             'allocentric_head_direction': observation[3:5],
             'egocentric_course_direction': observation[5:7], # within SubprocVecEnv, unnormalized obs. Later nomalized in VecPyTorch
-            'air_acc': observation[7] if self.haltere else None, # within SubprocVecEnv, unnormalized obs. Later nomalized in VecPyTorch
-            'ang_acc': observation[8] if self.haltere else None, # within SubprocVecEnv, unnormalized obs. Later nomalized in VecPyTorch
             'ang_vel': self.ang_vel if self.action_physics == 'force' else None
             }
 
@@ -2523,7 +2398,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         apparent_wind=args.apparent_wind
                         )
                 else:
-                    print(f"[DEBUG] v3; haltere: {args.haltere}, saccade: {args.saccade}, rotate_by: {args.rotate_by}, action_physics: {getattr(args, 'action_physics', None)}")
+                    print(f"[DEBUG] v3; rotate_by: {args.rotate_by}, action_physics: {getattr(args, 'action_physics', None)}")
                     env = PlumeEnvironment_v3(
                         dataset=args.dataset,
                         birthx=args.birthx,
@@ -2555,9 +2430,6 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         apparent_wind=args.apparent_wind,
                         flip_ventral_optic_flow=args.flip_ventral_optic_flow,
                         rotate_by=args.rotate_by,
-                        soft_reset=args.soft_reset,
-                        haltere=args.haltere,
-                        saccade=args.saccade,
                         action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
                         birthx_upper=getattr(args, 'birthx_upper', 0),
                         force_physics=getattr(args, 'force_physics', None),
@@ -2781,29 +2653,28 @@ class SubprocVecEnv(SubprocVecEnv_):
         obs, rews, dones, infos = zip(*results)
         for i, d in enumerate(dones): 
             if d:
-                if not infos[i]['soft_reset_button']: # sample new wind if soft reset button is OFF
-                    # log the final observation
-                    # infos[i]["terminal_observation"] = obs[i] # wrong place to do this - already happened in worker step and then replaced by reset - the reseted values are not the terminal ones
-                    if self.wind_directions > 1: # if there are multiple wind directions, then sample a new wind condition
-                        # sample a new wind condition
-                        new_wind_direction = self.sample_wind_direction()
-                        # print('[DEBUG] sampled wind direction:', new_wind_direction)
-                        current_wind_direction = self.ds2wind(self.get_attr('dataset', i)[0])
-                        # print('[DEBUG] current wind direction:', current_wind_direction)
-                        # if wind condtion changed, then swap
-                        if new_wind_direction != current_wind_direction:
-                            # print(f"[DEBUG] new wind dir selected... pre swap {self.get_attr('dataset')}")
-                            # check the remote_directory to swap with an undeployed env with the condition of interest
-                            for remote_idx, status in self.remote_directory.items():
-                                if status['deployed'] == False and status['wind_direction'] == new_wind_direction:
-                                    self.swap(i, remote_idx)
-                                    # print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
-                                    swapped = True
-                                    break
-                    
-                    # update the newest observation
-                    list(obs)[i] = self.reset_deployed_at(i)
-                    obs = tuple(obs)
+                # log the final observation
+                # infos[i]["terminal_observation"] = obs[i] # wrong place to do this - already happened in worker step and then replaced by reset - the reseted values are not the terminal ones
+                if self.wind_directions > 1: # if there are multiple wind directions, then sample a new wind condition
+                    # sample a new wind condition
+                    new_wind_direction = self.sample_wind_direction()
+                    # print('[DEBUG] sampled wind direction:', new_wind_direction)
+                    current_wind_direction = self.ds2wind(self.get_attr('dataset', i)[0])
+                    # print('[DEBUG] current wind direction:', current_wind_direction)
+                    # if wind condtion changed, then swap
+                    if new_wind_direction != current_wind_direction:
+                        # print(f"[DEBUG] new wind dir selected... pre swap {self.get_attr('dataset')}")
+                        # check the remote_directory to swap with an undeployed env with the condition of interest
+                        for remote_idx, status in self.remote_directory.items():
+                            if status['deployed'] == False and status['wind_direction'] == new_wind_direction:
+                                self.swap(i, remote_idx)
+                                # print(f"[DEBUG] new wind dir selected... post swap {self.get_attr('dataset')}")
+                                swapped = True
+                                break
+                
+                # update the newest observation
+                list(obs)[i] = self.reset_deployed_at(i)
+                obs = tuple(obs)
             
         return _flatten_obs(obs, self.observation_space), np.stack(rews), np.stack(dones), infos
 

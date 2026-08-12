@@ -162,7 +162,7 @@ def get_args():
         choices=['air_vel_angvel', 'ground_vel_angvel', 'force'],
         help="Action space: 'air_vel_angvel' (forward air speed + angular velocity, wind drifts the agent), "
              "'ground_vel_angvel' (forward ground speed + angular velocity, no wind drift), "
-             "or 'force' (body-frame thrust + yaw torque, rigid-body dynamics integrated from config.force_physics)")
+             "or 'force' (body-frame thrust + yaw torque; requires explicit force_physics coefficients)")
     parser.add_argument('--stage_name', type=str, default='',
         help='name identifying this training stage; triggers staged training when non-empty')
     parser.add_argument('--resume_from', type=str, default='',
@@ -264,10 +264,6 @@ def main(args=None):
     args.mlflow = True if "mlflow" not in args else args.mlflow # mlflow not in args when running from datajoint
     args.rotate_by = None if not args.rotate_by else args.rotate_by # False means no rotation, None means no rotation
     args.model_fname = f"{args.env_name}_{args.outsuffix}.pt"
-    args.soft_reset = False
-    if 'soft_reset' in args.r_shaping:
-        args.r_shaping.remove('soft_reset')
-        args.soft_reset = True
     # Save args and config info
     # https://stackoverflow.com/questions/16878315/what-is-the-right-way-to-treat-argparse-namespace-as-a-dictionary
     # Paths are set after set_up_staged_training so the stage suffix is available.
@@ -382,20 +378,6 @@ def main(args=None):
             }
             if args.config_diff:
                 print("Config changes from parent:", args.config_diff)
-
-    if 'haltere' in args.r_shaping:
-        args.haltere = True
-        args.r_shaping.remove('haltere')
-        print("Setting args.haltere = True")
-    else:
-        args.haltere = False
-
-    if 'saccade' in args.r_shaping:
-        args.saccade = True
-        args.r_shaping.remove('saccade')
-        print("Setting args.saccade = True")
-    else:
-        args.saccade = False
 
     if 'norm_odor_only' in args.r_shaping:
         args.norm_odor_only = True

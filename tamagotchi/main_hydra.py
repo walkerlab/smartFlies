@@ -44,9 +44,8 @@ def run(cfg: DictConfig) -> None:
 
     # Rename the physics subconfig to force_physics so it rides along in args: env.py
     # passes args.force_physics into PlumeEnvironment_v3, and it gets persisted in
-    # _args.json for eval to reconstruct. (Setting config.force_physics here does NOT
-    # work: env.py imports 'config' as a separate module object, and SubprocVecEnv
-    # workers re-import modules fresh anyway.)
+    # _args.json for eval to reconstruct. There is no module-level default to fall back on:
+    # PlumeEnvironment_v3 raises if action_physics='force' and no coefficients are supplied.
     if isinstance(cfg_dict.get("physics"), dict):
         cfg_dict["force_physics"] = cfg_dict.pop("physics")
 
