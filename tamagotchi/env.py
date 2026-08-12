@@ -1353,18 +1353,18 @@ class PlumeEnvironment_v2(gym.Env):
     pass
 
 class PlumeEnvironment_v3(PlumeEnvironment_v2):
-    def __init__(self, visual_feedback=False, 
-                 flip_ventral_optic_flow=False, 
+    def __init__(self, flip_ventral_optic_flow=False,
                  rotate_by=None, 
                  soft_reset=False, 
                  haltere=False, 
                  saccade=False, 
                  double_drift=False,
                  action_physics=None, # or 'ground_vel_angvel': agent commands ground velocity instead of air velocity
-                 obs_mask = [],
+                 obs_mask = [], # indices of observation channels to zero out; does NOT change obs space shape
                  odor_01 = False,
                  action_delay_const=None, # seconds; first-order lag on actions (EMA). None = off
                  action_latency=None,       # seconds；None = off
+                 obs_delayed_actions=False, # if True, obs includes last action (delayed by action_latency) as part of observation
                  force_physics=None, # dict of coefficients for action_physics=='force'; None falls back to config.force_physics
                  **kwargs):
         '''
@@ -1375,9 +1375,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.flip_ventral_optic_flow = flip_ventral_optic_flow
         if self.verbose > 0:
             print("PlumeEnvironment_v3")
-            print("visual_feedback", visual_feedback)
             print("flip_ventral_optic_flow", flip_ventral_optic_flow)
-        self.visual_feedback = visual_feedback
         self.ground_velocity = np.array([0, 0]) # for egocentric course direction calculation
         self.rotate_by = rotate_by # PEv3 - rotate the data by this angle (in degrees) before using it. Used for evaluation to see the behavioral impact of rotating the data.
         self.mirror = False  # PEv3 - mirror/flip the data along the long axis of the plume - used in rotate wind function and gets turned on when rotate_by is set to a non-zero value.
@@ -1408,28 +1406,34 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self.ang_vel = 0.0  # angular velocity (rad/s), persists across steps
             print(f"[DEBUG] PEv3 using force action physics; action space shape: {self.action_space.shape}; coeffs: {self.physics_coeff}")
         
-        if self.visual_feedback:
-            self.observation_space = spaces.Box(low=-1, high=+1,
-                                        shape=(7,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y]
-            if self.haltere:
-                self.observation_space = spaces.Box(low=-1, high=+1,
-                                            shape=(9,), dtype=np.float32) # [wind x, y, odor, head direction x, y, course direction x, y, acc., ang. acc.]
-                
-        else:
-            self.observation_space = spaces.Box(low=-1, high=+1,
-                                    shape=(3,), dtype=np.float32) # [(apparent/ambient) wind x, y, odor]
-        
+        # Observation layout is fixed; whether the agent actually receives a channel is decided by obs_mask.
+        obs_channels = ['wind_x', 'wind_y', 'odor', 'head_x', 'head_y', 'course_x', 'course_y']
+        if self.haltere:
+            obs_channels = obs_channels + ['air_acc', 'ang_acc']
+        self.observation_space = spaces.Box(low=-1, high=+1,
+                                    shape=(len(obs_channels),), dtype=np.float32)
+
         self.saccade = saccade # PEv3 - saccade action
-        if obs_mask:
+        # obs_mask zeroes channels in place - it never changes the observation shape, so every
+        # index-based reader downstream (reward odor reads, info dict, reset zeroing) stays valid.
+        if obs_mask is not None and len(obs_mask):
             obs_size = self.observation_space.shape[0]
+            idxs = np.asarray(obs_mask).ravel()
+            if idxs.dtype == bool:
+                raise ValueError(f"obs_mask must be a list of channel indices, got a boolean array {obs_mask}. "
+                                 f"Channels are {list(enumerate(obs_channels))}")
+            idxs = idxs.astype(int)
+            if idxs.min() < 0 or idxs.max() >= obs_size:
+                raise ValueError(f"obs_mask indices {obs_mask} out of range for {obs_size} channels "
+                                 f"{list(enumerate(obs_channels))}")
             mask_arr = np.zeros(obs_size, dtype=bool)
-            for idx in obs_mask:
-                mask_arr[idx] = True
+            mask_arr[idxs] = True
+            if mask_arr.all():
+                raise ValueError(f"obs_mask {obs_mask} masks every observation channel")
             self.obs_mask = mask_arr
-            new_obs_size = int(obs_size - mask_arr.sum())
-            self.observation_space = spaces.Box(low=-1, high=+1,
-                                        shape=(new_obs_size,), dtype=np.float32)
-            print(f"[DEBUG] PEv3 obs_mask indices {obs_mask} -> bool mask {mask_arr}; obs_space reduced {obs_size}->{new_obs_size}")
+            masked_names = [obs_channels[i] for i in np.flatnonzero(mask_arr)]
+            print(f"[DEBUG] PEv3 obs_mask {list(idxs)} -> zeroing channels {masked_names}; "
+                  f"obs_space unchanged ({obs_size})")
         else:
             self.obs_mask = []
         ################################################
@@ -1460,7 +1464,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         
         # Action latency (fixed transport delay on actions)
         self.action_latency = action_latency
-        self.obs_delayed_actions = True if self.action_latency is not None else False # always on for now
+        self.obs_delayed_actions = obs_delayed_actions
         if self.action_latency is not None:
             self.latency_steps = int(round(self.action_latency / self.dt)) + np.random.randint(-1, 2)  # add jitter of +-1 step
             assert self.latency_steps >= 1
@@ -1469,6 +1473,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                 maxlen=self.latency_steps)
             print(f"[DEBUG] PEv3 action transport delay {self.action_latency:.2f}s +- dt: "
                 f"{self.action_latency}s = {self.latency_steps} steps @ dt={self.dt}")
+            print(f"[DEBUG] PEv3 action latency: obs_delayed_actions={self.obs_delayed_actions}, "
+                f"action_buffer shape: {len(self.action_buffer)} x {act_dim}")
             incompatible = []
             if self.action_feedback: incompatible.append("action_feedback")
             if any(k in self.r_shaping for k in ("turn", "move")): incompatible.append("r_shaping 'turn'/'move'")
@@ -1870,40 +1876,40 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         odor_observation = np.clip(odor_observation, 0.0, 1.0) # clip
 
         observation = np.array(wind_observation + [odor_observation]).astype(np.float32) # per Gym spec
-        # Visual feedback
-        if self.visual_feedback:
-            # head direction
-            allocentric_head_direction_radian = np.angle(self.agent_angle[0] + 1j*self.agent_angle[1], deg=False)
-            # course direction
-            allocentric_course_direction_radian = np.angle(self.ground_velocity[0] + 1j*self.ground_velocity[1], deg=False)
-            egocentric_course_direction_radian = allocentric_course_direction_radian - allocentric_head_direction_radian # leftward positive - standard CWW convention
-            if self.flip_ventral_optic_flow:
-                egocentric_course_direction_radian = allocentric_head_direction_radian - allocentric_course_direction_radian # rightward positive - for eval to see the behavioral impact of flipping course direction perception.
-            if self.double_drift:
-                # Double the observed drift angle - was not a good test because it changes the actual inference problem.
-                egocentric_course_direction_radian *= 2
-                egocentric_course_direction_radian = np.arctan2(
-                    np.sin(egocentric_course_direction_radian),
-                    np.cos(egocentric_course_direction_radian)
-                )
-                if abs(egocentric_course_direction_radian) > np.pi:
-                    raise ValueError(f"Double drift angle out of range: {np.degrees(egocentric_course_direction_radian):.2f} radian")
-            if self.obs_noise:
-                # NOTE: don't trust this setup. Tmp solution using VRVR testing
-                # allocentric_head_direction_radian += np.random.normal(0, self.obs_noise)
-                # egocentric_course_direction_radian += np.random.normal(0, self.obs_noise)
-                # apparent_wind_radian = np.angle(observation[0] + 1j*observation[1], deg=False) + np.random.normal(0, self.obs_noise)
-                # observation[:2] = [np.cos(apparent_wind_radian), np.sin(apparent_wind_radian)]
-                observation[0] += np.random.normal(0, self.obs_noise)
-            observation = np.append(observation, [np.cos(allocentric_head_direction_radian), np.sin(allocentric_head_direction_radian), np.cos(egocentric_course_direction_radian), np.sin(egocentric_course_direction_radian)])
+        # Visual feedback - always sensed; use obs_mask to withhold it from the agent
+        # head direction
+        allocentric_head_direction_radian = np.angle(self.agent_angle[0] + 1j*self.agent_angle[1], deg=False)
+        # course direction
+        allocentric_course_direction_radian = np.angle(self.ground_velocity[0] + 1j*self.ground_velocity[1], deg=False)
+        egocentric_course_direction_radian = allocentric_course_direction_radian - allocentric_head_direction_radian # leftward positive - standard CWW convention
+        if self.flip_ventral_optic_flow:
+            egocentric_course_direction_radian = allocentric_head_direction_radian - allocentric_course_direction_radian # rightward positive - for eval to see the behavioral impact of flipping course direction perception.
+        if self.double_drift:
+            # Double the observed drift angle - was not a good test because it changes the actual inference problem.
+            egocentric_course_direction_radian *= 2
+            egocentric_course_direction_radian = np.arctan2(
+                np.sin(egocentric_course_direction_radian),
+                np.cos(egocentric_course_direction_radian)
+            )
+            if abs(egocentric_course_direction_radian) > np.pi:
+                raise ValueError(f"Double drift angle out of range: {np.degrees(egocentric_course_direction_radian):.2f} radian")
+        if self.obs_noise:
+            # NOTE: don't trust this setup. Tmp solution using VRVR testing
+            # allocentric_head_direction_radian += np.random.normal(0, self.obs_noise)
+            # egocentric_course_direction_radian += np.random.normal(0, self.obs_noise)
+            # apparent_wind_radian = np.angle(observation[0] + 1j*observation[1], deg=False) + np.random.normal(0, self.obs_noise)
+            # observation[:2] = [np.cos(apparent_wind_radian), np.sin(apparent_wind_radian)]
+            observation[0] += np.random.normal(0, self.obs_noise)
+        observation = np.append(observation, [np.cos(allocentric_head_direction_radian), np.sin(allocentric_head_direction_radian), np.cos(egocentric_course_direction_radian), np.sin(egocentric_course_direction_radian)])
         if self.verbose > 1:
             print('observation', observation)
-            
+
         if self.haltere:
             # Add haltere gyroscopic feedback
             observation = np.append(observation, [self.air_acc, self.ang_acc])
         if len(self.obs_mask):
-            observation = observation[~self.obs_mask]
+            # Zero in place - shape is preserved so downstream index-based readers stay valid
+            observation[self.obs_mask] = 0.0
         if self.obs_delayed_actions:
             hist = list(self.action_buffer)  # oldest -> newest
             pad = (int(round(self.action_latency / self.dt)) + 1) - len(hist) # Max delay steps - current buffer length
@@ -1946,10 +1952,11 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                 maxlen=self.latency_steps)
 
         observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
-        if self.visual_feedback:
-            observation[5:7] = 0
-        elif self.haltere:
-            observation[5:] = 0
+        # Course direction is undefined before the agent has moved; haltere accelerations start at rest.
+        # Bounded slices only - an open-ended one would also wipe the appended action history.
+        observation[5:7] = 0
+        if self.haltere:
+            observation[7:9] = 0
 
         self.init_angle = self.agent_angle
         return observation
@@ -2481,7 +2488,10 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
     def _thunk():
         if args.recurrent_policy or (args.stacking == 0):
             if 'apparent_wind' in args:
-                if 'visual_feedback' not in args:
+                # v3 is selected by an explicit env_version key. Legacy fallback: configs saved before
+                # env_version existed carry 'visual_feedback', which used to be the v2/v3 selector.
+                use_v3 = (getattr(args, 'env_version', None) == 'v3') or ('visual_feedback' in args)
+                if not use_v3:
                     env = PlumeEnvironment_v2(
                         dataset=args.dataset,
                         birthx=args.birthx, 
@@ -2543,7 +2553,6 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         act_noise=args.act_noise,
                         seed=args.seed,
                         apparent_wind=args.apparent_wind,
-                        visual_feedback=args.visual_feedback,
                         flip_ventral_optic_flow=args.flip_ventral_optic_flow,
                         rotate_by=args.rotate_by,
                         soft_reset=args.soft_reset,

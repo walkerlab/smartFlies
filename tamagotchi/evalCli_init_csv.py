@@ -429,7 +429,8 @@ if __name__ == "__main__":
     # env related
     parser.add_argument('--diffusionx',  type=float, default=1.0)
     parser.add_argument('--apparent_wind', type=bool, default=False)
-    parser.add_argument('--visual_feedback', type=bool, default=False)
+    parser.add_argument('--env_version', type=str, default='v3')
+    parser.add_argument('--obs_mask', type=int, nargs='*', default=[])
     parser.add_argument('--flip_ventral_optic_flow', type=bool, default=False) # for eval to see the behavioral impact of flipping course direction perception.
     parser.add_argument('--perturb_along_subspace', type=str, default=False, help='a file that stores a orthogonal basis, where the first vector is the wind encoding subspace')
     parser.add_argument('--no_vec_norm_stats', action='store_true', default=False, help='an agent that is trained without storing vecNormalize stats, or did not use it during training')

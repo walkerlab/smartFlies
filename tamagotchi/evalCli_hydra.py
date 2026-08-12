@@ -36,7 +36,8 @@ def build_evalcli_defaults() -> dict:
     parser.add_argument('--diffusionx', type=float, default=1.0)
     parser.add_argument('--obs_noise', type=float, default=0.0)
     parser.add_argument('--apparent_wind', type=bool, default=False)
-    parser.add_argument('--visual_feedback', type=bool, default=False)
+    parser.add_argument('--env_version', type=str, default='v3')
+    parser.add_argument('--obs_mask', type=int, nargs='*', default=[])
     parser.add_argument('--saccade', type=bool, default=False)
     parser.add_argument('--haltere', type=bool, default=False)
 
@@ -226,7 +227,7 @@ def main():
 
     # Step. 4: inherit subset of args when relevant
     agent_setting = ['if_vec_norm', 'if_train_actor_std', 'rnn_type', 'variant']
-    env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'visual_feedback', 'odor_01', 'action_delay_const', 'env_dt', 'stray_max', 'haltere', 'saccade', 'obs_mask']
+    env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'env_version', 'odor_01', 'action_delay_const', 'env_dt', 'stray_max', 'haltere', 'saccade', 'obs_mask']
     # env_setting = ['apparent_wind', 'action_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'rotate_by', 'visual_feedback'] # just keep rotate_by off for now
     #'ou_eval' set to true
     args = apply_configs(args, train_cfg, keys=agent_setting + env_setting)
