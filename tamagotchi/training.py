@@ -847,6 +847,7 @@ def training_loop(agent, envs, args, device, actor_critic,
             'start_tidx', 'end_tidx', 'location_initial', 'init_angle'
         ]) # track stats of episodes
         episode_counter = 0
+        update_wind_xy = [] # per-step ambient wind across all envs; for wind diversity metrics
         # do this every 10th update
         if j % plot_every_n_updates == 0:
             traj_storage.reset_update(expected_datasets = args.dataset[0:int(envs.wind_directions)]) # track few trajectories for plotting
@@ -861,6 +862,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                     rollouts.masks[step],
                     ou_state=rollouts.ou_states[step])
             obs, reward, done, infos = envs.step(action)
+            update_wind_xy.append(np.asarray([info['ambient_wind'] for info in infos], dtype=np.float64)) # for wind_stats/* metrics
             if j % plot_every_n_updates == 0:
                 traj_storage.add_step(infos)
                 traj_storage.check_episode_done(infos, done, tracked_ds=int(envs.wind_directions)) 
@@ -917,7 +919,8 @@ def training_loop(agent, envs, args, device, actor_critic,
                 
         utils.log_agent_learning(j_global, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
         # wind obsver v1 modification: plot success fractions every 20 updates
-        utils.log_eps_artifacts(j_global, args, update_episodes_df, use_mlflow=args.mlflow, log_artifacts=True, plot=(j % plot_every_n_updates == 0))
+        utils.log_eps_artifacts(j_global, args, update_episodes_df, use_mlflow=args.mlflow, log_artifacts=True, plot=(j % plot_every_n_updates == 0),
+                                wind_xy=np.concatenate(update_wind_xy, axis=0) if update_wind_xy else None)
 
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
         if j % args.log_interval == 0 and len(episode_rewards) > 1 and not args.dryrun:

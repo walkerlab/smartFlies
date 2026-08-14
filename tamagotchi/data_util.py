@@ -785,21 +785,93 @@ def log_curriculum_schedule(schedule_dict, j, use_mlflow=True):
         if applicable_steps:
             current_step = max(applicable_steps)
             current_value = lesson_schedule[current_step]
-            mlflow.log_metric(f"curriculum/{lesson_name}", current_value, step=j)
+            if isinstance(current_value, (list, tuple)):
+                # e.g. {ds}_rotate_by holds an angle list ([0, 180] ... [0, 180, 90, -90, 45, -45, 135, -135]).
+                # A list is not a plottable metric, so log how many options are unlocked instead.
+                mlflow.log_metric(f"curriculum/{lesson_name}_n", len(current_value), step=j)
+            else:
+                mlflow.log_metric(f"curriculum/{lesson_name}", current_value, step=j)
+
+
+def _log_eps_group(j, df, prefix):
+    """Log per-update episode statistics for one group of episodes.
+
+    Called once for the whole update and once per dataset, so the per-(dataset, update)
+    thresholds used in the figure-2 panels can be rebuilt from wandb alone.
+    """
+    n = len(df)
+    if n == 0:
+        return
+    mlflow.log_metric(f"{prefix}num_episodes", n, step=j)
+    for outcome in ['HOME', 'OOB', 'OOT']:
+        k = int((df['outcome'] == outcome).sum())
+        mlflow.log_metric(f"{prefix}{outcome}_num", k, step=j)
+        mlflow.log_metric(f"{prefix}{outcome}_ratio", k / n, step=j)
+
+    # Realized rotate_by diversity: what was actually sampled, not what the schedule holds
+    if 'rotate_by' in df.columns:
+        mlflow.log_metric(f"{prefix}n_unique_rotate_by", int(df['rotate_by'].nunique()), step=j)
+
+    init_dist = df['location_initial'].apply(np.linalg.norm)
+    for name, s in [('init_distance', init_dist),
+                    ('plume_density', df['plume_density'].astype(float)),
+                    ('stray_initial', df['stray_initial'].astype(float))]:
+        # mean + std + num_episodes is enough to recover the exact pooled mean/variance
+        # across seeds later; the figure-2 density band is std**2.
+        mlflow.log_metric(f"{prefix}{name}_mean", s.mean(), step=j)
+        mlflow.log_metric(f"{prefix}{name}_std", s.std(ddof=1) if n > 1 else 0.0, step=j)
+        mlflow.log_metric(f"{prefix}{name}_min", s.min(), step=j)
+        mlflow.log_metric(f"{prefix}{name}_max", s.max(), step=j)
 
 
 def log_eps_info(j, update_episodes_df, use_mlflow=True):
-    if not use_mlflow:
+    if not use_mlflow or len(update_episodes_df) == 0:
         return
-    for outcome in ['HOME', 'OOB', 'OOT']:
-        mlflow.log_metric(f"perf/{outcome}_num", sum(update_episodes_df['outcome'] == outcome), step=j)
-        mlflow.log_metric(f"perf/{outcome}_ratio", sum(update_episodes_df['outcome'] == outcome) / len(update_episodes_df['outcome']), step=j)
-        mlflow.log_metric(f"perf/num_episodes", len(update_episodes_df['outcome']), step=j)
-
+    # Legacy keys - kept verbatim so existing dashboards/queries keep working
     mlflow.log_metric("perf/init_distance", update_episodes_df['location_initial'].apply(np.linalg.norm).mean(), step=j)
     mlflow.log_metric("perf/stray_initial", update_episodes_df['stray_initial'].mean(), step=j)
 
-def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifacts=True, plot=True):
+    _log_eps_group(j, update_episodes_df, "perf/")
+    for ds, group in update_episodes_df.groupby('dataset'):
+        _log_eps_group(j, group, f"perf/{ds}/")
+
+
+def log_update_wind_stats(j, wind_xy, use_mlflow=True, round_decimals=2):
+    """Log per-update ambient-wind diversity for this run.
+
+    Args:
+        j (int): Update index (absolute, i.e. j_global).
+        wind_xy: (num_steps * num_processes, 2) array of ``info['ambient_wind']``
+            collected over the update - the wind the agents actually experienced,
+            already rotated/mirrored by the env.
+        round_decimals (int): Quantization of (direction, magnitude) before counting
+            uniques. Matches the convention used to build the figure-2 wind panel.
+
+    Note this counts uniques *within this run*; pooling across seeds is a mean of
+    per-seed counts, not a set union.
+    """
+    if not use_mlflow or wind_xy is None or len(wind_xy) == 0:
+        return
+    wind_xy = np.asarray(wind_xy, dtype=np.float64)
+    wind_dir = np.degrees(np.arctan2(wind_xy[:, 1], wind_xy[:, 0])) % 360.0
+    wind_mag = np.hypot(wind_xy[:, 0], wind_xy[:, 1])
+
+    # Quantize to integers and count unique (dir, mag) pairs through a single packed key.
+    # ~2x faster than np.unique(..., axis=0), which lexsorts rows. Both quantities are
+    # non-negative here, so a stride of max+1 packs them without collisions.
+    scale = 10 ** round_decimals
+    dir_i = np.rint(wind_dir * scale).astype(np.int64)
+    mag_i = np.rint(wind_mag * scale).astype(np.int64)
+    n_unique_vels = len(np.unique(dir_i * (mag_i.max() + 1) + mag_i))
+
+    mlflow.log_metric("wind_stats/n_unique_wind_vels", n_unique_vels, step=j)
+    mlflow.log_metric("wind_stats/n_unique_wind_dirs", len(np.unique(dir_i)), step=j)
+    mlflow.log_metric("wind_stats/n_unique_wind_mags", len(np.unique(mag_i)), step=j)
+    # Denominator: lets counts be normalized across runs with different num_processes/num_steps
+    mlflow.log_metric("wind_stats/n_wind_samples", len(wind_xy), step=j)
+
+def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifacts=True, plot=True,
+                      wind_xy=None):
     """
     Log episode statistics and plot a histogram of plume density for successful episodes.
     Just log episode statistics if not long_artifacts
@@ -807,14 +879,20 @@ def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifact
         j (int): Update index for logging and for labeling the plot.
         args (Namespace): Contains `save_dir` for saving the plot.
         update_episodes_df (pd.DataFrame): DataFrame with 'outcome', 'dataset', and 'plume_density'.
+        wind_xy: optional (num_steps * num_processes, 2) array of ``info['ambient_wind']``
+            collected over this update. See :func:`log_update_wind_stats`.
     """
-    
+
     # Log episode statistics
     if not use_mlflow:
         return
-    
+
+    # Ambient wind is sampled every step regardless of whether any episode finished, so it
+    # is logged before anything that keys off update_episodes_df (which may be empty).
+    log_update_wind_stats(j, wind_xy)
+
     log_eps_info(j, update_episodes_df)
-    
+
     if log_artifacts:
         log_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '')}_eps_log_{j}.csv"
         update_episodes_df.to_csv(log_path, index=False)
