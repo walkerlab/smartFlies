@@ -217,10 +217,10 @@ def rotate_puffs_optimized(data_puffs, rotation_angle_degrees, mirror):
     else:
         theta = np.deg2rad(rotation_angle_degrees)
         c, s = np.cos(theta), np.sin(theta)
-        wind_x_new = c * puffs_rotated['wind_x'] - s * puffs_rotated['wind_y']
-        wind_y_new = s * puffs_rotated['wind_x'] + c * puffs_rotated['wind_y']
+        x_new = c * puffs_rotated['x'] - s * puffs_rotated['y']
+        y_new = s * puffs_rotated['x'] + c * puffs_rotated['y']
         if mirror:
-            wind_x_new = -wind_x_new
+            x_new = -x_new
 
     puffs_rotated['x'] = x_new
     puffs_rotated['y'] = y_new
