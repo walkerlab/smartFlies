@@ -1624,30 +1624,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             loc_xy = np.array([
                 2 + np.random.uniform(-1, 1), 
                 np.random.uniform(-0.5, 0.5)])
-            
-        elif 'quantile' in algo:
-            """ 
-            Distance curriculum
-            Start the agent at a location with random location with mean and var
-            decided by distribution/percentile of puffs
-            
-            Samples a upper quantile to make a [upper-0.1, upper] quantile range
-            Sample puff Xs from this range
-            For puffs in this range, find the meadian and the lowest 5% quantile of Ys
-            Mean Y at the median, and VarY as the spread of Y from 5% to 50% quantile, capped at 1 
-            'diff_max': [0.8, 0.8, 0.8],
-            'diff_min': [0.7, 0.65, 0.4],
-            """
-            q_curriculum = np.random.uniform(self.diff_min, self.diff_max)
-
-            Z = self.get_abunchofpuffs()
-            X_pcts = Z['x'].quantile([q_curriculum-0.1, q_curriculum]).to_numpy()
-            X_mean, X_var = X_pcts[1], X_pcts[1] - X_pcts[0]
-            Y_pcts = Z.query("(x >= (@X_mean - @X_var)) and (x <= (@X_mean + @X_var))")['y'].quantile([0.05,0.5]).to_numpy()
-            Y_mean, Y_var = Y_pcts[1], min(1, Y_pcts[1] - Y_pcts[0]) # Min here cap variance at 1 
-            varx = self.qvar 
-            loc_xy = np.array([X_mean + varx*X_var*np.random.randn(), 
-                Y_mean + varx*Y_var*np.random.randn()]) 
 
         elif 'slice' in algo:
             """ 
@@ -1699,62 +1675,20 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                     X_mean + varx * X_var * np.random.randn(),  # x
                     Y_mean + varx * Y_var * np.random.randn()   # y
                 ])
+                long_idx = 0 if long == 'x' else 1
+                long_mean_signed = X_mean if long == 'x' else Y_mean
                 if np.linalg.norm(loc_xy) < 1: # not too close to the source - push away if too close
-                    # add 1 to the long axis 
-                    if long == 'x':
-                        loc_xy[0] += np.sign(loc_xy[0]) * 1
-                    else:
-                        loc_xy[1] += np.sign(loc_xy[1]) * 1
-                D = np.linalg.norm(Z.to_numpy() - loc_xy, axis=1)
-                # loc should be within plume range and not too far from plume and not too close to the source
-                if long == 'x' and abs(loc_xy[0]) < Z['x'].abs().max() and np.sign(X_mean) == np.sign(loc_xy[0]):
+                    # add 1 to the long axis
+                    loc_xy[long_idx] += np.sign(loc_xy[long_idx]) * 1
+                # loc should be within plume range, not too far from the plume, not too close to the source
+                in_arena = abs(loc_xy[long_idx]) <= 10 # puffs are cut beyond |10| (see sim_utils)
+                in_plume = abs(loc_xy[long_idx]) < Z[long].abs().max() and \
+                    np.sign(long_mean_signed) == np.sign(loc_xy[long_idx])
+                if in_arena and in_plume:
+                    D = np.linalg.norm(Z.to_numpy() - loc_xy, axis=1)
                     if np.min(D) < 1.5: # init stray distance < 75% of the stray max
                         break
-                    else:
-                        varx *= 0.8 # reduce variance to sample closer to plume
-                elif long == 'y' and abs(loc_xy[1]) < abs(Z['y']).max() and np.sign(Y_mean) == np.sign(loc_xy[1]):
-                    if np.min(D) < 1.5: # init stray distance < 75% of the stray max
-                        break
-                    else:
-                        varx *= 0.8
-
-        elif 'on_plume' in algo:
-            """
-            Distance curriculum:
-            Select one puff randomly from a filtered subset within a quantile .
-            """
-            q_curriculum = np.random.uniform(self.diff_min, self.diff_max)
-            Z = self.get_abunchofpuffs()
-
-            X_span = abs(Z['x'].max() - Z['x'].min())
-            Y_span = abs(Z['y'].max() - Z['y'].min())
-            long = 'x' if X_span > Y_span else 'y'
-            wide = 'y' if long == 'x' else 'x'
-            
-            # crop off puffs right near the center as to not initialize on the source location!
-            Z = Z[Z[long].abs() > 1]
-            
-            long_pcts = Z[long].abs().quantile([q_curriculum - 0.05, q_curriculum]).to_numpy()
-            long_mean, long_var = long_pcts[1], long_pcts[1] - long_pcts[0]
-            long_mean *= np.sign(Z[long].mean())
-
-            lower_limit = 0.05
-            Z_filtered_long = Z[(Z[long] >= (long_mean - long_var)) & (Z[long] <= (long_mean + long_var))] # puffs in the long quantile range
-            if Z_filtered_long.empty:
-                raise ValueError("No puffs found in the desired long quantile range.")
-
-            wide_pcts = Z_filtered_long[wide].quantile([lower_limit, 0.5]).to_numpy() # sample wide quantiles from the puffs at the long quantile range
-            wide_mean, wide_var = wide_pcts[1], min(1, wide_pcts[1] - wide_pcts[0])
-            # first sample by long quantile and then by wide quantile
-            Z_final = Z_filtered_long[(Z_filtered_long[wide] >= (wide_mean - wide_var)) & (Z_filtered_long[wide] <= (wide_mean + wide_var))]
-
-            if Z_final.empty:
-                raise ValueError("No puffs found in the refined wide quantile range.")
-
-            # Randomly select one puff
-            puff_sample = Z_final.sample(n=1).iloc[0]
-            loc_xy = np.array([puff_sample['x'], puff_sample['y']])
-
+                varx *= 0.8 # every rejection reduces variance to sample closer to the plume
 
         elif 'precise' in algo:
             """
