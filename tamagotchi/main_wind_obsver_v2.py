@@ -2,7 +2,7 @@
 # Adapted from: https://github.com/ikostrikov/pytorch-a2c-ppo-acktr-gail
 # take out the TC hack
 """
-
+raise ValueError("This file is deprecated.")
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
@@ -249,10 +249,6 @@ def main(args=None):
     args.model_fname = f"{args.env_name}_{args.outsuffix}.pt"
     args.model_fpath = os.path.join(args.save_dir, 'weights', args.model_fname)
     args.training_log = os.path.join(args.save_dir, 'train_logs', args.model_fname.replace(".pt", '_train.csv'))
-    args.soft_reset = False
-    if 'soft_reset' in args.r_shaping:
-        args.r_shaping.remove('soft_reset')
-        args.soft_reset = True
     # Save args and config info
     # https://stackoverflow.com/questions/16878315/what-is-the-right-way-to-treat-argparse-namespace-as-a-dictionary
     args.json_config = os.path.join(args.save_dir, 'json', args.model_fname.replace(".pt", "_args.json"))
@@ -313,20 +309,6 @@ def main(args=None):
         actor_critic = None
         optimizer_state_dict = None
     
-    if 'haltere' in args.r_shaping:
-        args.haltere = True
-        args.r_shaping.remove('haltere')
-        print("Setting args.haltere = True")
-    else:
-        args.haltere = False
-        
-    if 'saccade' in args.r_shaping:
-        args.saccade = True
-        args.r_shaping.remove('saccade')
-        print("Setting args.saccade = True")
-    else:
-        args.saccade = False
-        
     if 'norm_odor_only' in args.r_shaping:
         args.norm_odor_only = True
         args.r_shaping.remove('norm_odor_only')

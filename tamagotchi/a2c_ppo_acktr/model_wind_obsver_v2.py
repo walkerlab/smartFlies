@@ -1,9 +1,10 @@
 # Version 2. Modular wind predictor that feeds prediction and uncertainty into the decision making network.
+raise ValueError("This file is deprecated.")
 import numpy as np
 import torch
 import torch.nn as nn
 from tamagotchi.a2c_ppo_acktr.gnODE import GNODE
-from tamagotchi.a2c_ppo_acktr.distributions import Bernoulli, Categorical, DiagGaussian, BetaCustom
+from tamagotchi.a2c_ppo_acktr.distributions import Bernoulli, Categorical, DiagGaussian, BetaCustom, FixedNormal
 from tamagotchi.a2c_ppo_acktr.utils import init
 
 
@@ -126,24 +127,34 @@ class Policy(nn.Module):
         WIND_FEATURE_DIM = 4  # wind_mu(2) + wind_logvar(2)
         self.base = MLPBase(base_obs_dim + WIND_FEATURE_DIM, **base_kwargs) 
 
+        self.ou_action_dim = 1
+        self.ou_supported = False
+        self._ou_warned_unsupported = False
+
         if action_space.__class__.__name__ == "Discrete":
             num_outputs = action_space.n
             self.dist = Categorical(self.base.output_size, num_outputs)
         elif action_space.__class__.__name__ == "Box":
             num_outputs = action_space.shape[0]
+            self.ou_action_dim = num_outputs
             self.dist = DiagGaussian(self.base.output_size, num_outputs)
-            if args is not None: 
+            self.ou_supported = True
+            if args is not None:
                 if args.if_train_actor_std:
                     print("Using DiagGaussian with trainable std!")
                     self.dist = DiagGaussian(self.base.output_size, num_outputs, trainable_std_dev=args.if_train_actor_std)
                 if args.betadist:
                     print("Using BetaCustom distribution!")
                     self.dist = BetaCustom(self.base.output_size, num_outputs)
+                    self.ou_supported = False
         elif action_space.__class__.__name__ == "MultiBinary":
             num_outputs = action_space.shape[0]
+            self.ou_action_dim = num_outputs
             self.dist = Bernoulli(self.base.output_size, num_outputs)
         else:
             raise NotImplementedError
+
+        self.configure_ou(args)
 
     @property
     def is_recurrent(self):
@@ -158,6 +169,54 @@ class Policy(nn.Module):
     def observer_hidden_state_size(self):
         """Size of h_obs."""
         return self.observer.hidden_state_size
+
+    def configure_ou(self, args=None):
+        if not hasattr(self, 'ou_action_dim'):
+            if hasattr(self.dist, 'fc_mean'):
+                self.ou_action_dim = self.dist.fc_mean.out_features
+            elif hasattr(self.dist, 'alpha') and len(self.dist.alpha) > 0:
+                self.ou_action_dim = self.dist.alpha[0].out_features
+            else:
+                self.ou_action_dim = 1
+        if not hasattr(self, 'ou_supported'):
+            self.ou_supported = isinstance(self.dist, DiagGaussian)
+        if not hasattr(self, '_ou_warned_unsupported'):
+            self._ou_warned_unsupported = False
+        self.ou_theta = getattr(args, 'ou_theta', 0.15) if args is not None else getattr(self, 'ou_theta', 0.15)
+        self.ou_sigma_initial = getattr(args, 'ou_sigma', 0.0) if args is not None else getattr(self, 'ou_sigma_initial', 0.0)
+        self.ou_sigma_final = getattr(args, 'ou_sigma_final', 0.0) if args is not None else getattr(self, 'ou_sigma_final', 0.0)
+        self.ou_sigma_current = self.ou_sigma_initial
+        self.ou_dt = getattr(args, 'ou_dt', None) if args is not None else getattr(self, 'ou_dt', None)
+        if self.ou_dt is None:
+            self.ou_dt = getattr(args, 'env_dt', 0.04) if args is not None else 0.04
+        self.ou_configured = (self.ou_sigma_initial != 0.0) or (self.ou_sigma_final != 0.0)
+
+    def _zero_ou_state(self, inputs):
+        ou_action_dim = getattr(self, 'ou_action_dim', 1)
+        return torch.zeros(inputs.size(0), ou_action_dim, device=inputs.device, dtype=inputs.dtype)
+
+    def _warn_if_ou_unsupported(self, dist):
+        if getattr(self, 'ou_configured', False) and not getattr(self, '_ou_warned_unsupported', False):
+            print(
+                f"Warning: OU exploration requested but unsupported for "
+                f"{dist.__class__.__name__}; running OU as a no-op.",
+                flush=True)
+            self._ou_warned_unsupported = True
+
+    def _apply_ou_shift(self, dist, inputs, masks, ou_state):
+        if not isinstance(dist, FixedNormal):
+            self._warn_if_ou_unsupported(dist)
+            return dist, self._zero_ou_state(inputs), False
+        if not getattr(self, 'ou_supported', False):
+            self._warn_if_ou_unsupported(dist)
+            return dist, self._zero_ou_state(inputs), False
+        if ou_state is None:
+            ou_state = self._zero_ou_state(inputs)
+        z_eff = ou_state * masks
+        ou_configured = getattr(self, 'ou_configured', False)
+        if ou_configured:
+            dist = FixedNormal(dist.loc + z_eff, dist.scale)
+        return dist, z_eff, ou_configured
 
     def forward(self, inputs, rnn_hxs, masks):
         raise NotImplementedError
@@ -191,16 +250,16 @@ class Policy(nn.Module):
 
         return obs_wind_module, obs_base
         
-    def act(self, full_obs, rnn_hxs, h_wind_module, masks, deterministic=False, vr_wind_mod=False):
-        # Wind obsver v2 modification: split obs for observer and base; 
+    def act(self, full_obs, rnn_hxs, h_wind_module, masks, deterministic=False, vr_wind_mod=False, ou_state=None):
+        # Wind obsver v2 modification: split obs for observer and base;
         # full_obs: [B, full_dim]
         if full_obs.shape[-1] == 11: # during vrvr, obs passed in with predtermined wind predictor outputs; split if wind in inputs, no matter if vr_wind_mod
             vr_wind_mu = full_obs[:, -4:-2]
             vr_wind_logvar = full_obs[:, -2:]
-            full_obs = full_obs[:, :-4]  # remove wind pred inputs for observer 
+            full_obs = full_obs[:, :-4]  # remove wind pred inputs for observer
 
         obs_wind_module, obs_base = self.split_observer_base_obs(full_obs) # TODO: static version for now. Set obs later.
-        
+
         # 1) Wind inputs into observer
         wind_mu, wind_logvar, h_wind_module = self.observer(obs_wind_module, h_wind_module, masks)
 
@@ -217,7 +276,7 @@ class Policy(nn.Module):
 
         base_in = torch.cat([obs_base, wind_mu.detach(), wind_logvar.detach()], dim=-1) # 如果你想让 observer 只走 aux loss，不走 RL 梯度就 detach；否则去掉 detach
         value, actor_features, rnn_hxs, activities = self.base(base_in, rnn_hxs, masks)
-        
+
         # 3) Store wind predictions in activities for logging
         activities['wind_mu'] = wind_mu
         activities['wind_logvar'] = wind_logvar
@@ -226,10 +285,20 @@ class Policy(nn.Module):
             activities['vr_wind_logvar'] = vr_wind_logvar
 
         dist = self.dist(actor_features)
+        dist, z_eff, ou_active = self._apply_ou_shift(dist, full_obs, masks, ou_state)
+
         action = dist.mode() if deterministic else dist.sample()
         action_log_probs = dist.log_probs(action)
 
-        return value, action, action_log_probs, (rnn_hxs, h_wind_module), activities
+        if ou_active:
+            dt = self.ou_dt
+            ou_state_new = z_eff + self.ou_theta * (-z_eff) * dt
+            if self.ou_sigma_current != 0.0:
+                ou_state_new = ou_state_new + self.ou_sigma_current * (dt ** 0.5) * torch.randn_like(z_eff)
+        else:
+            ou_state_new = self._zero_ou_state(full_obs)
+
+        return value, action, action_log_probs, (rnn_hxs, h_wind_module), activities, ou_state_new
 
     def get_value(self, inputs, rnn_hxs, h_wind_module, masks):
         '''return the value estimation given inputs and states
@@ -245,14 +314,15 @@ class Policy(nn.Module):
         value, _, rnn_hxs, _ = self.base(base_in, rnn_hxs, masks)
         return value
 
-    def evaluate_actions(self, base_inputs, rnn_hxs, masks, action):
-        '''Run the base module to evaluate actions (for actor loss) in PPO. Ran wind prediction upstream and the inputs here contain predictions already. 
+    def evaluate_actions(self, base_inputs, rnn_hxs, masks, action, ou_state=None):
+        '''Run the base module to evaluate actions (for actor loss) in PPO. Ran wind prediction upstream and the inputs here contain predictions already.
         Return action log prob and entropy of actor distribution for PPO update
-        
-        base_inputs: includes base observations and wind predictions 
+
+        base_inputs: includes base observations and wind predictions
         '''
         value, actor_features, rnn_hxs, activities = self.base(base_inputs, rnn_hxs, masks)
         dist = self.dist(actor_features)
+        dist, _, _ = self._apply_ou_shift(dist, base_inputs, masks, ou_state)
 
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()

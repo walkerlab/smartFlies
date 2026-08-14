@@ -1,3 +1,4 @@
+raise ValueError("This file is deprecated.")
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -69,6 +70,10 @@ class PPO():
         all_wind_nll = []
         all_wind_sqerr = []
         all_wind_logvar = []
+        checked_ou_log_probs = False
+        ou_configured = getattr(self.actor_critic, 'ou_configured', False)
+        if hasattr(self.actor_critic, 'ou_sigma_current'):
+            print(f"  [OU] sigma={self.actor_critic.ou_sigma_current:.4f}", flush=True)
 
         for e in range(self.ppo_epoch):
             if self.actor_critic.is_recurrent:
@@ -80,7 +85,7 @@ class PPO():
 
             for sample in data_generator:
                 # Wind obsver v2 modification: grab wind targets and module-specific inputs from data generator
-                (obs_batch, # all inputs - to be split 
+                (obs_batch, # all inputs - to be split
                    recurrent_hidden_states_batch,
                    observer_hidden_states_batch,
                    actions_batch,
@@ -89,7 +94,8 @@ class PPO():
                    masks_batch,
                    old_action_log_probs_batch,
                    adv_targ,
-                   wind_targets_batch,) = sample  # Wind observer hidden state
+                   wind_targets_batch,
+                   ou_states_batch,) = sample  # Wind observer hidden state
                 # Wind obsver v2 modification: separate updates for observer and base module + policy 
                 # Ssplit obs_batch into base module inputs and wind observer inputs               
                 obs_wind_module_batch, obs_base_batch = self.actor_critic.split_observer_base_obs(obs_batch)
@@ -131,7 +137,16 @@ class PPO():
                         obs_base_batch,             # Base module inputs + wind obsver outputs
                         recurrent_hidden_states_batch,
                         masks_batch,
-                        actions_batch)
+                        actions_batch,
+                        ou_state=ou_states_batch)
+
+                if ou_configured and not checked_ou_log_probs:
+                    max_log_prob_diff = (action_log_probs - old_action_log_probs_batch).abs().max().item()
+                    print(f"  [OU] log_prob_check max_abs_diff={max_log_prob_diff:.6g}", flush=True)
+                    if max_log_prob_diff > 1e-3:
+                        print(f"  [OU] WARNING: log_prob discrepancy {max_log_prob_diff:.6g} exceeds 1e-3 — "
+                              f"check ou_state threading", flush=True)
+                    checked_ou_log_probs = True
 
                 ratio = torch.exp(action_log_probs -
                                   old_action_log_probs_batch)
