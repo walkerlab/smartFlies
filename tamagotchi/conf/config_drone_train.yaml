@@ -76,7 +76,10 @@ birthx_linear_tc_steps: 6
 
 apparent_wind: true
 apparent_wind_allo: false
-visual_feedback: true
+env_version: v3
+# Observation channels: 0 wind_x, 1 wind_y, 2 odor, 3 head_x, 4 head_y, 5 course_x, 6 course_y
+# obs_mask lists indices to zero out; obs shape is unchanged.
+obs_mask: []
 flip_ventral_optic_flow: false
 rotate_by: 1
 birthx_max: 1.0
