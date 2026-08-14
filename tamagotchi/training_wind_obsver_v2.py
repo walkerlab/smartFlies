@@ -1,3 +1,4 @@
+raise ValueError("This file is deprecated.")
 import time
 import numpy as np
 import itertools

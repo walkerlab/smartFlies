@@ -6,7 +6,7 @@ dataset: [constantx5b5]
 # dataset: [constant_mag_narrowx5b5]
 # dataset: [poisson_noisy3x5b5]
 # dataset: [noisy3x5b5]
-
+action_latency: null
 qvar: [0.5]
 # qvar: [1.5]
 # qvar: [2.0]
@@ -44,7 +44,10 @@ birthx_linear_tc_steps: 7
 dryrun: false
 
 apparent_wind: true
-visual_feedback: true
+env_version: v3
+# Observation channels: 0 wind_x, 1 wind_y, 2 odor, 3 head_x, 4 head_y, 5 course_x, 6 course_y
+# obs_mask lists indices to zero out; obs shape is unchanged.
+obs_mask: []
 if_train_actor_std: true
 stray_max: 2.0
 if_vec_norm: 1

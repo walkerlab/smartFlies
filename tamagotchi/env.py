@@ -1520,8 +1520,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.data_puffs = self.data_puffs_all.copy() # trim this per episode
         self.data_wind = self.data_wind_all.copy() # trim/flip this per episode
         self.t_vals = self.data_wind_all['time'].tolist()
-        # print("wind: t_val_diff", (self.t_vals[2] - self.t_vals[1]), "env_dt", self.dt)
-        t_vals_puffs = self.data_puffs_all['time'].unique()
+        self.puff_indices_by_tidx = self.data_puffs_all.groupby('tidx').indices # fast index lookup
         # print("puffs: t_val_diff", (t_vals_puffs[2] - t_vals_puffs[1]), "env_dt", self.dt)
         self.tidxs = self.data_wind_all['tidx'].tolist()
 
@@ -1549,15 +1548,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             return df[['wind_x', 'wind_y']].tolist() # Safer
         else:
             return self.data_wind.loc[df_idx,['wind_x', 'wind_y']].tolist() # Safer
-    
-    # def get_abunchofpuffs(self, max_samples=300):  
-    #     if self.rotate_by:
-    #         Z = rotate_puffs_optimized(self.data_puffs.query(f"tidx == {self.tidx}"), self.rotate_by, self.mirror).loc[:,['x','y']]
-    #         if self.verbose: print(f"[DEBUG] PEv3 get_abunchofpuffs: rotating puffs by {self.rotate_by} degrees; mean x, y: {Z['x'].mean():.2f}, {Z['y'].mean():.2f}")
-    #     else:
-    #         Z = self.data_puffs.query(f"tidx == {self.tidx}").loc[:,['x','y']]
-    #     Z = Z.sample(n=max_samples, replace=False) if Z.shape[0] > max_samples else Z
-    #     return Z
+        
     
     def get_stray_distance(self):
         Z = self.get_abunchofpuffs()
@@ -1616,7 +1607,24 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             puffs = puffs.sample(n=max_samples, replace=False)
 
         return puffs
+    
+    def _rotate_location(self, loc_xy):
+        """
+        Rotate a point from original plume frame into world 
+        frame.
+        """
+        if not self.rotate_by:
+            return np.asarray(loc_xy, dtype=float)
 
+        theta = np.deg2rad(self.rotate_by)
+        c, s = np.cos(theta), np.sin(theta)
+
+        x, y = loc_xy
+
+        return np.array([
+            c * x - s * y,
+            s * x + c * y
+        ])
 
     def get_initial_location(self, algo = 'slice'):
         loc_xy = None
@@ -1624,30 +1632,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             loc_xy = np.array([
                 2 + np.random.uniform(-1, 1), 
                 np.random.uniform(-0.5, 0.5)])
-            
-        elif 'quantile' in algo:
-            """ 
-            Distance curriculum
-            Start the agent at a location with random location with mean and var
-            decided by distribution/percentile of puffs
-            
-            Samples a upper quantile to make a [upper-0.1, upper] quantile range
-            Sample puff Xs from this range
-            For puffs in this range, find the meadian and the lowest 5% quantile of Ys
-            Mean Y at the median, and VarY as the spread of Y from 5% to 50% quantile, capped at 1 
-            'diff_max': [0.8, 0.8, 0.8],
-            'diff_min': [0.7, 0.65, 0.4],
-            """
-            q_curriculum = np.random.uniform(self.diff_min, self.diff_max)
-
-            Z = self.get_abunchofpuffs()
-            X_pcts = Z['x'].quantile([q_curriculum-0.1, q_curriculum]).to_numpy()
-            X_mean, X_var = X_pcts[1], X_pcts[1] - X_pcts[0]
-            Y_pcts = Z.query("(x >= (@X_mean - @X_var)) and (x <= (@X_mean + @X_var))")['y'].quantile([0.05,0.5]).to_numpy()
-            Y_mean, Y_var = Y_pcts[1], min(1, Y_pcts[1] - Y_pcts[0]) # Min here cap variance at 1 
-            varx = self.qvar 
-            loc_xy = np.array([X_mean + varx*X_var*np.random.randn(), 
-                Y_mean + varx*Y_var*np.random.randn()]) 
 
         elif 'slice' in algo:
             """ 
@@ -1663,98 +1647,68 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             'diff_min': [0.7, 0.65, 0.4],
             """
             q_curriculum = np.random.uniform(self.diff_min, self.diff_max)
-            # print(f"[DEBUG] self.diff_min: {self.diff_min}, self.diff_max: {self.diff_max}, q_curriculum: {q_curriculum}")
-            Z = self.get_abunchofpuffs()
-            
-            X_span = abs(Z['x'].max() - Z['x'].min())
-            Y_span = abs(Z['y'].max() - Z['y'].min())
-            long = 'x' if X_span > Y_span else 'y' # the long side of the plume
-            wide = 'y' if long == 'x' else 'x' # the wide side of the plume
-            
-            # crop off puffs right near the center as to not initialize on the source location!
-            Z = Z[Z[long].abs() > 1]
-            
-            long_pcts = Z[long].abs().quantile([q_curriculum-0.1, q_curriculum]).to_numpy()
-            long_mean, long_var = long_pcts[1], long_pcts[1] - long_pcts[0]
-            # Perserver the sign of the long coordinate
-            long_mean *= np.sign(Z[long].mean())
-            # print("initial long mean, var, q: ", long_mean, long_var, q_curriculum)
-            # lower_limit = float(algo.split('_')[1]) if '_' in algo else 0.05 # disabled because algo does not always control this parameter
-            lower_limit = 0.05
-            wide_pcts = Z.query(f"({long} >= (@long_mean - @long_var)) and ({long} <= (@long_mean + @long_var))")[wide].quantile([lower_limit,0.5]).to_numpy()
-            wide_mean, wide_var = wide_pcts[1], min(1, wide_pcts[1] - wide_pcts[0]) # Min here cap variance at 1
-            # print(f"long: {long}, wide: {wide}, long_pcts: {long_pcts}, wide_pcts: {wide_pcts} {long_mean}, self.rotate_by: {self.rotate_by} {wide_mean}")
-            # print(wide_mean, wide_var)
-            varx = self.qvar 
-            # Determine which is x and y
-            X_mean, X_var = (long_mean, long_var) if long == 'x' else (wide_mean, wide_var)
-            Y_mean, Y_var = (wide_mean, wide_var) if long == 'x' else (long_mean, long_var)
-            cnter = -1
+            idxs = self.puff_indices_by_tidx[self.tidx]
+            if len(idxs) > 200:
+                idxs = np.random.choice(idxs, size=200, replace=False)
+            # Make init location in original plume frame
+            # Then rotate init location into world frame
+            Z = self.data_puffs_all.iloc[idxs][['x', 'y']].to_numpy()
+            long_vals = Z[:, 0]
+            wide_vals = Z[:, 1]
+
+            # Don't initialize too close to source
+            mask = np.abs(long_vals) > 1.0
+            long_vals = long_vals[mask]
+            wide_vals = wide_vals[mask]
+
+            # Longitudinal curriculum - sample a quantile range of the longitudinal distribution
+            long_abs = np.abs(long_vals)
+            long_pcts = np.quantile(
+                long_abs,
+                [q_curriculum - 0.1, q_curriculum]
+            )
+            long_mean = long_pcts[1]
+            long_var = long_pcts[1] - long_pcts[0]
+            # Preserve plume direction
+            long_mean *= np.sign(np.mean(long_vals))
+            # Look at plume width around this longitudinal position
+            long_mask = (
+                (long_vals >= long_mean - long_var) &
+                (long_vals <= long_mean + long_var)
+            )
+            # Get the wide values in this longitudinal slice
+            slice_wide = wide_vals[long_mask]
+            if len(slice_wide) == 0:
+                slice_wide = wide_vals
+            wide_pcts = np.quantile(slice_wide, [0.05, 0.5])
+            wide_mean = wide_pcts[1]
+            wide_var = min(1.0, wide_pcts[1] - wide_pcts[0])
+
+            Z_xy = np.column_stack([long_vals, wide_vals])
+            # Sample a location that is within arena,  not too close to source and not too far from plume 
+            varx = self.qvar
             while True:
-                # Sample location in [x, y] order
-                cnter +=1
-                if cnter>10:
-                    print('counter=', cnter)
-                loc_xy = np.array([
-                    X_mean + varx * X_var * np.random.randn(),  # x
-                    Y_mean + varx * Y_var * np.random.randn()   # y
+                loc_plume = np.array([
+                    long_mean + varx * long_var * np.random.randn(),
+                    wide_mean + varx * wide_var * np.random.randn()
                 ])
-                if np.linalg.norm(loc_xy) < 1: # not too close to the source - push away if too close
-                    # add 1 to the long axis 
-                    if long == 'x':
-                        loc_xy[0] += np.sign(loc_xy[0]) * 1
-                    else:
-                        loc_xy[1] += np.sign(loc_xy[1]) * 1
-                D = np.linalg.norm(Z.to_numpy() - loc_xy, axis=1)
-                # loc should be within plume range and not too far from plume and not too close to the source
-                if long == 'x' and abs(loc_xy[0]) < Z['x'].abs().max() and np.sign(X_mean) == np.sign(loc_xy[0]):
-                    if np.min(D) < 1.5: # init stray distance < 75% of the stray max
+                in_arena = abs(loc_plume[0]) <= 10 # Within valid plume arena. Larger than 10 puffs are dropped.
+                if np.linalg.norm(loc_plume) < 1: # Not too close to source
+                    loc_plume[0] += np.sign(loc_plume[0]) * 1
+                in_plume = (
+                    abs(loc_plume[0]) < np.max(np.abs(long_vals))
+                    and np.sign(long_mean) == np.sign(loc_plume[0])
+                )
+                if in_arena and in_plume:
+                    D = np.linalg.norm(Z_xy - loc_plume, axis=1)
+                    if np.min(D) < 1.5:
                         break
-                    else:
-                        varx *= 0.8 # reduce variance to sample closer to plume
-                elif long == 'y' and abs(loc_xy[1]) < abs(Z['y']).max() and np.sign(Y_mean) == np.sign(loc_xy[1]):
-                    if np.min(D) < 1.5: # init stray distance < 75% of the stray max
-                        break
-                    else:
-                        varx *= 0.8
 
-        elif 'on_plume' in algo:
-            """
-            Distance curriculum:
-            Select one puff randomly from a filtered subset within a quantile .
-            """
-            q_curriculum = np.random.uniform(self.diff_min, self.diff_max)
-            Z = self.get_abunchofpuffs()
+                varx *= 0.8
 
-            X_span = abs(Z['x'].max() - Z['x'].min())
-            Y_span = abs(Z['y'].max() - Z['y'].min())
-            long = 'x' if X_span > Y_span else 'y'
-            wide = 'y' if long == 'x' else 'x'
-            
-            # crop off puffs right near the center as to not initialize on the source location!
-            Z = Z[Z[long].abs() > 1]
-            
-            long_pcts = Z[long].abs().quantile([q_curriculum - 0.05, q_curriculum]).to_numpy()
-            long_mean, long_var = long_pcts[1], long_pcts[1] - long_pcts[0]
-            long_mean *= np.sign(Z[long].mean())
-
-            lower_limit = 0.05
-            Z_filtered_long = Z[(Z[long] >= (long_mean - long_var)) & (Z[long] <= (long_mean + long_var))] # puffs in the long quantile range
-            if Z_filtered_long.empty:
-                raise ValueError("No puffs found in the desired long quantile range.")
-
-            wide_pcts = Z_filtered_long[wide].quantile([lower_limit, 0.5]).to_numpy() # sample wide quantiles from the puffs at the long quantile range
-            wide_mean, wide_var = wide_pcts[1], min(1, wide_pcts[1] - wide_pcts[0])
-            # first sample by long quantile and then by wide quantile
-            Z_final = Z_filtered_long[(Z_filtered_long[wide] >= (wide_mean - wide_var)) & (Z_filtered_long[wide] <= (wide_mean + wide_var))]
-
-            if Z_final.empty:
-                raise ValueError("No puffs found in the refined wide quantile range.")
-
-            # Randomly select one puff
-            puff_sample = Z_final.sample(n=1).iloc[0]
-            loc_xy = np.array([puff_sample['x'], puff_sample['y']])
-
+            # Only now rotate into world coordinates
+            loc_xy = self._rotate_location(loc_plume)
+            return loc_xy
 
         elif 'precise' in algo:
             """
@@ -1764,48 +1718,68 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             Samples the wide coordinate based on puff spread at that long slice — wide enough
             to often initialize the agent off-plume.
             """
-            Z = self.get_abunchofpuffs()
 
-            X_span = abs(Z['x'].max() - Z['x'].min())
-            Y_span = abs(Z['y'].max() - Z['y'].min())
-            long = 'x' if X_span > Y_span else 'y'
-            wide = 'y' if long == 'x' else 'x'
+            idxs = self.puff_indices_by_tidx[self.tidx]
+            if len(idxs) > 200:
+                idxs = np.random.choice(idxs, size=200, replace=False)
+            # Make init location in original plume frame
+            # Then rotate init location into world frame
+            Z = self.data_puffs_all.iloc[idxs][['x', 'y']].to_numpy()
+            long_vals = Z[:, 0]
+            wide_vals = Z[:, 1]
 
-            # +- ~10% noise to the curriculum-set long coordinate
+            # Sample longitudinal coordinate
             if "random" in algo:
-                # sample actual location with noise - control case to increasing curriculum 
-                # uniform sample from 1 to self.now_init_long
                 init_long = np.random.uniform(1, self.now_init_long)
                 long_coord = init_long * (1 + 0.1 * np.random.randn())
             else:
-                # sample actual location with noise around self.now_init_long - this is the intended curriculum
                 long_coord = self.now_init_long * (1 + 0.1 * np.random.randn())
-            
-            # Align sign with plume direction
-            long_sign = np.sign(Z[long].mean())
-            long_coord = abs(long_coord) * long_sign
 
-            # Find puffs in a band around this long coordinate
+            # Preserve plume direction
+            long_coord = abs(long_coord) * np.sign(np.mean(long_vals))
+
+            # Find puffs around this longitudinal slice
             band = max(0.5, abs(self.now_init_long) * 0.15)
-            Z_band = Z[(Z[long].abs() >= abs(long_coord) - band) & (Z[long].abs() <= abs(long_coord) + band)]
-            if Z_band.empty:
-                Z_band = Z
 
-            # Sample wide coordinate: mean of plume at this slice + large spread to often land off-plume
-            wide_center = Z_band[wide].mean()
-            wide_spread = max(Z_band[wide].std(), 0.5)
-            Z_band_xy = Z_band[['x', 'y']].to_numpy()
+            band_mask = (
+                (np.abs(long_vals) >= abs(long_coord) - band) &
+                (np.abs(long_vals) <= abs(long_coord) + band)
+            )
+
+            if np.any(band_mask):
+                band_long = long_vals[band_mask]
+                band_wide = wide_vals[band_mask]
+            else:
+                band_long = long_vals
+                band_wide = wide_vals
+
+            wide_center = np.mean(band_wide)
+            wide_spread = max(np.std(band_wide), 0.5)
+
+            Z_band = np.column_stack([band_long, band_wide])
+
             varx = self.qvar
-            # Ensure init is no too far 
+
             while True:
-                wide_coord = wide_center + varx * wide_spread * np.random.randn()
-                if long == 'x':
-                    loc_xy = np.array([long_coord, wide_coord])
-                else:
-                    loc_xy = np.array([wide_coord, long_coord])
-                if np.min(np.linalg.norm(Z_band_xy - loc_xy, axis=1)) < 1.0:
+                wide_coord = (
+                    wide_center
+                    + varx * wide_spread * np.random.randn()
+                )
+
+                loc_plume = np.array([
+                    long_coord,
+                    wide_coord
+                ])
+
+                if np.min(
+                    np.linalg.norm(Z_band - loc_plume, axis=1)
+                ) < 1.0:
                     break
-                varx *= 0.8  # pull toward plume center until close enough
+
+                varx *= 0.8
+
+            # Original plume frame -> rotated world frame
+            loc_xy = self._rotate_location(loc_plume)
 
         elif 'fixed' in algo:
             loc_xy = np.array( [self.fixed_x, self.fixed_y] )
@@ -2149,21 +2123,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if is_outofbounds and 'missed_time_cost' in self.r_shaping:
             steps_left = self.episode_steps_max - self.episode_step
             reward += steps_left * self.rewards['tick']
-
-        if is_outoftime and 'oot_plus' in self.r_shaping:
-            # not letting oot off easy!
-            oob_penalty = 5*np.linalg.norm(self.agent_location) + self.stray_distance
-            
-            if self.rotate_by == 0 and self.agent_location[0] < 0:
-                oob_penalty *= 2
-            elif self.rotate_by == 90 and self.agent_location[1] < 0:
-                oob_penalty *= 2
-            elif self.rotate_by == -90 and self.agent_location[1] > 0:
-                oob_penalty *= 2
-            elif self.rotate_by == 180 and self.agent_location[0] > 0:
-                oob_penalty *= 2
-                            
-            reward -= oob_penalty 
 
         # Radial distance decrease at each STEP of episode
         r_radial_step = 0
