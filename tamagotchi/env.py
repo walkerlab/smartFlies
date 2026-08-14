@@ -2084,21 +2084,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             steps_left = self.episode_steps_max - self.episode_step
             reward += steps_left * self.rewards['tick']
 
-        if is_outoftime and 'oot_plus' in self.r_shaping:
-            # not letting oot off easy!
-            oob_penalty = 5*np.linalg.norm(self.agent_location) + self.stray_distance
-            
-            if self.rotate_by == 0 and self.agent_location[0] < 0:
-                oob_penalty *= 2
-            elif self.rotate_by == 90 and self.agent_location[1] < 0:
-                oob_penalty *= 2
-            elif self.rotate_by == -90 and self.agent_location[1] > 0:
-                oob_penalty *= 2
-            elif self.rotate_by == 180 and self.agent_location[0] > 0:
-                oob_penalty *= 2
-                            
-            reward -= oob_penalty 
-
         # Radial distance decrease at each STEP of episode
         r_radial_step = 0
         # check if 'step' is in any substring of items in r_shaping
