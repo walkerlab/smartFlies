@@ -25,7 +25,8 @@ adam_smoke("") # something about the import order causes a weird interaction - i
 
 from tamagotchi import main as base_main
 from tamagotchi import main_wind_obsver_v1
-from tamagotchi import main_wind_obsver_v2
+# main_wind_obsver_v2 is deprecated and raises on import; imported lazily in run() so
+# that selecting it still errors, but the other variants stay runnable.
 
 def _auto_outsuffix(cfg_dict: dict) -> str:
     """Build a unique per-job outsuffix: seed-{seed}-{hash}, hash over the full override string."""
@@ -82,6 +83,7 @@ def run(cfg: DictConfig) -> None:
     if variant == "wind_obsver_v1":
         main_wind_obsver_v1.main(args=vars(args))
     elif variant == "wind_obsver_v2":
+        from tamagotchi import main_wind_obsver_v2
         main_wind_obsver_v2.main(args=vars(args))
     elif variant == "base":
         base_main.main(args=vars(args))
