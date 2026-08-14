@@ -12,6 +12,8 @@ defaults:
 
 # Training variant: "base" (default), "wind_obsver_v1", or "wind_obsver_v2"
 variant: wind_obsver_v1
+auxiliary_arch: separate_wind_head
+
 env_dt: 0.1
 experiment_name: drone_physics_dt01
 action_physics: force
@@ -28,6 +30,7 @@ num_env_steps: 4000000
 odor_01: false
 action_delay_const: null
 action_latency: null
+
 
 # PPO / optimizer
 algo: ppo
