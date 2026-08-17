@@ -1,10 +1,7 @@
 # # Physics coefficients for the 'force' action_physics mode — ~1 mg fly model.
 # Kinematic constraints
 # TODO pass these into the kinematics model
-max_forward_airspeed: 0.90       # m/s
-# Fuller et al. 2014 [FREE FLIGHT]:
-# ~0.15-0.20 m/s upwind groundspeed maintained in steady headwind.
-# With max modeled headwind = 0.7 m/s -> required airspeed ~0.85-0.90 m/s.
+max_forward_airspeed: 1.5       # m/s
 # Rohrseitz & Fry 2011 [FREE FLIGHT]: saturation airspeed = 1.1577 +/- 0.2055 m/s.
 
 max_forward_accel: 2.90          # m/s^2
