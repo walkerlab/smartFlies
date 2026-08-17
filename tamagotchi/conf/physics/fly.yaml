@@ -27,7 +27,7 @@ T_perp_max: 1.30e-6     # N — Set to mean + 1 SD of the peak body-frame side f
 
 mass: 1.0e-6            # kg — Representative adult D. melanogaster mass, consistent with the ~1.0-1.24 mg values reported in flight studies including Mronz & Lehmann (2008) and Fuller et al. (2014).
 
-drag: 3.22e-6           # N*s/m — Model-derived from T_para_max/0.90 m/s and not the experimentally fitted free-flight drag coefficient of 11 +/- 1.7 uN*s/m reported by Fuller et al. (2014).
+drag: 1.93e-6           # N*s/m, gives max steady forward airspeed ~= 1.5 m/s based on table 2 of Rohrseitz and Fry mean saturated airspeed + 2std under strong visual speed stimulation (2010), not the experimentally fitted free-flight drag coefficient of 11 +/- 1.7 uN*s/m reported by Fuller et al. (2014).
 
 inertia: 5.2e-13        # kg*m^2 — Salem et al. (2023) use 5.2e-13 kg*m^2 as the approximately 1x native yaw moment of inertia of D. melanogaster.
 
