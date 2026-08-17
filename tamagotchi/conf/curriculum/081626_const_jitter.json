@@ -8,7 +8,7 @@
   "wind_cond": {
     "0": 1
   },
-  "noisy_jitter_coveragex5b5_rotate_by": {
+  "const_jitterx5b5_rotate_by": {
     "0": [
       0,
       180
@@ -34,7 +34,7 @@
       -135
     ]
   },
-  "noisy_jitter_coveragex5b5_diff_min": {
+  "const_jitterx5b5_diff_min": {
     "0": 0.1,
     "25": 0.233333,
     "50": 0.366667,
@@ -55,7 +55,7 @@
     "350": 0.366667,
     "375": 0.5
   },
-  "noisy_jitter_coveragex5b5_diff_max": {
+  "const_jitterx5b5_diff_max": {
     "0": 0.2,
     "25": 0.333333,
     "50": 0.466667,
