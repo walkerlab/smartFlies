@@ -253,6 +253,32 @@ def set_up_staged_training(args):
     args.stage_checkpoint_suffix = f'_stage_{args.stage_hash}'
     print(f"Staged training: stage_name={stage_name}, stage_hash={args.stage_hash}")
 
+def log_weight_provenance(args):
+    """Announce inside the active run how the model weights were initialized.
+
+    wandb only captures console output after wandb.init, so the load messages
+    printed earlier in main() never reach the run's log — repeat them here and
+    persist them in the run summary.
+    """
+    source = getattr(args, 'weights_load_source', 'scratch')
+    path = getattr(args, 'weights_load_path', '')
+    resume_update = getattr(args, 'resume_update', None)
+    if source == 'stage_checkpoint':
+        msg = f"Resumed from stage checkpoint {path}"
+        if resume_update is not None:
+            msg += f" (update {resume_update})"
+    elif source == 'parent_seed':
+        msg = f"Fresh stage start — loaded parent/seed weights from {path}"
+    else:
+        msg = "Starting from scratch — no checkpoint or seed weights loaded"
+    print(msg, flush=True)
+    mlflow.log_summary('weights_load_source', source)
+    if path:
+        mlflow.log_summary('weights_load_path', path)
+    if resume_update is not None:
+        mlflow.log_summary('resume_update', resume_update)
+
+
 def main(args=None):
     if not args:
         args = get_args()
@@ -330,6 +356,8 @@ def main(args=None):
             with open(meta_path) as f:
                 args.resume_update = int(json.load(f)['update'])
             print(f"Resume update index from {meta_path}: {args.resume_update}")
+        args.weights_load_source = 'stage_checkpoint'
+        args.weights_load_path = args.chkpt_fpath
     elif args.staged_training and resume_from and os.path.isfile(resume_from):
         print("Fresh stage start — loading parent weights from", resume_from)
         args.model_fpath = resume_from
@@ -337,10 +365,14 @@ def main(args=None):
         actor_critic.base.rnn.flatten_parameters()
         args.is_fresh_stage = True
         args.model_fpath = args.chkpt_fpath   # restore save target
+        args.weights_load_source = 'parent_seed'
+        args.weights_load_path = resume_from
     else:
         print(f"No checkpoint found. Starting from scratch. ({args.chkpt_fpath})")
         actor_critic = None
         optimizer_state_dict = None
+        args.weights_load_source = 'scratch'
+        args.weights_load_path = ''
 
     # Stage update offset — how many updates the parent (or earlier stage) already ran
     args.stage_update_offset = 0
@@ -526,6 +558,7 @@ def main(args=None):
         run_params['dir'] = args.save_dir
         with mlflow.start_run(**run_params):
             mlflow.log_params(vars(args))
+            log_weight_provenance(args)
             if getattr(args, 'config_diff', {}):
                 mlflow.log_summary('stage_changes', args.config_diff)
                 mlflow.log_summary('stage_hash', args.stage_hash)
