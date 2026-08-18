@@ -1032,6 +1032,44 @@ def realign_schedule(schedule, num_updates, orig_num_updates):
     return realigned, realign_ratio
 
 
+def validate_tc_schedule_datasets(schedule, datasets):
+    """Fail fast when a per-dataset lesson key does not match any loaded dataset.
+
+    Per-dataset lessons are keyed as ``{dataset}_{suffix}`` and dispatched in
+    ``update_by_schedule`` by exact match of the dataset prefix against the envs'
+    ``remote_directory``. A misspelled/abbreviated dataset name (e.g.
+    ``const_jitterx5b5`` vs the real ``constant_jitterx5b5``) makes every one of
+    those lessons a silent no-op ("No remote found" print), while the curriculum
+    metrics still log the intended schedule - the envs just never receive it.
+
+    Args:
+        schedule: dict[str, dict[int, value]] as returned by :func:`load_tc_schedule`.
+        datasets: iterable of dataset names actually loaded (``args.dataset``).
+
+    Raises:
+        ValueError: if any per-dataset lesson key has an unknown dataset prefix
+            or an unknown suffix.
+    """
+    global_keys = {'birthx', 'wind_cond'}
+    per_ds_suffixes = ('_diff_max', '_diff_min', '_now_init_long', '_rotate_by')
+    datasets = set(datasets)
+    bad = []
+    for k in schedule:
+        if k in global_keys:
+            continue
+        suffix = next((s for s in per_ds_suffixes if k.endswith(s)), None)
+        if suffix is None:
+            bad.append(f"'{k}': unknown lesson key (not one of {sorted(global_keys)} "
+                       f"and does not end with one of {list(per_ds_suffixes)})")
+            continue
+        ds_name = k[:-len(suffix)]
+        if ds_name not in datasets:
+            bad.append(f"'{k}': dataset prefix '{ds_name}' does not match any loaded "
+                       f"dataset {sorted(datasets)} - this lesson would silently never apply")
+    if bad:
+        raise ValueError("Invalid curriculum schedule keys:\n  " + "\n  ".join(bad))
+
+
 def load_tc_schedule(path, num_updates):
     """Load a saved curriculum schedule JSON and optionally realign its update count.
 

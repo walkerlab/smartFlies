@@ -738,6 +738,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                                                                     'dtype': 'float', 'step_type': 'linear'},
                                             wind_cond={'num_classes': len(args.dataset) - 1, 'difficulty_range': [1, len(args.dataset)],
                                                         'dtype': 'int', 'step_type': 'linear'}) # wind_cond: in the sequence of args.dataset - first is 1, last is 3
+        utils.validate_tc_schedule_datasets(schedule, args.dataset) # fail fast on dataset-name mismatches that would silently no-op
         # For staged training, shift all schedule keys by stage_offset so curriculum
         # transitions fire at the correct global update index.
         if stage_offset > 0:
