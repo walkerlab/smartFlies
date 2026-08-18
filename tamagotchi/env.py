@@ -1708,6 +1708,14 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
 
             # Only now rotate into world coordinates
             loc_xy = self._rotate_location(loc_plume)
+            if np.linalg.norm(loc_xy) < 0.99:
+                # The accept loop pushes any sample within 1m of the source out along the
+                # long axis, and rotation preserves distance to origin - this should be
+                # unreachable. Loud print (not raise) so a 4h run isn't killed mid-flight.
+                print(f"[WARN] get_initial_location(slice): init within 1m of source! "
+                      f"loc_plume={loc_plume}, loc_xy={loc_xy}, tidx={self.tidx}, "
+                      f"diff_min={self.diff_min}, diff_max={self.diff_max}, "
+                      f"rotate_by={self.rotate_by}, qvar={self.qvar}", flush=True)
             return loc_xy
 
         elif 'precise' in algo:
