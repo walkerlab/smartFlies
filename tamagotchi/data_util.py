@@ -1026,9 +1026,7 @@ def realign_schedule(schedule, num_updates, orig_num_updates):
             continue
         new_lessons = {}
         for t, v in sorted(lessons.items()):           # ascending -> last write wins on collision
-            # Clamp to num_updates-1: the training loop runs range(num_updates), so a
-            # lesson realigned to exactly num_updates would silently never fire.
-            nt = min(_round(t * realign_ratio), num_updates - 1)
+            nt = min(_round(t * realign_ratio), num_updates)
             new_lessons[nt] = v
         realigned[var] = new_lessons
     return realigned, realign_ratio
