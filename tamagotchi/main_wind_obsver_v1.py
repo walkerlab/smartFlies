@@ -502,7 +502,15 @@ def main(args=None):
             run_params['log_system_metrics'] = True
             print(f"Branch off: starting new run '{run_name}' in experiment '{experiment_name}'")
         else:
-            run_object = mlflow.search_runs(filter_string=f"attributes.run_name = '{run_name}'")
+            # Resume an existing wandb run ONLY when this process actually continues
+            # training (stage checkpoint found, or staged continuation of a parent run).
+            # A scratch start (update 0) must never resume: wandb enforces monotonic
+            # steps per run, so every log with step below the old run's counter is
+            # silently dropped and the panels keep showing the old run's (stale) data.
+            continuing = (os.path.isfile(args.chkpt_fpath)
+                          or getattr(args, 'is_fresh_stage', False))
+            run_object = (mlflow.search_runs(filter_string=f"attributes.run_name = '{run_name}'")
+                          if continuing else [])
             if len(run_object) > 0:
                 # Run exists - use its run_id
                 run_id = run_object.iloc[0]["run_id"]
@@ -510,10 +518,11 @@ def main(args=None):
                 run_params['log_system_metrics'] = True
                 print(f"Continuing existing run: {run_name} (ID: {run_id})")
             else:
-                # Run doesn't exist - use run_name
+                # Run doesn't exist (or scratch start) - use run_name
                 run_params['run_name'] = run_name
                 run_params['log_system_metrics'] = True
-                print(f"Starting new run: {run_name}")
+                print(f"Starting new run: {run_name}"
+                      + ("" if continuing else " (scratch start: not resuming any same-named wandb run)"))
 
         # Single block using the appropriate parameters
         run_params['dir'] = args.save_dir
