@@ -614,6 +614,10 @@ def plot_trajectories(traj_storage, envs, save_path="/src/tamagotchi/debug_plot.
                                                           episode['episode_info']['t_val'], 
                                                           ax=ax, fig=fig, fname='', show=False)
                 
+                # Home region: 0.2m radius around the odor source at the origin
+                ax.add_patch(plt.Circle((0, 0), 0.2, facecolor='none',
+                                        edgecolor='black', linewidth=1.2, zorder=4))
+
                 # Plot the trajectory
                 x, y, odor_obs = zip(*trajectory)
                 # Create color array
