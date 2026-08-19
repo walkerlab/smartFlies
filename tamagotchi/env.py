@@ -1718,7 +1718,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                       f"rotate_by={self.rotate_by}, qvar={self.qvar}", flush=True)
             return loc_xy
 
-        elif 'precise' in algo:
+        elif 'precise' in algo and 'precise_v2' not in algo:
             """
             Precise location curriculum.
             self.now_init_long is set directly by the curriculum scheduler.
@@ -1785,6 +1785,74 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                     break
 
                 varx *= 0.8
+
+            # Original plume frame -> rotated world frame
+            loc_xy = self._rotate_location(loc_plume)
+
+        elif 'precise_v2' in algo:
+            """
+            Precise location curriculum v2.
+            Long coordinate identical to 'precise'.
+            Wide coordinate: band puff mean + gaussian noise whose scale grows with
+            the long distance (with an extra low-x boost that vanishes at 6 m).
+            Guards: pushed out along the long axis if within 0.7 m of source;
+            initial stray (distance to nearest band puff) kept < 1.5 m by shrinking
+            the noise scale and resampling.
+            """
+
+            idxs = self.puff_indices_by_tidx[self.tidx]
+            if len(idxs) > 200:
+                idxs = np.random.choice(idxs, size=200, replace=False)
+            # Make init location in original plume frame
+            # Then rotate init location into world frame
+            Z = self.data_puffs_all.iloc[idxs][['x', 'y']].to_numpy()
+            long_vals = Z[:, 0]
+            wide_vals = Z[:, 1]
+
+            # Sample longitudinal coordinate
+            if "random" in algo:
+                init_long = np.random.uniform(1, self.now_init_long)
+                long_coord = init_long * (1 + 0.1 * np.random.randn())
+            else:
+                long_coord = self.now_init_long * (1 + 0.1 * np.random.randn())
+
+            # Preserve plume direction; stay within arena
+            long_coord = min(abs(long_coord), 10.0) * np.sign(np.mean(long_vals))
+
+            # Find puffs around this longitudinal slice
+            band = max(0.5, abs(self.now_init_long) * 0.15)
+
+            band_mask = (
+                (np.abs(long_vals) >= abs(long_coord) - band) &
+                (np.abs(long_vals) <= abs(long_coord) + band)
+            )
+
+            if np.any(band_mask):
+                band_long = long_vals[band_mask]
+                band_wide = wide_vals[band_mask]
+            else:
+                band_long = long_vals
+                band_wide = wide_vals
+
+            wide_center = np.mean(band_wide)
+            Z_band = np.column_stack([band_long, band_wide])
+
+            # Noise scale grows with long distance; extra low-x boost vanishes at 6 m
+            noise_coef = 0.08 * abs(long_coord) + 0.2 * max(0.0, 1.0 - abs(long_coord) / 6.0)
+
+            while True:
+                wide_coord = wide_center + noise_coef * np.random.randn()
+                loc_plume = np.array([long_coord, wide_coord])
+
+                # Not too close to source
+                if np.linalg.norm(loc_plume) < 0.7:
+                    loc_plume[0] += np.sign(loc_plume[0]) * 0.3
+
+                # Initial stray distance < 1.5
+                if np.min(np.linalg.norm(Z_band - loc_plume, axis=1)) < 1.5:
+                    break
+
+                noise_coef *= 0.9
 
             # Original plume frame -> rotated world frame
             loc_xy = self._rotate_location(loc_plume)
