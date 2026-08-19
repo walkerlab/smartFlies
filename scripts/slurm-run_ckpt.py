@@ -6,6 +6,8 @@
 # resumes automatically from the last saved checkpoint (no load_jobid logic needed).
 #
 # Cancel all your ckpt jobs: squeue -u $USER -h | grep ckpt-all | awk '{print $1}' | xargs scancel
+# Name a batch with --job_name mybatch, then cancel just that batch: scancel -u $USER --name=mybatch
+# python3 scripts/slurm-run_ckpt.py --job_name force-sweep --n_seeds 15 --override "..."
 
 
 '''
@@ -51,6 +53,7 @@ def submit(
         cpus,
         time,
         partition,
+        job_name,
         dry_run
         ):
     gpu_resource = GPU_CONFIGS[gpu_type]
@@ -59,7 +62,7 @@ def submit(
     os.makedirs(OUTFILES_DIR, exist_ok=True)
 
     script = f"""#!/bin/bash
-#SBATCH --job-name={partition}
+#SBATCH --job-name={job_name}
 #SBATCH --partition={partition}
 #SBATCH --account={group_name}
 #SBATCH --time={time}
@@ -119,6 +122,10 @@ def main():
                         help='Wall time limit day-HH:MM:SS (default: 1-00:00:00)')
     parser.add_argument('--partition', type=str, default='ckpt-all',
                         help='SLURM partition (default: ckpt-all)')
+    parser.add_argument('--job_name', type=str, default='',
+                        help='SLURM job name shown in squeue; lets you target a batch, e.g. '
+                             'squeue -u $USER -h | grep <name> | awk \'{print $1}\' | xargs scancel '
+                             '(default: the partition name)')
     parser.add_argument('--override', type=str, default='',
                         help='Additional Hydra overrides passed directly to main_hydra '
                              '(e.g. "outsuffix=run01 action_physics=force seed=1")')
@@ -176,6 +183,7 @@ def main():
         cpus=args.cpus,
         time=args.time,
         partition=args.partition,
+        job_name=args.job_name or args.partition,
         dry_run=args.dry_run
     )
 
