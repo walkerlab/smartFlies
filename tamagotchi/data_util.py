@@ -793,11 +793,10 @@ def log_curriculum_schedule(schedule_dict, j, use_mlflow=True):
                 mlflow.log_metric(f"curriculum/{lesson_name}", current_value, step=j)
 
 
-def _log_eps_group(j, df, prefix):
-    """Log per-update episode statistics for one group of episodes.
+def _log_outcome_group(j, df, prefix):
+    """Log per-update outcome statistics for one group of episodes (perf/ tab).
 
-    Called once for the whole update and once per dataset, so the per-(dataset, update)
-    thresholds used in the figure-2 panels can be rebuilt from wandb alone.
+    Called once for the whole update and once per dataset.
     """
     n = len(df)
     if n == 0:
@@ -807,6 +806,18 @@ def _log_eps_group(j, df, prefix):
         k = int((df['outcome'] == outcome).sum())
         mlflow.log_metric(f"{prefix}{outcome}_num", k, step=j)
         mlflow.log_metric(f"{prefix}{outcome}_ratio", k / n, step=j)
+
+
+def _log_trial_stats_group(j, df, prefix):
+    """Log per-update trial condition statistics for one group of episodes
+    (trial_stats/ tab), so the per-(dataset, update) thresholds used in the
+    figure-2 panels can be rebuilt from wandb alone.
+    """
+    n = len(df)
+    if n == 0:
+        return
+    # num_episodes repeated here so the tab is self-contained for pooling across seeds
+    mlflow.log_metric(f"{prefix}num_episodes", n, step=j)
 
     # Realized rotate_by diversity: what was actually sampled, not what the schedule holds
     if 'rotate_by' in df.columns:
@@ -827,13 +838,12 @@ def _log_eps_group(j, df, prefix):
 def log_eps_info(j, update_episodes_df, use_mlflow=True):
     if not use_mlflow or len(update_episodes_df) == 0:
         return
-    # Legacy keys - kept verbatim so existing dashboards/queries keep working
-    mlflow.log_metric("perf/init_distance", update_episodes_df['location_initial'].apply(np.linalg.norm).mean(), step=j)
-    mlflow.log_metric("perf/stray_initial", update_episodes_df['stray_initial'].mean(), step=j)
-
-    _log_eps_group(j, update_episodes_df, "perf/")
+    # perf/ carries outcome info only; trial conditions live under trial_stats/
+    _log_outcome_group(j, update_episodes_df, "perf/")
+    _log_trial_stats_group(j, update_episodes_df, "trial_stats/")
     for ds, group in update_episodes_df.groupby('dataset'):
-        _log_eps_group(j, group, f"perf/{ds}/")
+        _log_outcome_group(j, group, f"perf/{ds}/")
+        _log_trial_stats_group(j, group, f"trial_stats/{ds}/")
 
 
 def log_update_wind_stats(j, wind_xy, use_mlflow=True, round_decimals=2):
