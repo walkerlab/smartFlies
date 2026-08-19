@@ -408,22 +408,20 @@ def plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=False, win
 
     # Indicator placement/size in axes fraction (independent of data limits)
     cx, cy = 0.12, 0.72  # circle center (upper-left, below the info box)
-    L_pts = 11            # arrow half-length in display points (circle radius is 15 pts)
+    L_pts = 13            # arrow length in display points (circle radius is 15 pts)
     color = 'white' if invert_colors else 'black'
 
     if not wind_vector:
         return ax
 
-    # Draw wind vector as an arrow through the circle center. Both ends are
+    # Draw wind vector as an arrow from the circle center outward. The head is
     # offset from the anchor in display points so the direction is rendered
     # faithfully (axes-fraction offsets would skew with non-square panels)
     # and the arrow stays inside the circle.
     tr_head = matplotlib.transforms.offset_copy(
         ax.transAxes, fig=ax.figure, x=v_x * L_pts, y=v_y * L_pts, units='points')
-    tr_tail = matplotlib.transforms.offset_copy(
-        ax.transAxes, fig=ax.figure, x=-v_x * L_pts, y=-v_y * L_pts, units='points')
     ax.annotate('', xy=(cx, cy), xytext=(cx, cy),
-                xycoords=tr_head, textcoords=tr_tail,
+                xycoords=tr_head, textcoords=ax.transAxes,
                 arrowprops=dict(arrowstyle='-|>', color=color, lw=2), zorder=6)
 
     # Draw wind circle centered on the same anchor (s=900 -> ~15 pt radius)
