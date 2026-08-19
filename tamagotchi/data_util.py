@@ -393,7 +393,7 @@ def init(module, weight_init, bias_init, gain=1):
 # Wind direction indicator: a dashed circle + arrow drawn in axes-fraction
 # coordinates, so it stays a fixed visible size regardless of the arena/axis
 # limits (which can vary widely, e.g. when sized per-episode from x0/y0).
-def plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=False, wind_vector=True):
+def plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=False, wind_vector=True, indicator_radius_pts=15):
     # Get mean wind vector at given time (tolerant match: t_val may not equal a
     # stored time exactly due to float precision / downsampling).
     data_at_t = data_wind[np.isclose(data_wind.time, t_val, atol=1e-3)]
@@ -406,21 +406,31 @@ def plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=False, win
     else:
         v_x, v_y = v_x / norm, v_y / norm
 
-    # Indicator placement/size in axes fraction (independent of data limits)
-    cx, cy = 0.12, 0.8   # circle center (top-left corner)
-    L = 0.032             # arrow half-length
+    # Indicator placement in axes fraction (independent of data limits); size in
+    # display points. The arrow length and the circle marker size are both
+    # derived from indicator_radius_pts, so they stay in sync if resized.
+    cx, cy = 0.12, 0.72  # circle center (upper-left, below the info box)
+    R_pts = indicator_radius_pts
     color = 'white' if invert_colors else 'black'
 
     if not wind_vector:
         return ax
 
-    # Draw wind vector as an arrow through the circle center
-    ax.annotate('', xy=(cx + v_x * L, cy + v_y * L), xytext=(cx, cy),
-                xycoords='axes fraction', textcoords='axes fraction',
-                arrowprops=dict(arrowstyle='-|>', color=color, lw=2), zorder=6)
+    # Draw wind vector as an arrow from the circle center to the boundary. The
+    # head is offset from the anchor in display points so the direction is
+    # rendered faithfully (axes-fraction offsets would skew with non-square
+    # panels); shrinkA/B=0 keeps the tail exactly at the center and the tip
+    # exactly on the boundary.
+    tr_head = matplotlib.transforms.offset_copy(
+        ax.transAxes, fig=ax.figure, x=v_x * R_pts, y=v_y * R_pts, units='points')
+    ax.annotate('', xy=(cx, cy), xytext=(cx, cy),
+                xycoords=tr_head, textcoords=ax.transAxes,
+                arrowprops=dict(arrowstyle='-|>', color=color, lw=2,
+                                shrinkA=0, shrinkB=0), zorder=6)
 
-    # Draw wind circle
-    ax.scatter([cx], [cx], s=900,
+    # Draw wind circle centered on the same anchor. Scatter's s is the marker
+    # bounding-box area in points^2, i.e. s = (diameter)^2 = (2*R_pts)^2.
+    ax.scatter([cx], [cy], s=(2 * R_pts) ** 2,
                facecolors='none',
                edgecolors=color,
                linestyle='--',
@@ -661,12 +671,12 @@ def make_animation_update(time_values, data_puffs, data_wind, traj_df,
 
 
 
-def plot_puffs_and_wind_vectors(data_puffs, data_wind, t_val, ax=None, fig=None, fname='', plotsize=(10,10), aspect_ratio=False, show=True, invert_colors=False, wind_vector=True):
+def plot_puffs_and_wind_vectors(data_puffs, data_wind, t_val, ax=None, fig=None, fname='', plotsize=(10,10), aspect_ratio=False, show=True, invert_colors=False, wind_vector=True, indicator_radius_pts=15):
     if fig is None:
         fig = plt.figure(figsize=plotsize)
     if ax is None:
         ax = fig.add_subplot(111)
-    ax = plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=invert_colors, wind_vector=wind_vector)
+    ax = plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=invert_colors, wind_vector=wind_vector, indicator_radius_pts=indicator_radius_pts)
     ax = plot_puffs(data_puffs, t_val, ax=ax, fig=fig, show=False)
     ax.patch.set_facecolor('none') 
     if aspect_ratio:
