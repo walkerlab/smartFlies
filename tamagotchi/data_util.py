@@ -408,7 +408,7 @@ def plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=False, win
 
     # Indicator placement/size in axes fraction (independent of data limits)
     cx, cy = 0.12, 0.72  # circle center (upper-left, below the info box)
-    L_pts = 13            # arrow length in display points (circle radius is 15 pts)
+    L_pts = 15            # arrow length in display points = circle radius (s=900 -> 15 pts), so the tip touches the boundary
     color = 'white' if invert_colors else 'black'
 
     if not wind_vector:
@@ -422,7 +422,8 @@ def plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=False, win
         ax.transAxes, fig=ax.figure, x=v_x * L_pts, y=v_y * L_pts, units='points')
     ax.annotate('', xy=(cx, cy), xytext=(cx, cy),
                 xycoords=tr_head, textcoords=ax.transAxes,
-                arrowprops=dict(arrowstyle='-|>', color=color, lw=2), zorder=6)
+                arrowprops=dict(arrowstyle='-|>', color=color, lw=2,
+                                shrinkA=0, shrinkB=0), zorder=6)
 
     # Draw wind circle centered on the same anchor (s=900 -> ~15 pt radius)
     ax.scatter([cx], [cy], s=900,
