@@ -29,7 +29,10 @@ path:
 
 num_env_steps: 4000000
 odor_01: false
-action_delay_const: null
+# action_delay_const (first-order EMA lag) is DEPRECATED and removed from this
+# config: PEv3 raises on any non-null value. Use action_latency below - a fixed
+# transport delay in seconds, the same shape as the airframe's cmd->velocity
+# delay that tamagotchi_bot's Simulator replays.
 action_latency: null
 
 plot_every_n_updates: 1

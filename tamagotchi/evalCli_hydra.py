@@ -227,6 +227,9 @@ def main():
     agent_setting = ['if_vec_norm', 'if_train_actor_std', 'rnn_type', 'variant']
     # WARNING: keys NOT listed here are not inherited from the training config - eval falls back to the
     # argparse defaults in build_evalcli_defaults(). Known gaps: action_latency, movex, turnx, walking.
+    # action_delay_const stays listed on purpose even though it is deprecated: inheriting it means an
+    # old EMA-lag training JSON trips PEv3's deprecation error instead of quietly evaluating without
+    # the lag it was trained with.
     env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'env_version', 'odor_01', 'action_delay_const', 'env_dt', 'stray_max', 'obs_mask']
     # env_setting = ['apparent_wind', 'action_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'rotate_by', 'visual_feedback'] # just keep rotate_by off for now
     #'ou_eval' set to true

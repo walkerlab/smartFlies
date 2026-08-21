@@ -1359,7 +1359,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  action_physics=None, # or 'ground_vel_angvel': agent commands ground velocity instead of air velocity
                  obs_mask = [], # indices of observation channels to zero out; does NOT change obs space shape
                  odor_01 = False,
-                 action_delay_const=None, # seconds; first-order lag on actions (EMA). None = off
+                 action_delay_const=None, # DEPRECATED: first-order EMA lag on actions. Must be None - see the guard below.
                  action_latency=None,       # seconds；None = off
                  obs_delayed_actions=False, # if True, obs includes last action (delayed by action_latency) as part of observation
                  force_physics=None, # dict of coefficients required by action_physics=='force'
@@ -1452,21 +1452,22 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self._null_action = np.array([0.0, 0.5, 0.5], dtype=np.float64)
         else:
             self._null_action = np.array([0.0, 0.5], dtype=np.float64)
-        # Action delay (first-order lag on actions and/or action feedback)
-        self.action_delay_const = action_delay_const
-        if self.action_delay_const is not None:
-            assert self.action_delay_const > 0
-            self.action_alpha = 1.0 - np.exp(-self.dt / self.action_delay_const)  # dt-invariant EMA coeff
-            self.action_applied = self._null_action.copy()
-            # Compatibility guard: these options mix commanded vs applied action semantics
-            incompatible = []
-            if self.action_feedback: incompatible.append("action_feedback")
-            if self.flipping: incompatible.append("flipping")
-            if incompatible:
-                raise ValueError(f"action_delay_const={self.action_delay_const} is incompatible with: "
-                                f"{', '.join(incompatible)}. Disable these or set action_delay_const=None.")
-            print(f"[DEBUG] PEv3 action EMA lag: tau={self.action_delay_const}s, dt={self.dt}, alpha={self.action_alpha:.4f}")
-        
+        # DEPRECATED: action_delay_const (first-order EMA lag on actions).
+        # Superseded by action_latency, which is what the drone pipeline models: the
+        # airframe's cmd->velocity delay is a fixed transport delay, not an EMA, and
+        # tamagotchi_bot's Simulator implements only the transport-delay queue. Keeping
+        # a second, differently-shaped actuator model here means a config can train an
+        # agent that no deployment path can reproduce. The kwarg is still accepted (so
+        # stale configs carrying `action_delay_const: null` keep loading) but any
+        # non-None value is a hard error rather than a silently unreproducible run.
+        self.action_delay_const = None
+        if action_delay_const is not None:
+            raise ValueError(
+                f"action_delay_const={action_delay_const} is deprecated and no longer implemented. "
+                "Use action_latency (seconds of fixed transport delay) instead, and set "
+                "action_delay_const to null/None. Checkpoints trained with the old EMA lag "
+                "cannot be reproduced by this env or by tamagotchi_bot's Simulator.")
+
         # Action latency (fixed transport delay on actions)
         self.action_latency = action_latency
         self.obs_delayed_actions = obs_delayed_actions
@@ -1974,8 +1975,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # Wind can either be relative wind or apparent wind, depending on the setting
         if not self.loc_algo == self.angle_algo == self.time_algo == 'fixed': # Only sample rotate_by when in training. These three algos are used for eval.
             self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
-        if self.action_delay_const is not None:
-            self.action_applied = self._null_action.copy()
 
         # Zero out the velocity state at the start of each episode. Under 'force' this is the
         # integrator state; under the other modes it is recomputed each step, but it must not carry
@@ -2064,10 +2063,6 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # print(f"[DEBUG] now action: {self.action_commanded}\n")
             # print(f"[DEBUG] delayed: {delayed}\n")
             # print(f"[DEBUG] action buffer: {list(self.action_buffer)}\n")
-        # --- first-order actuator lag (EMA toward commanded action) ---
-        if self.action_delay_const is not None:
-            self.action_applied += self.action_alpha * (np.asarray(action, dtype=np.float64) - self.action_applied)
-            action = self.action_applied.copy()
 
         if self.action_physics == 'ground_vel_angvel':
             # action[0]: forward [0,1]; action[1]: lateral [0,1] -> [-1,1] (0.5=no lateral); action[2]: turn [0,1]
@@ -2470,7 +2465,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         force_physics=getattr(args, 'force_physics', None),
                         obs_mask=getattr(args, 'obs_mask', []),
                         odor_01=getattr(args, 'odor_01', False),
-                        action_delay_const=getattr(args, 'action_delay_const', None),
+                        action_delay_const=getattr(args, 'action_delay_const', None), # deprecated; non-None raises in PEv3
                         action_latency=getattr(args, 'action_latency', None),
                         )
             else:
@@ -2500,7 +2495,6 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                     stray_max=args.stray_max,
                     obs_noise=args.obs_noise,
                     act_noise=args.act_noise,
-                    action_delay_const=args.action_delay_const,
                     action_latency=getattr(args, 'action_latency', None),
                     action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
                     seed=args.seed
