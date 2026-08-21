@@ -74,6 +74,10 @@ def build_evalcli_defaults() -> dict:
         'dynamic': False,
         'stacking': 0,
         'recurrent_policy': True,
+        # Not an evalCli flag: eval_loop() backfills it from the PlumeEnvironment_v3
+        # __init__ signature. Listed here so the comparison table shows it side by side
+        # with the training value instead of filing it under "only in training JSON".
+        'action_latency': None,
     }
 
     defaults = vars(parser.parse_args([]))
@@ -226,11 +230,14 @@ def main():
     # Step. 4: inherit subset of args when relevant
     agent_setting = ['if_vec_norm', 'if_train_actor_std', 'rnn_type', 'variant']
     # WARNING: keys NOT listed here are not inherited from the training config - eval falls back to the
-    # argparse defaults in build_evalcli_defaults(). Known gaps: action_latency, movex, turnx, walking.
+    # argparse defaults in build_evalcli_defaults(). Known gaps: movex, turnx, walking.
+    # action_latency MUST be inherited: it is a physics-changing input delay, so evaluating a
+    # latency-trained checkpoint without it silently measures a different system (and made smartFlies
+    # eval non-comparable with tamagotchi_bot, which runs the delay from its own config).
     # action_delay_const stays listed on purpose even though it is deprecated: inheriting it means an
     # old EMA-lag training JSON trips PEv3's deprecation error instead of quietly evaluating without
     # the lag it was trained with.
-    env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'env_version', 'odor_01', 'action_delay_const', 'env_dt', 'stray_max', 'obs_mask']
+    env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'env_version', 'odor_01', 'action_delay_const', 'action_latency', 'env_dt', 'stray_max', 'obs_mask']
     # env_setting = ['apparent_wind', 'action_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'rotate_by', 'visual_feedback'] # just keep rotate_by off for now
     #'ou_eval' set to true
     args = apply_configs(args, train_cfg, keys=agent_setting + env_setting)
