@@ -9,8 +9,9 @@
 # SLURM eval job per checkpoint. Logs are saved alongside weights with the
 # same stem but in {from_folder}/{out_dir}/*.evallog
 #
-# Email: --mail-type=FAIL only -- mail on a real failure, not on a normal finish, a
-# preemption/requeue, or scancel. Set the address with --mail_user (or --mail_user "" for none).
+# Email: --mail-type=FAIL only -- mail on a real failure, not on a normal finish or on
+# scancel. Eval jobs are one-shot (no --requeue), so a preemption does still mail you.
+# Set the address with --mail_user (or --mail_user "" for none).
 #
 # Cancel all your jobs: squeue -u $USER -h | awk '{print $1}' | xargs scancel
 
@@ -83,10 +84,11 @@ def submit_eval(
     os.makedirs(OUTFILES_DIR, exist_ok=True)
 
     # Crash-only mail: FAIL covers a failed exit, OOM, node failure and wall-clock
-    # timeout, but not a normal finish (that is END) and not preemption -- slurm only
-    # skips the FAIL mail for a preempted job if the job is requeued, which is why
-    # --requeue is set below (it also means a preempted eval restarts instead of being
-    # silently lost, which matters on the ckpt-* partitions).
+    # timeout, but not a normal finish (that is END) and not scancel (CANCELLED sorts
+    # below FAILED in slurm's job-state enum, so the FAIL mail is skipped).
+    # Caveat: eval jobs are deliberately one-shot -- no --requeue -- and slurm only
+    # skips the FAIL mail on a preempted job when it is requeued. So a preempted eval
+    # on a ckpt-* partition does still mail you; it is also lost rather than restarted.
     mail_directives = MAIL_DIRECTIVES.format(mail_user=mail_user) if mail_user else ''
 
     script = f"""#!/bin/bash
@@ -103,7 +105,6 @@ def submit_eval(
 #SBATCH --open-mode=append
 #SBATCH -o {OUTFILES_DIR}/slurm-%A_%a.out
 {mail_directives}#SBATCH --nodelist={gpu_resource}
-#SBATCH --requeue
 cat $0
 module load cuda/12.9.1
 set -x
