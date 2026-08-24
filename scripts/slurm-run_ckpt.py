@@ -5,6 +5,11 @@
 # updates. On requeue the script restarts with the same args; if that file exists, training
 # resumes automatically from the last saved checkpoint (no load_jobid logic needed).
 #
+# Email: jobs are submitted with --mail-type=FAIL only, so you are mailed when a job
+# actually dies (non-zero exit, OOM, node failure, wall-clock timeout) but not when it
+# finishes normally, is preempted and requeued, or is cancelled with scancel. Change the
+# address with --mail_user, or pass --mail_user "" to turn mail off entirely.
+#
 # Cancel all your ckpt jobs: squeue -u $USER -h | grep ckpt-all | awk '{print $1}' | xargs scancel
 # Name a batch with --job_name mybatch, then cancel just that batch: scancel -u $USER --name=mybatch
 # python3 scripts/slurm-run_ckpt.py --job_name force-sweep --n_seeds 15 --override "..."
@@ -24,6 +29,10 @@ import sys
 
 PROJECT_DIR = '/gscratch/portia/jqhu/work/active_sensing/smartFlies/'
 OUTFILES_DIR = os.path.join(PROJECT_DIR, 'scripts/slurm_outfiles')
+DEFAULT_MAIL_USER = 'jqhu@uw.edu'
+MAIL_DIRECTIVES = """#SBATCH --mail-type=FAIL
+#SBATCH --mail-user={mail_user}
+"""
 
 GPU_CONFIGS = {
     'all':  'g[3043-3047,3050-3054,3057,3060-3067,3070-3077,3080-3087,3090-3137]',
@@ -54,12 +63,19 @@ def submit(
         time,
         partition,
         job_name,
+        mail_user,
         dry_run
         ):
     gpu_resource = GPU_CONFIGS[gpu_type]
     group_name = 'walkerlab' if partition == 'gpu-a100' else 'portia'
 
     os.makedirs(OUTFILES_DIR, exist_ok=True)
+
+    # Crash-only mail. FAIL fires when the job ends in a failed state (non-zero exit,
+    # OOM, node failure, wall-clock timeout). It does NOT fire on a normal finish
+    # (that would be END) nor on preemption: a preempted job on ckpt-* is requeued
+    # rather than terminated, which is REQUEUE, not FAIL. So neither is requested here.
+    mail_directives = MAIL_DIRECTIVES.format(mail_user=mail_user) if mail_user else ''
 
     script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
@@ -77,8 +93,12 @@ def submit(
 #SBATCH --nodelist={gpu_resource}
 #SBATCH --requeue
 #SBATCH --signal=B:USR1@120
-cat $0
+{mail_directives}cat $0
 module load cuda/12.9.1
+# --signal=B:USR1@120 warns the batch shell 120s before the job is killed (preemption
+# or wall-clock limit). Trap it: bash's default action for USR1 is to die, which would
+# exit non-zero and make a routine preemption look like a crash.
+trap 'echo "Caught USR1: job is being stopped; training resumes from the last checkpoint on requeue"' USR1
 set -x
 source ~/.bashrc
 nvidia-smi
@@ -90,6 +110,9 @@ export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 python3 -u -m tamagotchi.main_hydra \\
   --config-name {config_name} \\
   {override}
+status=$?
+echo "python3 exited with status $status"
+exit $status
 """
 
     print('Submitting job with script:')
@@ -126,6 +149,10 @@ def main():
                         help='SLURM job name shown in squeue; lets you target a batch, e.g. '
                              'squeue -u $USER -h | grep <name> | awk \'{print $1}\' | xargs scancel '
                              '(default: the partition name)')
+    parser.add_argument('--mail_user', type=str, default=DEFAULT_MAIL_USER,
+                        help='Email address for crash notifications (--mail-type=FAIL only: '
+                             'no mail on a normal finish or on preemption/requeue). '
+                             f'Pass an empty string to disable mail entirely (default: {DEFAULT_MAIL_USER})')
     parser.add_argument('--override', type=str, default='',
                         help='Additional Hydra overrides passed directly to main_hydra '
                              '(e.g. "outsuffix=run01 action_physics=force seed=1")')
@@ -184,6 +211,7 @@ def main():
         time=args.time,
         partition=args.partition,
         job_name=args.job_name or args.partition,
+        mail_user=args.mail_user,
         dry_run=args.dry_run
     )
 

@@ -9,6 +9,9 @@
 # SLURM eval job per checkpoint. Logs are saved alongside weights with the
 # same stem but in {from_folder}/{out_dir}/*.evallog
 #
+# Email: --mail-type=FAIL only -- mail on a real failure, not on a normal finish, a
+# preemption/requeue, or scancel. Set the address with --mail_user (or --mail_user "" for none).
+#
 # Cancel all your jobs: squeue -u $USER -h | awk '{print $1}' | xargs scancel
 
 # python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ --dataset eval_noisy_jitterx5b5 --substr stage --dry_run  --extra_args "--no_viz False --test_sparsity"
@@ -24,6 +27,10 @@ import sys
 
 PROJECT_DIR = '/gscratch/portia/jqhu/work/active_sensing/smartFlies/'
 OUTFILES_DIR = os.path.join(PROJECT_DIR, 'scripts/slurm_outfiles')
+DEFAULT_MAIL_USER = 'jqhu@uw.edu'
+MAIL_DIRECTIVES = """#SBATCH --mail-type=FAIL
+#SBATCH --mail-user={mail_user}
+"""
 
 GPU_CONFIGS = {
     'all':  'g[3040-3047,3050-3057,3060-3067,3070-3077,3080-3087,3090-3097,3091-3113,3115-3132]',
@@ -57,6 +64,7 @@ def submit_eval(
         time,
         partition,
         extra_args,
+        mail_user,
         ):
     gpu_resource = GPU_CONFIGS[gpu_type]
     group_name = 'walkerlab' if partition == 'gpu-a100' else 'portia'
@@ -74,6 +82,13 @@ def submit_eval(
 
     os.makedirs(OUTFILES_DIR, exist_ok=True)
 
+    # Crash-only mail: FAIL covers a failed exit, OOM, node failure and wall-clock
+    # timeout, but not a normal finish (that is END) and not preemption -- slurm only
+    # skips the FAIL mail for a preempted job if the job is requeued, which is why
+    # --requeue is set below (it also means a preempted eval restarts instead of being
+    # silently lost, which matters on the ckpt-* partitions).
+    mail_directives = MAIL_DIRECTIVES.format(mail_user=mail_user) if mail_user else ''
+
     script = f"""#!/bin/bash
 #SBATCH --job-name=eval-{partition}
 #SBATCH --partition={partition}
@@ -87,9 +102,8 @@ def submit_eval(
 #SBATCH --verbose
 #SBATCH --open-mode=append
 #SBATCH -o {OUTFILES_DIR}/slurm-%A_%a.out
-#SBATCH --mail-type=ALL
-#SBATCH --mail-user=jqhu@uw.edu
-#SBATCH --nodelist={gpu_resource}
+{mail_directives}#SBATCH --nodelist={gpu_resource}
+#SBATCH --requeue
 cat $0
 module load cuda/12.9.1
 set -x
@@ -109,6 +123,9 @@ python3 -u tamagotchi/evalCli_hydra.py \\
     --viz_episodes {viz_episodes} \\
     --model_fname {model_fname} \\
     {extra_args} >> {logfile} 2>&1
+status=$?
+echo "evalCli exited with status $status" >> {logfile}
+exit $status
 """
 
     print('Submitting eval job with script:')
@@ -154,6 +171,10 @@ def main():
                         help='Wall time limit HH:MM:SS (default: 4:00:00)')
     parser.add_argument('--partition', type=str, default='ckpt-all',
                         help='SLURM partition (default: ckpt-all)')
+    parser.add_argument('--mail_user', type=str, default=DEFAULT_MAIL_USER,
+                        help='Email address for crash notifications (--mail-type=FAIL only: '
+                             'no mail on a normal finish or on preemption/requeue). '
+                             f'Pass an empty string to disable mail entirely (default: {DEFAULT_MAIL_USER})')
     parser.add_argument('--dry_run', action='store_true', default=False,
                         help='Print the commands that would be executed without actually submitting the jobs')
 
@@ -199,6 +220,7 @@ def main():
             time=args.time,
             partition=args.partition,
             extra_args=args.extra_args,
+            mail_user=args.mail_user,
             dry_run=args.dry_run,
         )
 
