@@ -34,7 +34,7 @@ tau_max: 1.41e-11       # N*m — Model-derived smooth-yaw torque cap chosen so 
 
 
 # env_dt = 0.04:
-physics_substeps: 4
+physics_substeps: 8
 
 # env_dt = 0.10:
 # physics_substeps: 10
