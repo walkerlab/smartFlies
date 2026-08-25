@@ -5,10 +5,10 @@
 # updates. On requeue the script restarts with the same args; if that file exists, training
 # resumes automatically from the last saved checkpoint (no load_jobid logic needed).
 #
-# Email: jobs are submitted with --mail-type=FAIL only, so you are mailed when a job
-# actually dies (non-zero exit, OOM, node failure, wall-clock timeout) but not when it
-# finishes normally, is preempted and requeued, or is cancelled with scancel. Change the
-# address with --mail_user, or pass --mail_user "" to turn mail off entirely.
+# Email: the batch script mails you when python exits non-zero (crash, OOM kill of the
+# process), including the last 10 lines of the slurm .out file. No mail when it finishes
+# normally, is preempted/requeued, or is cancelled with scancel. Change the address with
+# --mail_user, or pass --mail_user "" to turn mail off entirely.
 #
 # Cancel all your ckpt jobs: squeue -u $USER -h | grep ckpt-all | awk '{print $1}' | xargs scancel
 # Name a batch with --job_name mybatch, then cancel just that batch: scancel -u $USER --name=mybatch
@@ -30,8 +30,13 @@ import sys
 PROJECT_DIR = '/gscratch/portia/jqhu/work/active_sensing/smartFlies/'
 OUTFILES_DIR = os.path.join(PROJECT_DIR, 'scripts/slurm_outfiles')
 DEFAULT_MAIL_USER = 'jqhu@uw.edu'
-MAIL_DIRECTIVES = """#SBATCH --mail-type=FAIL
-#SBATCH --mail-user={mail_user}
+# Sent from the batch script itself instead of --mail-type=FAIL, because SLURM's built-in
+# mail is a fixed template and cannot include the log. Skipped when USR1 was caught
+# (preemption / wall-clock stop) so a routine requeue does not look like a crash.
+MAIL_ON_FAIL = """if [ $status -ne 0 ] && [ -z "$stopped" ]; then
+  {{ echo "Job $SLURM_JOB_ID ($SLURM_JOB_NAME) on $SLURMD_NODENAME exited with status $status"; echo; echo "--- tail -n10 $out ---"; tail -n10 "$out"; }} \\
+    | mail -s "SLURM job $SLURM_JOB_ID ($SLURM_JOB_NAME) FAILED, status $status" {mail_user}
+fi
 """
 
 GPU_CONFIGS = {
@@ -71,11 +76,8 @@ def submit(
 
     os.makedirs(OUTFILES_DIR, exist_ok=True)
 
-    # Crash-only mail. FAIL fires when the job ends in a failed state (non-zero exit,
-    # OOM, node failure, wall-clock timeout). It does NOT fire on a normal finish
-    # (that would be END) nor on preemption: a preempted job on ckpt-* is requeued
-    # rather than terminated, which is REQUEUE, not FAIL. So neither is requested here.
-    mail_directives = MAIL_DIRECTIVES.format(mail_user=mail_user) if mail_user else ''
+    # Crash-only mail: sent when python exits non-zero and no stop signal was caught.
+    mail_on_fail = MAIL_ON_FAIL.format(mail_user=mail_user) if mail_user else ''
 
     script = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
@@ -93,12 +95,14 @@ def submit(
 #SBATCH --nodelist={gpu_resource}
 #SBATCH --requeue
 #SBATCH --signal=B:USR1@120
-{mail_directives}cat $0
+cat $0
 module load cuda/12.9.1
 # --signal=B:USR1@120 warns the batch shell 120s before the job is killed (preemption
 # or wall-clock limit). Trap it: bash's default action for USR1 is to die, which would
 # exit non-zero and make a routine preemption look like a crash.
-trap 'echo "Caught USR1: job is being stopped; training resumes from the last checkpoint on requeue"' USR1
+stopped=
+trap 'stopped=1; echo "Caught USR1: job is being stopped; training resumes from the last checkpoint on requeue"' USR1
+out={OUTFILES_DIR}/slurm-${{SLURM_ARRAY_JOB_ID:-$SLURM_JOB_ID}}_${{SLURM_ARRAY_TASK_ID:-4294967294}}.out
 set -x
 source ~/.bashrc
 nvidia-smi
@@ -112,7 +116,7 @@ python3 -u -m tamagotchi.main_hydra \\
   {override}
 status=$?
 echo "python3 exited with status $status"
-exit $status
+{mail_on_fail}exit $status
 """
 
     print('Submitting job with script:')
@@ -150,8 +154,9 @@ def main():
                              'squeue -u $USER -h | grep <name> | awk \'{print $1}\' | xargs scancel '
                              '(default: the partition name)')
     parser.add_argument('--mail_user', type=str, default=DEFAULT_MAIL_USER,
-                        help='Email address for crash notifications (--mail-type=FAIL only: '
-                             'no mail on a normal finish or on preemption/requeue). '
+                        help='Email address for crash notifications (sent when python exits '
+                             'non-zero, with the last 10 lines of the slurm .out file; no mail on '
+                             'a normal finish or on preemption/requeue). '
                              f'Pass an empty string to disable mail entirely (default: {DEFAULT_MAIL_USER})')
     parser.add_argument('--override', type=str, default='',
                         help='Additional Hydra overrides passed directly to main_hydra '
