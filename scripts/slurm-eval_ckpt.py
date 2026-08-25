@@ -12,8 +12,23 @@
 # Cancel all your jobs: squeue -u $USER -h | awk '{print $1}' | xargs scancel
 
 # python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ --dataset eval_noisy_jitterx5b5 --substr stage --dry_run  --extra_args "--no_viz False --test_sparsity"
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/CTL_noCL/ --dataset eval_noisy_jitterx5b5 --substr chkpt --dry_run  --extra_args "--no_viz False --test_sparsity"
 # python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ --dataset eval_noisy_jitterx5b5 --substr stage --dry_run  --extra_args="--only_test_sparsity"
+# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ --dataset eval_constant_jitterx5b5 --substr stage --extra_args "--no_viz False --test_sparsity"
+# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/CTL_noCL/ --dataset eval_noisy_jitterx5b5 --substr chkpt --dry_run  --extra_args "--no_viz False --test_sparsity"
+# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/CTL_noCL/ --dataset eval_constant_jitterx5b5 --substr chkpt  --extra_args "--no_viz False --test_sparsity"
+
+# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ --dataset poisson_mag_narrow_noisy3x5b5 --substr stage 
+
+# Base evals
+# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/CTL_noCL_base/ --dataset eval_noisy_jitterx5b5 --substr chkpt --extra_args "--no_viz False --test_sparsity"
+# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/CTL_noCL_base/ --dataset eval_constant_jitterx5b5 --substr chkpt  --extra_args "--no_viz False --test_sparsity"
+# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_base/ --dataset eval_noisy_jitterx5b5 --substr stage  --extra_args="--test_sparsity"
+# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_base/ --dataset eval_constant_jitterx5b5 --substr stage --extra_args "--no_viz False --test_sparsity"
+
+# Drone native runs 
+# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/drone_naive/ --dataset eval_constant_jitterx5b5 --substr chkpt --extra_args "--no_viz False --test_sparsity"
+# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/drone_naive_delay/ --dataset eval_constant_jitterx5b5 --substr chkpt --extra_args "--no_viz False --test_sparsity"
+
 
 import argparse
 import glob
@@ -25,13 +40,14 @@ import sys
 PROJECT_DIR = '/gscratch/portia/jqhu/work/active_sensing/smartFlies/'
 OUTFILES_DIR = os.path.join(PROJECT_DIR, 'scripts/slurm_outfiles')
 
+
 GPU_CONFIGS = {
-    'all':  'g[3040-3047,3050-3057,3060-3067,3070-3077,3080-3087,3090-3097,3091-3113,3115-3132]',
+    'all':  'g[3043-3047,3050-3054,3057,3060-3067,3070-3077,3080-3087,3090-3137]',
+    # 'all':  'g[3043-3047,3050-3054,3057,3060-3067,3070-3077,3080-3087,3090-3113,3115-3132]',
     'a100': 'g[3040-3047,3050-3057,3060-3067,3070-3077,3080-3087]',
     'l40s': 'g[3091-3113,3115-3132]',
     'h200': 'g[3125-3132]',
 }
-
 
 def slurm_submit(script_path):
     try:
@@ -62,7 +78,7 @@ def submit_eval(
     group_name = 'walkerlab' if partition == 'gpu-a100' else 'portia'
 
     # Derive log path: replace weights/ dir with out_dir, .pt -> .evallog
-    logfile = model_fname.replace('.pt', '.evallog')
+    logfile = model_fname.replace('.pt', f'_{dataset}.evallog')
     # Replace the weights component of the path with out_dir
     logfile = re.sub(r'/weights/', f'/{out_dir}/', logfile)
 
@@ -158,6 +174,8 @@ def main():
                         help='Print the commands that would be executed without actually submitting the jobs')
 
     args = parser.parse_args()
+    if 'constant' in args.dataset:
+        args.time_offsets = [0.0] # same idea
 
     pattern = os.path.join(args.from_folder, 'weights', 'plume_seed-*.pt')
     pt_files = sorted(glob.glob(pattern))
