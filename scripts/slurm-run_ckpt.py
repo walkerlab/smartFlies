@@ -6,7 +6,7 @@
 # resumes automatically from the last saved checkpoint (no load_jobid logic needed).
 #
 # Email: the batch script mails you when python exits non-zero (crash, OOM kill of the
-# process), including the last 10 lines of the slurm .out file. No mail when it finishes
+# process), including the last 50 lines of the slurm .out file. No mail when it finishes
 # normally, is preempted/requeued, or is cancelled with scancel. Change the address with
 # --mail_user, or pass --mail_user "" to turn mail off entirely.
 #
@@ -33,6 +33,9 @@ DEFAULT_MAIL_USER = 'jqhu@uw.edu'
 # Sent from the batch script itself instead of --mail-type=FAIL, because SLURM's built-in
 # mail is a fixed template and cannot include the log. Skipped when USR1 was caught
 # (preemption / wall-clock stop) so a routine requeue does not look like a crash.
+# The tail is snapshotted into a variable before composing the mail: the .out file keeps
+# growing while this block runs (xtrace is already off by now, see `set +x` after status=$?,
+# otherwise the trace of these very commands would fill the tail instead of the traceback).
 MAIL_ON_FAIL = """if [ $status -ne 0 ] && [ -z "$stopped" ]; then
   # tail is captured before anything else is written to $out, so the traceback is intact
   err_tail=$(tail -n10 "$out")
