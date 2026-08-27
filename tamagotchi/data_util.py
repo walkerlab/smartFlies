@@ -982,9 +982,6 @@ def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifact
         
 
 # from a2c_ppo_acktr/storage.py
-import torch
-from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
-
 
 def _flatten_helper(T, N, _tensor):
     return _tensor.view(T * N, *_tensor.size()[2:])
