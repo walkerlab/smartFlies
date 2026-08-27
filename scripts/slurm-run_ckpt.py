@@ -34,7 +34,9 @@ DEFAULT_MAIL_USER = 'jqhu@uw.edu'
 # mail is a fixed template and cannot include the log. Skipped when USR1 was caught
 # (preemption / wall-clock stop) so a routine requeue does not look like a crash.
 MAIL_ON_FAIL = """if [ $status -ne 0 ] && [ -z "$stopped" ]; then
-  {{ echo "Job $SLURM_JOB_ID ($SLURM_JOB_NAME) on $SLURMD_NODENAME exited with status $status"; echo; echo "--- tail -n10 $out ---"; tail -n10 "$out"; }} \\
+  # tail is captured before anything else is written to $out, so the traceback is intact
+  err_tail=$(tail -n10 "$out")
+  {{ echo "Job $SLURM_JOB_ID ($SLURM_JOB_NAME) on $SLURMD_NODENAME exited with status $status"; echo; echo "--- tail -n10 $out ---"; echo "$err_tail"; }} \\
     | mail -s "SLURM job $SLURM_JOB_ID ($SLURM_JOB_NAME) FAILED, status $status" {mail_user}
 fi
 """
@@ -114,9 +116,9 @@ export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 python3 -u -m tamagotchi.main_hydra \\
   --config-name {config_name} \\
   {override}
-status=$?
-echo "python3 exited with status $status"
-{mail_on_fail}exit $status
+{{ status=$?; set +x; }} 2>/dev/null
+{mail_on_fail}echo "python3 exited with status $status"
+exit $status
 """
 
     print('Submitting job with script:')
