@@ -6,7 +6,7 @@
 # resumes automatically from the last saved checkpoint (no load_jobid logic needed).
 #
 # Email: the batch script mails you when python exits non-zero (crash, OOM kill of the
-# process), including the last 10 lines of the slurm .out file. No mail when it finishes
+# process), including the last 50 lines of the slurm .out file. No mail when it finishes
 # normally, is preempted/requeued, or is cancelled with scancel. Change the address with
 # --mail_user, or pass --mail_user "" to turn mail off entirely.
 #
@@ -33,8 +33,12 @@ DEFAULT_MAIL_USER = 'jqhu@uw.edu'
 # Sent from the batch script itself instead of --mail-type=FAIL, because SLURM's built-in
 # mail is a fixed template and cannot include the log. Skipped when USR1 was caught
 # (preemption / wall-clock stop) so a routine requeue does not look like a crash.
+# The tail is snapshotted into a variable before composing the mail: the .out file keeps
+# growing while this block runs (xtrace is already off by now, see `set +x` after status=$?,
+# otherwise the trace of these very commands would fill the tail instead of the traceback).
 MAIL_ON_FAIL = """if [ $status -ne 0 ] && [ -z "$stopped" ]; then
-  {{ echo "Job $SLURM_JOB_ID ($SLURM_JOB_NAME) on $SLURMD_NODENAME exited with status $status"; echo; echo "--- tail -n10 $out ---"; tail -n10 "$out"; }} \\
+  log_tail=$(tail -n 50 "$out")
+  {{ echo "Job $SLURM_JOB_ID ($SLURM_JOB_NAME) on $SLURMD_NODENAME exited with status $status"; echo; echo "--- tail -n50 $out ---"; echo "$log_tail"; }} \\
     | mail -s "SLURM job $SLURM_JOB_ID ($SLURM_JOB_NAME) FAILED, status $status" {mail_user}
 fi
 """
@@ -115,6 +119,7 @@ python3 -u -m tamagotchi.main_hydra \\
   --config-name {config_name} \\
   {override}
 status=$?
+{{ set +x; }} 2>/dev/null
 echo "python3 exited with status $status"
 {mail_on_fail}exit $status
 """
