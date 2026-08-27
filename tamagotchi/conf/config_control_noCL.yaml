@@ -19,23 +19,25 @@ defaults:
 # Training variant: "base" (default), "wind_obsver_v1", or "wind_obsver_v2"
 variant: base
 experiment_name: default # should be overridden by CLI - acts as both suffix of save dir and wandb run name
+plot_every_n_updates: 5
+auxiliary_arch: separate_wind_head
 
 path:
-  curriculum_name: "061026_const_noisy_jitter_noCL"
-dataset: [constant_jitterx5b5, noisy_jitterx5b5]
-r_shaping: [step,missed_time_cost,rotate_by]
-loc_algo: linear_precise_random
-num_env_steps: 3000000
+  curriculum_name: "081626_const_noisy_jitter_coverage_noCL"
+dataset: [constant_jitterx5b5, noisy_jitter_coveragex5b5]
+r_shaping: [step,missed_time_cost,rotate_by,cosine]
+loc_algo: slice_linear # already random by min max
+num_env_steps: 3000000 # set in cmd override string
 # these belong should not matter - actual numbers are handled by the curriculum config file - but need to be set to something
-qvar: [1.5, 1.5]
-birthx: 0.7
-diff_max: [0.8, 0.8]
-diff_min: [0.3, 0.3]
-precise_max: [8.0, 8.0]
-precise_min: [1.0, 1.0] 
+qvar: [1.5, 1]
+birthx: 0.1
+diff_max: [0.6, 0.6] 
+diff_min: [0.1, 0.1]
+precise_max: [8.0, 8.0] # not used 
+precise_min: [1.0, 1.0] # not used 
 birthx_linear_tc_steps: 6
-plot_every_n_updates: 100
-
+birthx_upper: 0 
+odor_01: 1
 # PPO / optimizer
 algo: ppo
 lr: 0.0003
@@ -79,6 +81,7 @@ stride: 1
 
 apparent_wind: true
 apparent_wind_allo: false
+env_version: v3
 visual_feedback: true
 flip_ventral_optic_flow: false
 rotate_by: 1
