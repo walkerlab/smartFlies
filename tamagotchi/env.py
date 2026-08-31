@@ -1382,7 +1382,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.action_physics = action_physics
         self.now_init_long = 0.0 # long-axis init coordinate set directly by curriculum
         self.odor_01 = odor_01 # PEv3
-        self.ang_vel = 0.0 # angular velocity (rad/s); integrated by 'force' physics, left at 0 otherwise
+        self.ang_vel = 0.0 # angular velocity (rad/s); integrated by 'force' physics, tracks the capped yaw rate under kinematics accel caps, left at 0 otherwise
+        self.kin_accel_cap = None     # m/s^2; set below from physics coeffs if provided (kinematics mode only)
+        self.kin_ang_accel_cap = None # rad/s^2; same
         print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}, self.mirror: {self.mirror}, self.action_physics: {self.action_physics} {action_physics}")
         if self.action_physics == 'force':
             # 3-dim action in [0, 1]:
@@ -1412,7 +1414,13 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                 print(f"[DEBUG] PEv3 using fly.yaml kinematic coefficients for original action physics: "
                       f"move_capacity={self.move_capacity:.4g} m/s, "
                       f"turn_capacity={np.rad2deg(self.turn_capacity):.4g} deg/s")
-        else:            
+            # Acceleration caps: if the physics coeffs carry peak accelerations, step() caps the
+            # per-step change in commanded airspeed / yaw rate at them; absent keys = uncapped as before.
+            if force_physics is not None and 'max_forward_accel' in force_physics:
+                self.kin_accel_cap = force_physics['max_forward_accel']  # m/s^2
+            if force_physics is not None and 'max_smooth_yaw_accel' in force_physics:
+                self.kin_ang_accel_cap = np.deg2rad(force_physics['max_smooth_yaw_accel'])  # deg/s^2 -> rad/s^2
+        else:
             raise ValueError(f"action_physics='force' or 'kinematics'. Got: {self.action_physics!r}")
 
         # Options below only ever worked with the legacy 2-dim air-velocity physics; fail loudly
@@ -2102,6 +2110,11 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # Turn/Update orientation and move to new location
             turn_amount = self.turn_action_to_turn_amount(turn_action, radian=True) # in radians
             # print(f"[DEBUG] PEv3 turn_amount: {np.rad2deg(turn_amount):.4f}, turn_action: {turn_action:.4f}, move_action: {move_action:.4f}")
+            if self.kin_ang_accel_cap is not None:
+                # Cap angular acceleration: limit yaw-rate change per step vs last step's yaw rate.
+                dw_max = self.kin_ang_accel_cap * self.dt
+                self.ang_vel = np.clip(turn_amount / self.dt, self.ang_vel - dw_max, self.ang_vel + dw_max)
+                turn_amount = self.ang_vel * self.dt
 
             new_angle_radians = old_angle_radians + turn_amount
             self.agent_angle = [ np.cos(new_angle_radians), np.sin(new_angle_radians) ]
@@ -2109,8 +2122,14 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # New location = old location + agent movement + wind advection
 
             # Original physics: agent commands air velocity in heading direction; wind drifts it.
-            agent_move_x = self.agent_angle[0]*self.move_capacity*self.movex*move_action*self.dt
-            agent_move_y = self.agent_angle[1]*self.move_capacity*self.movex*move_action*self.dt
+            airspeed = self.move_capacity*self.movex*move_action
+            if self.kin_accel_cap is not None:
+                # Cap linear acceleration: limit airspeed change per step vs last step's airspeed.
+                dv_max = self.kin_accel_cap * self.dt
+                prev_airspeed = np.linalg.norm(self.air_velocity)
+                airspeed = np.clip(airspeed, prev_airspeed - dv_max, prev_airspeed + dv_max)
+            agent_move_x = self.agent_angle[0]*airspeed*self.dt
+            agent_move_y = self.agent_angle[1]*airspeed*self.dt
             wind_drift_x = self.ambient_wind[0]*self.dt
             wind_drift_y = self.ambient_wind[1]*self.dt
             self.agent_location = [
