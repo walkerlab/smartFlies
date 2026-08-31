@@ -10,8 +10,6 @@ defaults:
   - physics: drone_low_acc
   - _self_
 
-# Training variant: "base" (default), "wind_obsver_v1", or "wind_obsver_v2"
-variant: wind_obsver_v1
 auxiliary_arch: separate_wind_head
 
 birthx_upper: 0

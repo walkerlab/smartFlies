@@ -867,7 +867,11 @@ def training_loop(agent, envs, args, device, actor_critic,
                     rollouts.masks[step],
                     ou_state=rollouts.ou_states[step])
             obs, reward, done, infos = envs.step(action)
-            update_wind_xy.append(np.asarray([info['ambient_wind'] for info in infos], dtype=np.float64)) # for wind_stats/* metrics
+            wind_vels = np.asarray([info['ambient_wind'] for info in infos], dtype=np.float64)
+            update_wind_xy.append(wind_vels) # for wind_stats/* metrics
+            # unit wind-direction vectors; targets for the wind-observer aux loss
+            wind_dirs = wind_vels / (np.linalg.norm(wind_vels, axis=1, keepdims=True) + 1e-8)
+            wind_dirs = torch.tensor(wind_dirs, dtype=torch.float32, device=device)
             if j % plot_every_n_updates == 0:
                 traj_storage.add_step(infos)
                 traj_storage.check_episode_done(infos, done, tracked_ds=int(envs.wind_directions)) 
@@ -896,7 +900,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                 obs = envs.reset()
             rollouts.insert(obs, recurrent_hidden_states, action,
                             action_log_prob, value, reward, masks, bad_masks,
-                            ou_state) # ~0.0006s
+                            ou_state, wind_targets=wind_dirs) # ~0.0006s
         ##############################################################################################################
         # UPDATE AGENT 
         ##############################################################################################################
@@ -907,7 +911,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                 rollouts.masks[-1]).detach()
         rollouts.compute_returns(next_value, args.use_gae, args.gamma,
                                 args.gae_lambda, args.use_proper_time_limits)
-        value_loss, action_loss, dist_entropy, clip_fraction, advantages = agent.update(rollouts)
+        value_loss, action_loss, dist_entropy, clip_fraction, advantages, extras = agent.update(rollouts)
         
         # After update, get stored trajectories
         if j % plot_every_n_updates == 0:
@@ -922,7 +926,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                 except Exception as e:
                     print(f"Error logging artifact {plt_path}: {e}")
                 
-        utils.log_agent_learning(j_global, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
+        utils.log_agent_learning(j_global, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], aux_loss_dict=extras, use_mlflow=args.mlflow)
         # wind obsver v1 modification: plot success fractions every 20 updates
         utils.log_eps_artifacts(j_global, args, update_episodes_df, use_mlflow=args.mlflow, log_artifacts=True, plot=(j % plot_every_n_updates == 0),
                                 wind_xy=np.concatenate(update_wind_xy, axis=0) if update_wind_xy else None)

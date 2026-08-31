@@ -10,18 +10,18 @@ defaults:
   - physics: fly
   - _self_
 
-# Training variant: "base" (default), "wind_obsver_v1", or "wind_obsver_v2"
-variant: base
 experiment_name: default # should be overridden by CLI - acts as both suffix of save dir and wandb run name
 plot_every_n_updates: 1
 
 
-# Auxiliary wind-head architecture (wind_obsver_v1). One of:
+# Wind-observer architecture. One of:
+#   none                 - no wind heads; plain actor-critic
 #   default              - wind heads read from hidden_actor; policy does NOT see wind
 #   separate_wind_head   - wind heads read from RNN output x; policy does NOT see wind
 #   wind_cond_policy      - wind belief [mu, logvar] fed into actor+critic; PPO grads flow through wind heads
 #   wind_cond_policy_detached - same, but wind belief detached (heads train on aux loss only)
-auxiliary_arch: separate_wind_head
+auxiliary_arch: none
+wind_loss_coef: 0.01 # weight of the wind-observer NLL auxiliary loss; ignored when auxiliary_arch=none
 
 # PPO / optimizer
 algo: ppo

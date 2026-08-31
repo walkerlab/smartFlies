@@ -164,9 +164,11 @@ def get_args():
         help='name identifying this training stage; triggers staged training when non-empty')
     parser.add_argument('--resume_from', type=str, default='',
         help='path to parent stage checkpoint (.chkpt.pt) to load weights from at fresh stage start')
-    parser.add_argument('--auxiliary_arch', type=str, default='default',
-        choices=['default'],
-        help='wind-head architecture for MLPBase - reject all but default since this pipeline does not have auxiliary wind-heads')
+    parser.add_argument('--auxiliary_arch', type=str, default='none',
+        choices=['none', 'default', 'separate_wind_head', 'wind_cond_policy', 'wind_cond_policy_detached'],
+        help='wind-observer architecture for MLPBase; none = plain actor-critic (see config.yaml for descriptions)')
+    parser.add_argument('--wind_loss_coef', type=float, default=0.01,
+        help='weight of the wind-observer NLL auxiliary loss; ignored when auxiliary_arch=none')
     args = parser.parse_args()
     assert len(args.dataset) == len(args.qvar)
     assert len(args.dataset) == len(args.diff_max)
@@ -413,6 +415,7 @@ def main(args=None):
                         'recurrent': args.recurrent_policy,
                         'rnn_type': args.rnn_type,
                         'hidden_size': args.hidden_size,
+                        'auxiliary_arch': args.auxiliary_arch,
                         },
             args=args)
         actor_critic.to(device)
@@ -436,7 +439,8 @@ def main(args=None):
         eps=args.eps,
         max_grad_norm=args.max_grad_norm,
         weight_decay=args.weight_decay,
-        track_ppo_fraction=True)
+        track_ppo_fraction=True,
+        wind_loss_coef=args.wind_loss_coef if args.auxiliary_arch != 'none' else 0.0)
     
     
     # handling checkpoint loading

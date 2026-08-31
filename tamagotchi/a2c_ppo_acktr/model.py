@@ -140,14 +140,14 @@ class Policy(nn.Module):
         return value
 
     def evaluate_actions(self, inputs, rnn_hxs, masks, action, ou_state=None):
-        value, actor_features, rnn_hxs, _ = self.base(inputs, rnn_hxs, masks)
+        value, actor_features, rnn_hxs, activities = self.base(inputs, rnn_hxs, masks)
         dist = self.dist(actor_features)
         dist, _, _ = self._apply_ou_shift(dist, inputs, masks, ou_state)
 
         action_log_probs = dist.log_probs(action)
         dist_entropy = dist.entropy().mean()
 
-        return value, action_log_probs, dist_entropy, rnn_hxs
+        return value, action_log_probs, dist_entropy, rnn_hxs, activities
     
     def reset_actor(self):
         """
@@ -298,26 +298,48 @@ class NNBase(nn.Module):
         return x, hxs
 
 class MLPBase(NNBase):
-    def __init__(self, num_inputs, recurrent=False, hidden_size=64, rnn_type='GRU'):
+    def __init__(self, num_inputs, recurrent=False, hidden_size=64, rnn_type='GRU', auxiliary_arch='none'):
         super(MLPBase, self).__init__(recurrent, num_inputs, hidden_size, rnn_type)
+
+        # auxiliary_arch selects the wind-observer architecture (see conf/config.yaml):
+        #   none                      - no wind heads; plain actor-critic
+        #   default                   - wind heads read hidden_actor; policy does NOT see wind
+        #   separate_wind_head        - wind heads read the RNN output x; policy does NOT see wind
+        #   wind_cond_policy          - wind belief [mu, logvar] fed into actor+critic; PPO grads flow through
+        #   wind_cond_policy_detached - same, but detached (heads train on the aux loss only)
+        self.arch = auxiliary_arch
+        self.wind_belief_dim = 4  # wind_mu (2) + wind_logvar (2)
 
         if recurrent:
             num_inputs = hidden_size
+
+        # actor/critic consume [x, wind_mu, wind_logvar] in the conditioned archs
+        if self.arch in ('wind_cond_policy', 'wind_cond_policy_detached'):
+            ac_input_dim = num_inputs + self.wind_belief_dim
+        else:
+            ac_input_dim = num_inputs
 
         init_ = lambda m: init(m, nn.init.orthogonal_, lambda x: nn.init.
                                constant_(x, 0), np.sqrt(2))
 
         self.actor1 = nn.Sequential(
-            init_(nn.Linear(num_inputs, hidden_size)), nn.Tanh())
+            init_(nn.Linear(ac_input_dim, hidden_size)), nn.Tanh())
         self.actor = nn.Sequential(
             init_(nn.Linear(hidden_size, hidden_size)), nn.Tanh())
 
         self.critic1 = nn.Sequential(
-            init_(nn.Linear(num_inputs, hidden_size)), nn.Tanh())
+            init_(nn.Linear(ac_input_dim, hidden_size)), nn.Tanh())
         self.critic = nn.Sequential(
             init_(nn.Linear(hidden_size, hidden_size)), nn.Tanh())
 
         self.critic_linear = init_(nn.Linear(hidden_size, 1))
+
+        # Wind prediction heads always read from the RNN hidden state (num_inputs).
+        # Not constructed for 'none': their init would consume RNG and shift all
+        # downstream random streams relative to a plain actor-critic.
+        if self.arch != 'none':
+            self.wind_mu_head = nn.Linear(num_inputs, 2)
+            self.wind_logvar_head = nn.Linear(num_inputs, 2)
 
         self.train() # tells your model that you are training the model not eval().
 
@@ -326,13 +348,45 @@ class MLPBase(NNBase):
         if self.is_recurrent:
             x, rnn_hxs = self._forward_rnn(x, rnn_hxs, masks, input_masks=input_masks)
 
-        hx1_critic = self.critic1(x)
-        hx1_actor = self.actor1(x)
-        hidden_critic = self.critic(hx1_critic)
-        hidden_actor = self.actor(hx1_actor)
+        wind_mu = wind_logvar = None
+        if self.arch in ('none', 'default', 'separate_wind_head'):
+            hx1_critic = self.critic1(x)
+            hx1_actor = self.actor1(x)
+            hidden_critic = self.critic(hx1_critic)
+            hidden_actor = self.actor(hx1_actor)
+            value = self.critic_linear(hidden_critic)
 
-        value = self.critic_linear(hidden_critic)
-        
+            if self.arch == 'default':
+                # wind belief from hidden_actor
+                wind_mu = self.wind_mu_head(hidden_actor)
+                wind_logvar = self.wind_logvar_head(hidden_actor)
+            elif self.arch == 'separate_wind_head':
+                # wind belief from the hidden state of the network, not from hidden_actor
+                wind_mu = self.wind_mu_head(x)
+                wind_logvar = self.wind_logvar_head(x)
+
+        elif self.arch in ('wind_cond_policy', 'wind_cond_policy_detached'):
+            # feed predictions into the actor-critic; with 'wind_cond_policy' PPO
+            # gradients flow back through the wind heads (and into the RNN via them),
+            # with 'wind_cond_policy_detached' they are detached so the heads train
+            # only on the aux loss
+            wind_mu = self.wind_mu_head(x)
+            wind_logvar = self.wind_logvar_head(x)
+
+            if self.arch == 'wind_cond_policy_detached':
+                x_aug = torch.cat([x, wind_mu.detach(), wind_logvar.detach()], dim=-1)
+            else:
+                x_aug = torch.cat([x, wind_mu, wind_logvar], dim=-1)
+
+            hx1_critic = self.critic1(x_aug)
+            hx1_actor = self.actor1(x_aug)
+            hidden_critic = self.critic(hx1_critic)
+            hidden_actor = self.actor(hx1_actor)
+            value = self.critic_linear(hidden_critic)
+
+        else:
+            raise ValueError(f"Unknown auxiliary_arch: {self.arch!r}")
+
         activities = {
             'rnn_hxs': rnn_hxs,
             'hx1_actor': hx1_actor,
@@ -341,6 +395,9 @@ class MLPBase(NNBase):
             'hidden_critic': hidden_critic,
             'value': value,
         }
+        if wind_mu is not None:
+            activities['wind_mu'] = wind_mu
+            activities['wind_logvar'] = wind_logvar
 
         return value, hidden_actor, rnn_hxs, activities
     

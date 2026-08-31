@@ -5,10 +5,10 @@
 #   python3 -m tamagotchi.main_hydra -m seed=1,2,3
 
 # CL case: CL with wind change etc training 
-# action_physics=force OU_exploration=off experiment_name=force_physics_uncertainty 'r_shaping=[step,missed_time_cost,rotate_by,birthx_cl_last,cosine]' loc_algo=linear_precise num_env_steps=7200000 precise_max=[1] precise_max=[6] variant=wind_obsver_v1 'dataset=[noisy_jitterx5b5]' path.curriculum_name=060226_noisy_jitter
+# action_physics=force OU_exploration=off experiment_name=force_physics_uncertainty 'r_shaping=[step,missed_time_cost,rotate_by,birthx_cl_last,cosine]' loc_algo=linear_precise num_env_steps=7200000 precise_max=[1] precise_max=[6] auxiliary_arch=separate_wind_head 'dataset=[noisy_jitterx5b5]' path.curriculum_name=060226_noisy_jitter
 
 # ctl case: no curriculum at all -start with all plume, wind, start loc and all cardinal dir
-# action_physics=force OU_exploration=off experiment_name=noCL_control num_env_steps=10800000 variant=wind_obsver_v1 
+# action_physics=force OU_exploration=off experiment_name=noCL_control num_env_steps=10800000 auxiliary_arch=separate_wind_head
 
 defaults:
   - OU_exploration: "off"
@@ -16,8 +16,6 @@ defaults:
   - physics: fly
   - _self_
 
-# Training variant: "base" (default), "wind_obsver_v1", or "wind_obsver_v2"
-variant: base
 experiment_name: default # should be overridden by CLI - acts as both suffix of save dir and wandb run name
 
 path:

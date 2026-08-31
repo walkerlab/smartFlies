@@ -22,6 +22,8 @@ class RolloutStorage(object):
             action_shape = action_space.shape[0]
         self.actions = torch.zeros(num_steps, num_processes, action_shape)
         self.ou_states = torch.zeros(num_steps + 1, num_processes, action_shape)
+        # Per-step wind-direction unit vectors; targets for the wind-observer aux loss
+        self.wind_targets = torch.zeros(num_steps, num_processes, 2)
         if action_space.__class__.__name__ == 'Discrete':
             self.actions = self.actions.long()
         self.masks = torch.ones(num_steps + 1, num_processes, 1)
@@ -42,16 +44,19 @@ class RolloutStorage(object):
         self.action_log_probs = self.action_log_probs.to(device)
         self.actions = self.actions.to(device)
         self.ou_states = self.ou_states.to(device)
+        self.wind_targets = self.wind_targets.to(device)
         self.masks = self.masks.to(device)
         self.bad_masks = self.bad_masks.to(device)
 
     def insert(self, obs, recurrent_hidden_states, actions, action_log_probs,
-               value_preds, rewards, masks, bad_masks, ou_state):
+               value_preds, rewards, masks, bad_masks, ou_state, wind_targets=None):
         self.obs[self.step + 1].copy_(obs)
         self.recurrent_hidden_states[self.step +
                                      1].copy_(recurrent_hidden_states)
         self.actions[self.step].copy_(actions)
         self.ou_states[self.step + 1].copy_(ou_state)
+        if wind_targets is not None:
+            self.wind_targets[self.step].copy_(wind_targets)
         self.action_log_probs[self.step].copy_(action_log_probs)
         self.value_preds[self.step].copy_(value_preds)
         self.rewards[self.step].copy_(rewards)
@@ -64,6 +69,7 @@ class RolloutStorage(object):
         self.obs[0].copy_(self.obs[-1])
         self.recurrent_hidden_states[0].copy_(self.recurrent_hidden_states[-1])
         self.ou_states[0].copy_(self.ou_states[-1])
+        self.wind_targets[0].copy_(self.wind_targets[-1])
         self.masks[0].copy_(self.masks[-1])
         self.bad_masks[0].copy_(self.bad_masks[-1])
 
@@ -135,6 +141,7 @@ class RolloutStorage(object):
                                               self.actions.size(-1))[indices]
             ou_states_batch = self.ou_states[:-1].view(
                 -1, self.ou_states.size(-1))[indices]
+            wind_targets_batch = self.wind_targets.view(-1, 2)[indices]
             value_preds_batch = self.value_preds[:-1].view(-1, 1)[indices]
             return_batch = self.returns[:-1].view(-1, 1)[indices]
             masks_batch = self.masks[:-1].view(-1, 1)[indices]
@@ -146,7 +153,8 @@ class RolloutStorage(object):
                 adv_targ = advantages.view(-1, 1)[indices]
 
             yield obs_batch, recurrent_hidden_states_batch, actions_batch, \
-                value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ, ou_states_batch
+                value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ, \
+                wind_targets_batch, ou_states_batch
 
     def recurrent_generator(self, advantages, num_mini_batch):
         num_processes = self.rewards.size(1)
@@ -165,6 +173,7 @@ class RolloutStorage(object):
             masks_batch = []
             old_action_log_probs_batch = []
             adv_targ = []
+            wind_targets_batch = []
             ou_states_batch = []
 
             for offset in range(num_envs_per_batch):
@@ -179,6 +188,7 @@ class RolloutStorage(object):
                 old_action_log_probs_batch.append(
                     self.action_log_probs[:, ind])
                 adv_targ.append(advantages[:, ind])
+                wind_targets_batch.append(self.wind_targets[:, ind])
                 ou_states_batch.append(self.ou_states[:-1, ind])
 
             T, N = self.num_steps, num_envs_per_batch
@@ -191,6 +201,7 @@ class RolloutStorage(object):
             old_action_log_probs_batch = torch.stack(
                 old_action_log_probs_batch, 1)
             adv_targ = torch.stack(adv_targ, 1)
+            wind_targets_batch = torch.stack(wind_targets_batch, 1)  # (T, N, 2)
             ou_states_batch = torch.stack(ou_states_batch, 1)
 
             # States is just a (N, -1) tensor
@@ -206,7 +217,9 @@ class RolloutStorage(object):
             old_action_log_probs_batch = _flatten_helper(T, N, \
                     old_action_log_probs_batch)
             adv_targ = _flatten_helper(T, N, adv_targ)
+            wind_targets_batch = _flatten_helper(T, N, wind_targets_batch)  # (T*N, 2)
             ou_states_batch = _flatten_helper(T, N, ou_states_batch)
 
             yield obs_batch, recurrent_hidden_states_batch, actions_batch, \
-                value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ, ou_states_batch
+                value_preds_batch, return_batch, masks_batch, old_action_log_probs_batch, adv_targ, \
+                wind_targets_batch, ou_states_batch

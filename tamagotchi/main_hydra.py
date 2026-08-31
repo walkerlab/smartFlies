@@ -1,7 +1,7 @@
-"""Hydra entry point for dronmagotchi training.
+"""Hydra entry point for tamagotchi training.
 
-Replaces the datajoint-based experiment manager. Loads conf/config.yaml,
-converts it to the argparse.Namespace that main.main() expects, and runs it.
+Loads conf/config.yaml, converts it to the argparse.Namespace that
+main.main() expects, and runs the training loop.
 
 Usage:
     python3 -m tamagotchi.main_hydra env_name=plume outsuffix=run01
@@ -23,10 +23,7 @@ def adam_smoke(label):
 
 adam_smoke("") # something about the import order causes a weird interaction - if init here, bug disappears
 
-from tamagotchi import main as base_main
-from tamagotchi import main_wind_obsver_v1
-# main_wind_obsver_v2 is deprecated and raises on import; imported lazily in run() so
-# that selecting it still errors, but the other variants stay runnable.
+from tamagotchi.main import main as train_main
 
 def _auto_outsuffix(cfg_dict: dict) -> str:
     """Build a unique per-job outsuffix: seed-{seed}-{hash}, hash over the full override string."""
@@ -78,17 +75,7 @@ def run(cfg: DictConfig) -> None:
     import torch
     args.cuda = torch.cuda.is_available()
 
-    # Dispatch to the appropriate main function based on variant
-    variant = cfg_dict.get("variant", "base")
-    if variant == "wind_obsver_v1":
-        main_wind_obsver_v1.main(args=vars(args))
-    elif variant == "wind_obsver_v2":
-        from tamagotchi import main_wind_obsver_v2
-        main_wind_obsver_v2.main(args=vars(args))
-    elif variant == "base":
-        base_main.main(args=vars(args))
-    else:
-        raise ValueError(f"Unknown variant: {variant}. Must be 'base', 'wind_obsver_v1', or 'wind_obsver_v2'")
+    train_main(args=vars(args))
 
 
 if __name__ == "__main__":

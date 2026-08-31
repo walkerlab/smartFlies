@@ -755,7 +755,10 @@ def update_eps_info(update_episodes_df, info, episode_counter, update_idx):
     return update_episodes_df
 
 
-def log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, use_mlflow=True):
+def log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, aux_loss_dict=None, use_mlflow=True):
+    """Log the per-update PPO metrics, plus wind-observer diagnostics when the
+    auxiliary wind loss is active (aux_loss_dict is PPO.update()'s extras dict,
+    None when auxiliary_arch='none')."""
     if not use_mlflow:
         return
     mlflow.log_metric("ppo/advantages_mean", advantages.mean().item(), step=j)
@@ -768,20 +771,15 @@ def log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, cli
     mlflow.log_metric("ppo/clip_fraction", clip_fraction, step=j)
     mlflow.log_metric("ppo/learning_rate", learning_rate, step=j)
 
-
-def log_agent_learning_wind_obsver(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, aux_loss_dict, use_mlflow=True):
-    log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, use_mlflow=use_mlflow)
-    all_wind_nll = aux_loss_dict['wind_nll_all']
-    all_wind_sqerr = aux_loss_dict['wind_sqerr_all']
-    all_wind_logvar = aux_loss_dict['wind_logvar_all']
-    wind_nll_mean = all_wind_nll.mean().item()
-    wind_nll_std  = all_wind_nll.std().item()
-    wind_loss_epoch = aux_loss_dict["wind_loss_epoch"]
-    mlflow.log_metric("wind_observer/wind_loss_mean", wind_loss_epoch, step=j)
-    mlflow.log_metric("wind_observer/wind_nll_mean", wind_nll_mean, step=j)
-    mlflow.log_metric("wind_observer/wind_nll_std",  wind_nll_std, step=j)
-    mlflow.log_metric("wind_observer/wind_sqerr_mean", all_wind_sqerr.mean().item(), step=j)
-    mlflow.log_metric("wind_observer/wind_logvar_mean", all_wind_logvar.mean().item(), step=j)
+    if aux_loss_dict is not None and len(aux_loss_dict['wind_nll_all']) > 0:
+        all_wind_nll = aux_loss_dict['wind_nll_all']
+        all_wind_sqerr = aux_loss_dict['wind_sqerr_all']
+        all_wind_logvar = aux_loss_dict['wind_logvar_all']
+        mlflow.log_metric("wind_observer/wind_loss_mean", aux_loss_dict["wind_loss_epoch"], step=j)
+        mlflow.log_metric("wind_observer/wind_nll_mean", all_wind_nll.mean().item(), step=j)
+        mlflow.log_metric("wind_observer/wind_nll_std", all_wind_nll.std().item(), step=j)
+        mlflow.log_metric("wind_observer/wind_sqerr_mean", all_wind_sqerr.mean().item(), step=j)
+        mlflow.log_metric("wind_observer/wind_logvar_mean", all_wind_logvar.mean().item(), step=j)
 
 
 def log_curriculum_schedule(schedule_dict, j, use_mlflow=True):
