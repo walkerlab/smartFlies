@@ -6,7 +6,6 @@ import pandas as pd
 import os
 import json
 from collections import deque
-# from tamagotchi.eval import eval_lite
 try:
     import data_util as utils
 except ImportError:
@@ -927,7 +926,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                     print(f"Error logging artifact {plt_path}: {e}")
                 
         utils.log_agent_learning(j_global, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], aux_loss_dict=extras, use_wandb=args.wandb)
-        # wind obsver v1 modification: plot success fractions every 20 updates
+        # plot success fractions periodically
         utils.log_eps_artifacts(j_global, args, update_episodes_df, use_wandb=args.wandb, log_artifacts=True, plot=(j % plot_every_n_updates == 0),
                                 wind_xy=np.concatenate(update_wind_xy, axis=0) if update_wind_xy else None)
 

@@ -107,8 +107,7 @@ def get_args():
     parser.add_argument('--diff_min',  type=float, nargs='+', default=[0.4])
     parser.add_argument('--birthx_linear_tc_steps', type=int, default=0) # if on, birthx will linearly decrease over time, reachinig the birthx value gradually
     # apparent wind 
-    parser.add_argument('--apparent_wind', type=bool, default=False) 
-    parser.add_argument('--apparent_wind_allo', type=bool, default=False) 
+    parser.add_argument('--apparent_wind', type=bool, default=False)
     parser.add_argument('--env_version', type=str, default='v3') # PEv3: 'v3' selects PlumeEnvironment_v3
     parser.add_argument('--obs_mask', type=int, nargs='*', default=[]) # PEv3: observation channel indices to zero out; obs shape is unchanged
     parser.add_argument('--flip_ventral_optic_flow', type=bool, default=False) # PEv3: for eval to see the behavioral impact of flipping course direction perception.

@@ -74,13 +74,11 @@ stride: 1
 
 
 apparent_wind: true
-apparent_wind_allo: false
 visual_feedback: true
 flip_ventral_optic_flow: false
 rotate_by: 1
 birthx_max: 1.0
 dryrun: false
-curriculum: false
 turnx: 1.0
 movex: 1.0
 auto_movex: false

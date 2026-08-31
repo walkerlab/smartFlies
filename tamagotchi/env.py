@@ -85,7 +85,6 @@ class PlumeEnvironment_v3(gym.Env):
                  seed=137,
                  verbose=0,
                  apparent_wind=False,
-                 apparent_wind_allo=False, # deprecated!
                  birthx_upper=0, 
                  ):
         super().__init__()
@@ -400,7 +399,7 @@ class PlumeEnvironment_v3(gym.Env):
         try:
             minY = min(Y) 
         except Exception as ex:
-            print(f"[PEv2 get_stray_distance] Exception: {ex}, t:{self.t_val:.2f}, tidx:{self.tidx}({self.tidx_min_episode}...{self.tidx_max_episode}), ep_step:{self.episode_step}, {Z}")  
+            print(f"[PEv3 get_stray_distance] Exception: {ex}, t:{self.t_val:.2f}, tidx:{self.tidx}({self.tidx_min_episode}...{self.tidx_max_episode}), ep_step:{self.episode_step}, {Z}")  
             minY = 0
         return minY # return float not float-array
 
@@ -866,7 +865,8 @@ class PlumeEnvironment_v3(gym.Env):
     def step(self, action):
         """
         return observation, reward, done, info
-        same as v2, but with ground velco and air velco as attributes
+        Tracks ground and air velocity as attributes for the egocentric course
+        and apparent-wind observations.
         """
         self.episode_step += 1 
         self.agent_location_last = self.agent_location

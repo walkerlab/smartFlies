@@ -979,14 +979,6 @@ def log_eps_artifacts(j, args, update_episodes_df, use_wandb=True, log_artifacts
                     print(f"Error logging artifact {plt_path}: {e}")
         
 
-# from a2c_ppo_acktr/storage.py
-import torch
-from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
-
-
-def _flatten_helper(T, N, _tensor):
-    return _tensor.view(T * N, *_tensor.size()[2:])
-
 """Load a curriculum schedule saved by the Curriculum Scheduler (JSON) and
 optionally realign it to a different total number of updates.
 
