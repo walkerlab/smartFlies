@@ -91,6 +91,20 @@ def evaluate_agent(actor_critic, env, args):
         # check for nans
         if np.isnan(grid).any():
             raise ValueError("Found NaN values in the evaluation grid.")
+    if getattr(args, 'eval_rotate_by', None) is not None:
+        # Pin the rotation for the whole eval: reset() skips sample_rotate_by in fixed mode,
+        # and rotate_angles=[angle] means any resampling can only pick this same angle.
+        venv.rotate_angles = [args.eval_rotate_by]
+        venv.rotate_by = args.eval_rotate_by
+        if args.fixed_eval:
+            # The grid above was built in the (unrotated) plume frame; map the start
+            # locations/headings into the rotated world frame, same as training does
+            # via _rotate_location for the non-fixed loc algos.
+            theta = np.deg2rad(args.eval_rotate_by)
+            xy = np.array([venv._rotate_location([x, y]) for x, y in zip(grid[:, 2], grid[:, 0])])
+            grid[:, 2], grid[:, 0] = xy[:, 0], xy[:, 1]
+            grid[:, 1] = (grid[:, 1] + theta) % (2 * np.pi)
+        print(f"Evaluating with plume rotated by {args.eval_rotate_by} degrees")
     if args.perturb_RNN_by:
         if args.perturb_RNN_by:
             if args.perturb_RNN_by == 'subspace' or args.perturb_RNN_by == 'nullspace':
