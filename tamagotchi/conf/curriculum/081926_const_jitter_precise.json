@@ -1,0 +1,63 @@
+{
+  "birthx": {
+    "400": 0.7,
+    "425": 0.365931,
+    "450": 0.191293,
+    "475": 0.1
+  },
+  "wind_cond": {
+    "0": 1
+  },
+  "constant_jitterx5b5_rotate_by": {
+    "0": [
+      0,
+      180
+    ],
+    "100": [
+      90,
+      -90
+    ],
+    "200": [
+      0,
+      90,
+      180,
+      -90
+    ],
+    "300": [
+      0,
+      180,
+      90,
+      -90,
+      45,
+      -45,
+      135,
+      -135
+    ]
+  },
+  "constant_jitterx5b5_now_init_long": {
+    "0": 0.8,
+    "25": 2.866667,
+    "50": 4.933333,
+    "75": 7,
+
+    "100": 0.8,
+    "125": 2.866667,
+    "150": 4.933333,
+    "175": 7,
+
+    "200": 0.8,
+    "225": 2.866667,
+    "250": 4.933333,
+    "275": 7,
+
+    "300": 0.8,
+    "325": 2.866667,
+    "350": 4.933333,
+    "375": 7
+  },
+  "meta": {
+    "restart_period": 101,
+    "total_num_updates": 500,
+    "note": "Precise-loc_algo twin of 081626_const_jitter: identical rotate_by stages, birthx tail, and lesson times, with diff_min/diff_max replaced by the now_init_long ladder (0.8 -> 7 m) from 060226_const_jitter. Use with loc_algo=linear_precise."
+  }
+}

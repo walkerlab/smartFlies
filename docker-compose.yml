@@ -1,0 +1,21 @@
+version: "3.9" # Docker-compose version, just using the latest for now
+services: 
+  tamagotchi_dev_container_test: # Name of the service, can be whatever you want
+    build: # The . here is similar to the docker build . which specifiy the context in which to build the docker image under
+      # context: -t test --build-arg UBUNTU_VER=22.04 --build-arg CUDA_VER=12.4.1 .
+      context: .
+    volumes:
+    - ./:/src # Left hand is host, right hand is container. Basically map an outside volume into container
+    deploy:
+      resources:
+        limits:
+          cpus: '24'
+          memory: 32G
+        reservations:
+          devices:
+          - driver: nvidia
+            # device_ids: ['0', '1']
+            count: 2
+            capabilities: [gpu]
+    env_file: .env # Load environment variables from .env file- 
+    command: sleep infinity 

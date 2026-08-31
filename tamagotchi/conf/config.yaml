@@ -1,0 +1,133 @@
+# Hydra config for dronmagotchi. Override from CLI, e.g.:
+#   python -m tamagotchi.main_hydra outsuffix=run01 action_physics=ground_vel_angvel
+# Multirun sweep:
+#   python3 -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=air_vel_angvel,ground_vel_angvel
+#   python3 -m tamagotchi.main_hydra -m seed=1,2,3
+
+defaults:
+  - OU_exploration: "off"
+  - path: glados
+  - physics: fly
+  - _self_
+
+# Training variant: "base" (default), "wind_obsver_v1", or "wind_obsver_v2"
+variant: base
+experiment_name: default # should be overridden by CLI - acts as both suffix of save dir and wandb run name
+plot_every_n_updates: 1
+
+
+# Auxiliary wind-head architecture (wind_obsver_v1). One of:
+#   default              - wind heads read from hidden_actor; policy does NOT see wind
+#   separate_wind_head   - wind heads read from RNN output x; policy does NOT see wind
+#   wind_cond_policy      - wind belief [mu, logvar] fed into actor+critic; PPO grads flow through wind heads
+#   wind_cond_policy_detached - same, but wind belief detached (heads train on aux loss only)
+auxiliary_arch: separate_wind_head
+
+# PPO / optimizer
+algo: ppo
+lr: 0.0003
+eps: 1.0e-05
+alpha: 0.99
+gamma: 0.99
+use_gae: true
+gae_lambda: 0.95
+entropy_coef: 0.005
+value_loss_coef: 0.5
+max_grad_norm: 0.5
+seed: 137            # sampled by the insert layer at launch time
+cuda_deterministic: false
+num_processes: 8
+num_steps: 2048
+ppo_epoch: 10
+num_mini_batch: 4
+clip_param: 0.2
+log_interval: 1
+save_interval: 25
+no_cuda: false
+use_proper_time_limits: false
+recurrent_policy: true
+use_linear_lr_decay: true
+weight_decay: 0.0001
+
+# Env / experiment
+env_name: plume
+dynamic: false
+eval_type: skip
+eval_episodes: 20
+eval_interval: null
+rnn_type: VRNN
+hidden_size: 64
+betadist: false
+stacking: 0
+masking: null
+stride: 1
+
+dataset: [constantx5b5]
+num_env_steps: 3000000
+qvar: [1.5]
+birthx: 0.7
+birthx_upper: 0
+diff_max: [0.8]
+diff_min: [0.3]
+precise_max: [8.0]
+precise_min: [1.0]
+birthx_linear_tc_steps: 6
+
+apparent_wind: true
+apparent_wind_allo: false
+env_version: v3
+# Observation channels: 0 wind_x, 1 wind_y, 2 odor, 3 head_x, 4 head_y, 5 course_x, 6 course_y
+# obs_mask lists indices to zero out; obs shape is unchanged.
+obs_mask: []
+flip_ventral_optic_flow: false
+rotate_by: 1
+birthx_max: 1.0
+dryrun: false
+curriculum: false
+turnx: 1.0
+movex: 1.0
+auto_movex: false
+auto_reward: false
+loc_algo: slice_linear
+time_algo: uniform
+env_dt: 0.04
+outsuffix: ""        
+walking: false
+radiusx: 1.0
+diffusion_min: 1.0
+diffusion_max: 1.0
+r_shaping: [step, oob, rotate_by, birthx_cl_last, cosine]
+wind_rel: true
+action_feedback: false
+squash_action: true
+flipping: false
+odor_scaling: true
+odor_01: false
+stray_max: 2.0
+test_episodes: 50
+viz_episodes: 10
+model_fname: ""
+obs_noise: 0.0
+act_noise: 0.0
+if_vec_norm: 1
+if_train_actor_std: false
+
+# Logging (wandb via tamagotchi.wb shim). Name kept for backward compat.
+mlflow: 1
+
+# New: action physics. 'air_vel_angvel' (legacy) or 'ground_vel_angvel', or 'force'.
+action_physics: force
+
+stage_name: ""      # non-empty triggers staged-training mode; short label for this stage
+resume_from: ""     # explicit .chkpt.pt path to load weights from (parent seed)
+
+hydra:
+  run:
+    dir: ${path.save_dir}
+  sweep:
+    dir: ${path.save_dir}
+    subdir: sweep_${hydra.job.num}
+  output_subdir: json
+  # launcher:
+  #   timeout_min: 120
+  #   gpus_per_node: 1  # if using GPUs

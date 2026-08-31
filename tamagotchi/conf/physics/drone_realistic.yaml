@@ -1,0 +1,8 @@
+T_perp_max: 59.5e-3    # N
+T_para_max: 59.5e-3    # N max air velocity of 2.3 == max stable velocity of 1m/s in 1.3m/s wind. Each axis is independent. 
+tau_max: 7.6e-4     # N*m    = k_rot·ω_max, ω_max = 200 deg/s - limit to max yaw rate of joystick controller
+mass: 2.8e-2          # kg reported 28g - maybe higher for us 
+drag: 25.8e-3          # N*s/m; backed out from published kd; arXiv:2604.00343 Table 6.2; can be measured too by hovering 
+inertia: 2.17e-5    # kg*m²  I_zz, 	arXiv:1608.05786 Luis & Le Ny; Table 2.3.1
+k_rot: 2.17e-4    # N*m*s  = I/τ_rot, τ_rot = 0.1 s （prev value - effective damping coefficient of the controller can be measured）
+physics_substeps: 8

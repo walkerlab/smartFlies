@@ -1,0 +1,11 @@
+# ~6 mg drone: peak fwd accel 2.5 m/s², combined 3.0 m/s², v_ss 1.0 m/s fwd / 0.67 lat,
+# yaw_rate_ss 114.6 deg/s, peak ang accel 1146 deg/s².
+
+T_para_max: 1.5e-5    # N
+T_perp_max: 1.0e-5    # N
+tau_max: 4.0e-11      # N*m
+mass: 6.0e-6          # kg
+drag: 1.5e-5          # N*s/m   (linear time constant = 0.4 s)
+inertia: 2.0e-12      # kg*m^2
+k_rot: 2.0e-11        # N*m*s   (rotational time constant = 0.1 s)
+physics_substeps: 8

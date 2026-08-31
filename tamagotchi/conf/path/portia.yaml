@@ -1,0 +1,7 @@
+base_dir: /src
+log_dir: ${path.base_dir}/data/wind_sensing/apparent_wind_visual_feedback/logs/
+save_dir: ${path.base_dir}/data/wind_sensing/apparent_wind_visual_feedback/${experiment_name}/
+
+curriculum_name: false 
+curriculum_dir: ${path.base_dir}/tamagotchi/conf/curriculum/
+curriculum_path: ${path.curriculum_dir}/${path.curriculum_name}.json

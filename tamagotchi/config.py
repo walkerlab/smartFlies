@@ -1,0 +1,129 @@
+import os
+import sys
+import glob
+import numpy as np
+import matplotlib
+
+import socket
+MACHINE = socket.gethostname().lower()
+curr_wd = os.getcwd()
+# datadir = '/src/data/performance_plot_data_code/collection_1/'
+if 'gscratch' in curr_wd and 'walkerlab' in curr_wd:
+    datadir = '/gscratch/walkerlab/jqhu/smartFlies/data/published_results/reproduce/'
+elif 'gscratch' in curr_wd and 'portia' in curr_wd:
+	datadir = '/gscratch/portia/jqhu/work/active_sensing/smartFlies/data/published_results/reproduce/'
+elif '/src' in curr_wd:
+    datadir = '/src/data/published_results/reproduce/'
+else:
+	raise ValueError(f'Unrecognized gscratch path: {curr_wd}')
+# datadir = '/src/data/performance_plot_data_code/lawrence/' # for running Toha comparison experiments
+
+# print(f'Using datadir: {datadir}', flush=True)
+# if MACHINE == 'mycroft':
+# 	datadir = '/data/users/satsingh/plumedata/'
+# if (MACHINE == 'salarian') or (MACHINE == 'cylon'):
+# 	datadir = '/data1/users/satsingh/plumedata/'
+
+seed_global = 137
+
+traj_colormap = { 
+	# 'on': 'lime',
+	# 'on': 'darkgreen',
+	# 'on': 'seagreen', # manuscript
+	'on': 'gold', # Bing presentation
+	# 'on': 'mediumseagreen',
+	# 'on': 'royalblue',
+	# 'on': 'dodgerblue',
+	# 'on': 'blue',
+
+	# 'off': 'blue', # manuscript	
+	# 'off': 'mediumorchid', # Bing presentation
+	'off': 'hotpink', # Bing presentation
+	# 'off': 'dodgerblue', # lighter than royalblue
+	# 'off': 'royalblue',
+	# 'off': 'brown',
+	# 'off': 'crimson',
+	# 'off': 'red',
+}
+
+regime_colormap = {
+					'SEARCH': 'red', 
+					# 'SEARCH': 'brown', 
+
+                   # 'TRACK':'darkolivegreen', # darker
+                   # 'TRACK':'forestgreen', # standard green
+                   'TRACK':'seagreen', # just right
+                   # 'TRACK':'limegreen', 
+                   
+                   # 'RECOVER':'mediumslateblue', 	
+                   'RECOVER':'slateblue', 
+                   }
+outcome_colormap = {'HOME': 'g', 
+				    'OOB':'r', 
+				    'OOT':'b'}
+
+ttcs_colormap = {'HOME': 'b', 'OOB':'darkorange'}
+
+
+plume_color = matplotlib.colors.to_rgba('gray')
+# from sim_analysis.py
+# rgba_colors[:,0:3] = matplotlib.colors.to_rgba('gray')[:3] # decent
+# rgba_colors[:,0:3] = matplotlib.colors.to_rgba('darkgray')[:3] # decent
+# rgba_colors[:,0:3] = matplotlib.colors.to_rgba('dimgray')[:3] # decent
+# rgba_colors[:,0:3] = matplotlib.colors.to_rgba('darkslategray')[:3] # too dark
+# rgba_colors[:,0:3] = matplotlib.colors.to_rgba('lightsteelblue')[:3] # ok
+# rgba_colors[:,0:3] = matplotlib.colors.to_rgba('red')[:3] 
+# rgba_colors[:,0:3] = matplotlib.colors.to_rgba('lightskyblue')[:3] 
+
+
+
+# mwidth, mheight = 5.5, 9 # Manuscript usable dimensions for NeurIPS/ICLR
+mwidth, mheight = 7, 9 # Manuscript usable dimensions for IEEE
+
+# metadata associated with some seeds
+seedmeta = {
+	'2760377': {'recover_min':12, 'recover_max': 30, },
+	# '3199993': {'recover_min':12, 'recover_max': 25, },
+	'3307e9': {'recover_min':12, 'recover_max': 35, },
+	'541058': {'recover_min':12, 'recover_max': 38, },
+	# '9781ba': {'recover_min':12, 'recover_max': 25, },
+}
+
+
+env = {
+    'odor_threshold': 0.0001 if 'performance_plot_data_code' not in curr_wd else 1e-8, # arbit units
+    # 'odor_threshold': 1e-8, # arbit units
+	'arena_bounds': {
+		'x_min':-5, 
+		'x_max':20, 
+      	'y_min':-5, 
+      	'y_max':5
+      	},	
+
+	# Max agent CW/CCW turn per second
+	# 'turn_capacity': 25*np.pi * 0.75, 
+	
+	# Max agent speed in m/s
+	# 'move_capacity': 2.5, 	
+	# 'curriculum': True, # set in cli train
+	# 'difficulty': 0.5, # Curriculum difficulty \in [0.0, 1.0]
+	# 'difficulty': 0.65, # Curriculum difficulty \in [0.0, 1.0]
+}
+
+# NOTE: force-physics coefficients are NOT defaulted here. PlumeEnvironment_v3 requires them to
+# be passed in explicitly (hydra: physics=<fly|drone|drone_low_acc|...>, see conf/physics/), so a
+# run can never silently fall back to a body model it was not trained with.
+
+
+# for data_utils.plot_artifacts
+mlflow_colors = {
+            'constantx5b5': 'blue',
+            'constant_mag_narrowx5b5': 'green',
+            'constant_jitterx5b5': 'red',
+			# 'constant_magx5b5': 'red',
+            'noisy3x5b5': 'purple',
+            'noisy_jitterx5b5': 'purple',
+            'poisson_mag_narrow_noisy3x5b5': 'orange',
+            'poisson_mag_noisy3x5b5': 'cyan',
+            'poisson_noisy3x5b5': 'magenta'
+        }

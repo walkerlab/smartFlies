@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# Experiment outputs
+wandb/
+outputs/
+multirun/
+*.pt
+*.pt.best
+*.pkl
+*_train.csv
+*_eps_log_*.csv
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Jupyter
+.ipynb_checkpoints/

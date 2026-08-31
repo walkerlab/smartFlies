@@ -1,0 +1,7 @@
+# @package _global_
+# tamagotchi/conf/ou/medium_noanneal.yaml
+ou_theta: 1.0
+ou_sigma: 0.5
+ou_sigma_final: 0.5
+ou_dt: null
+ou_eval: false

@@ -1,0 +1,40 @@
+# # Physics coefficients for the 'force' action_physics mode — ~1 mg fly model.
+# Kinematic constraints
+# TODO pass these into the kinematics model
+max_forward_airspeed: 1.5       # m/s
+# Rohrseitz & Fry 2011 [FREE FLIGHT]: saturation airspeed = 1.1577 +/- 0.2055 m/s.
+
+max_forward_accel: 2.90          # m/s^2
+# van Breugel, Suver & Dickinson 2014 [FREE FLIGHT]:
+# maximum forward accelerations up to ~2.9 m/s^2.
+
+max_smooth_yaw_rate: 500         # deg/s
+# Mronz & Lehmann 2008 [FREE FLIGHT]:
+# aggressive smooth optomotor turning around 500 deg/s;
+# saccades separately classified at >1000 deg/s.
+
+max_smooth_yaw_accel: 1550       # deg/s^2
+# DERIVED, not directly reported as a maximum.
+# Cellini, Salem & Mongeau 2022 [MAGNETIC TETHER, SMOOTH YAW]:
+# fitted intact-fly yaw dynamics have pole C/I = 3.1 s^-1.
+# 3.1 s^-1 * 500 deg/s = 1550 deg/s^2.
+T_para_max: 2.90e-6     # N — Derived as m*a from free-flight forward accelerations up to ~2.9 m/s^2 reported by van Breugel et al. (2014), so this is a model-derived net-force scale rather than a directly measured thrust.
+
+T_perp_max: 1.30e-6     # N — Set to mean + 1 SD of the peak body-frame side force (0.8 +/- 0.5 uN) measured in rigidly tethered D. melanogaster by Sugiura & Dickinson (2009).
+
+mass: 1.0e-6            # kg — Representative adult D. melanogaster mass, consistent with the ~1.0-1.24 mg values reported in flight studies including Mronz & Lehmann (2008) and Fuller et al. (2014).
+
+drag: 1.93e-6           # N*s/m, gives max steady forward airspeed ~= 1.5 m/s based on table 2 of Rohrseitz and Fry mean saturated airspeed + 2std under strong visual speed stimulation (2010), not the experimentally fitted free-flight drag coefficient of 11 +/- 1.7 uN*s/m reported by Fuller et al. (2014).
+
+inertia: 5.2e-13        # kg*m^2 — Salem et al. (2023) use 5.2e-13 kg*m^2 as the approximately 1x native yaw moment of inertia of D. melanogaster.
+
+k_rot: 1.61e-12         # N*m*s — Effective yaw damping obtained from C/I ~= 3.1 s^-1 fitted to intact-fly optomotor dynamics by Salem et al. (2022), using I = 5.2e-13 kg*m^2.
+
+tau_max: 1.41e-11       # N*m — Model-derived smooth-yaw torque cap chosen so tau_max/k_rot = 500 deg/s, a rate within the high-performance free-flight optomotor regime reported by Mronz & Lehmann (2008), not a measured smooth-turn maximum.
+
+
+# env_dt = 0.04:
+physics_substeps: 4
+
+# env_dt = 0.10:
+# physics_substeps: 10
