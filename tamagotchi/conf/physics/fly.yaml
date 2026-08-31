@@ -1,6 +1,7 @@
 # # Physics coefficients for the 'force' action_physics mode — ~1 mg fly model.
 # Kinematic constraints
-# TODO pass these into the kinematics model
+# max_forward_airspeed/max_smooth_yaw_rate also override move_capacity/turn_capacity for the
+# original/kinematics action_physics (see PlumeEnvironment_v3.__init__ in env.py).
 max_forward_airspeed: 1.5       # m/s
 # Rohrseitz & Fry 2011 [FREE FLIGHT]: saturation airspeed = 1.1577 +/- 0.2055 m/s.
 

@@ -1362,7 +1362,10 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  action_delay_const=None, # seconds; first-order lag on actions (EMA). None = off
                  action_latency=None,       # seconds；None = off
                  obs_delayed_actions=False, # if True, obs includes last action (delayed by action_latency) as part of observation
-                 force_physics=None, # dict of coefficients required by action_physics=='force'
+                 force_physics=None, # dict of coefficients required by action_physics=='force'; also
+                                      # supplies move_capacity/turn_capacity overrides (via
+                                      # 'max_forward_airspeed'/'max_smooth_yaw_rate') for the
+                                      # original/kinematics action physics, if present
                  **kwargs):
         super(PlumeEnvironment_v3, self).__init__(**kwargs)
         self.flip_ventral_optic_flow = flip_ventral_optic_flow
@@ -1405,6 +1408,17 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print(f"[DEBUG] PEv3 using force action physics; action space shape: {self.action_space.shape}; "
                   f"tau_lin={pc['mass']/pc['drag']:.4g}s, tau_rot={pc['inertia']/pc['k_rot']:.4g}s, "
                   f"sub_dt={self.dt/pc['physics_substeps']:.4g}s; coeffs: {self.physics_coeff}")
+        else:
+            # Original physics (2-dim action: move, turn). move_capacity/turn_capacity default to the
+            # arbitrary values set in the base class __init__; if fly kinematic coefficients are
+            # supplied (e.g. conf/physics/fly.yaml, which is loaded as force_physics regardless of
+            # action_physics), use the measured airspeed/yaw-rate limits instead.
+            if force_physics is not None and 'max_forward_airspeed' in force_physics:
+                self.move_capacity = force_physics['max_forward_airspeed']  # m/s
+                self.turn_capacity = np.deg2rad(force_physics['max_smooth_yaw_rate'])  # deg/s -> rad/s
+                print(f"[DEBUG] PEv3 using fly.yaml kinematic coefficients for original action physics: "
+                      f"move_capacity={self.move_capacity:.4g} m/s, "
+                      f"turn_capacity={np.rad2deg(self.turn_capacity):.4g} deg/s")
 
         # Options below only ever worked with the legacy 2-dim air-velocity physics; fail loudly
         # rather than silently ignoring them under the 3-dim action modes.
