@@ -116,7 +116,7 @@ env = {
 
 
 # for data_utils.plot_artifacts
-mlflow_colors = {
+dataset_colors = {
             'constantx5b5': 'blue',
             'constant_mag_narrowx5b5': 'green',
             'constant_jitterx5b5': 'red',

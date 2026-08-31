@@ -1,9 +1,8 @@
-"""Thin wandb shim exposing the subset of the mlflow API used by this project.
+"""Thin wandb wrapper used for all experiment logging.
 
-Lets existing `mlflow.log_metric / log_params / log_artifact / start_run`
-call sites keep working by importing this module as `mlflow`:
-
-    from tamagotchi import wb as mlflow
+Import as `from tamagotchi import wb` and call `wb.set_experiment`,
+`wb.start_run`, `wb.log_metric` / `log_params` / `log_artifact` /
+`log_summary`, and `wb.flush` to commit a step.
 """
 from contextlib import contextmanager
 import os
@@ -14,14 +13,6 @@ from PIL import Image
 _project = None
 _experiment = None
 _run = None
-
-
-def set_tracking_uri(uri=None):
-    pass
-
-
-def set_system_metrics_sampling_interval(interval):
-    pass
 
 
 def set_experiment(experiment_name):
@@ -46,7 +37,7 @@ def search_runs(filter_string=""):
 
 
 @contextmanager
-def start_run(run_name=None, run_id=None, log_system_metrics=False, dir=None, **_):
+def start_run(run_name=None, run_id=None, dir=None, **_):
     global _run
     _run = wandb.init(
         project=_experiment or os.environ.get("WANDB_PROJECT", "dronmagotchi"),

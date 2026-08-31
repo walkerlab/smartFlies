@@ -112,8 +112,8 @@ act_noise: 0.0
 if_vec_norm: 1
 if_train_actor_std: false
 
-# Logging (wandb via tamagotchi.wb shim). Name kept for backward compat.
-mlflow: 1
+# Logging (wandb via tamagotchi.wb)
+wandb: 1
 
 # New: action physics. 'air_vel_angvel' (legacy) or 'ground_vel_angvel', or 'force'.
 action_physics: force

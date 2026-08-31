@@ -31,7 +31,7 @@ try:
 except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from training import training_loop #hydra pipeline version
-from tamagotchi import wb as mlflow  # wandb shim with mlflow API
+from tamagotchi import wb
 
 def get_args():
     parser = argparse.ArgumentParser(description='PPO for Plume')
@@ -154,7 +154,7 @@ def get_args():
         help='OU integration timestep; defaults to env_dt when unset')
     parser.add_argument('--ou_eval', type=bool, default=False,
         help='enable OU noise during evaluation ablations; off by default')
-    parser.add_argument('--mlflow', type=int, default=1) # whether to train the std of the stochastic policy
+    parser.add_argument('--wandb', type=int, default=1) # whether to log this run to wandb
     parser.add_argument('--action_physics', type=str, default='air_vel_angvel',
         choices=['air_vel_angvel', 'ground_vel_angvel', 'force'],
         help="Action space: 'air_vel_angvel' (forward air speed + angular velocity, wind drifts the agent), "
@@ -263,7 +263,6 @@ def main(args=None):
         args = argparse.Namespace(**args)
         args.dryrun = False
         args.flip_ventral_optic_flow = False
-    args.mlflow = True if "mlflow" not in args else args.mlflow # mlflow not in args when running from datajoint
     args.rotate_by = None if not args.rotate_by else args.rotate_by # False means no rotation, None means no rotation
     args.model_fname = f"{args.env_name}_{args.outsuffix}.pt"
     # Save args and config info
@@ -492,16 +491,13 @@ def main(args=None):
     print(f"[staged training check] run_name       = {run_name}")
     print(f"[staged training check] is_branch_off  = {is_branch_off}")
 
-    if args.mlflow:
-        mlflow.set_tracking_uri(uri="https://dev0.uwcnc.net/mlflow/")
-        mlflow.set_system_metrics_sampling_interval(3600)
-        mlflow.set_experiment(experiment_name)
-        # Start an MLflow run
+    if args.wandb:
+        wb.set_experiment(experiment_name)
+        # Resolve which wandb run to start (or resume)
         run_params = {}
         if is_branch_off:
             # Branch-off: always start a fresh run in the new experiment
             run_params['run_name'] = run_name
-            run_params['log_system_metrics'] = True
             print(f"Branch off: starting new run '{run_name}' in experiment '{experiment_name}'")
         else:
             # Resume an existing wandb run ONLY when this process actually continues
@@ -511,33 +507,31 @@ def main(args=None):
             # silently dropped and the panels keep showing the old run's (stale) data.
             continuing = (os.path.isfile(args.chkpt_fpath)
                           or getattr(args, 'is_fresh_stage', False))
-            run_object = (mlflow.search_runs(filter_string=f"attributes.run_name = '{run_name}'")
+            run_object = (wb.search_runs(filter_string=f"attributes.run_name = '{run_name}'")
                           if continuing else [])
             if len(run_object) > 0:
                 # Run exists - use its run_id
                 run_id = run_object.iloc[0]["run_id"]
                 run_params['run_id'] = run_id
-                run_params['log_system_metrics'] = True
                 print(f"Continuing existing run: {run_name} (ID: {run_id})")
             else:
                 # Run doesn't exist (or scratch start) - use run_name
                 run_params['run_name'] = run_name
-                run_params['log_system_metrics'] = True
                 print(f"Starting new run: {run_name}"
                       + ("" if continuing else " (scratch start: not resuming any same-named wandb run)"))
 
         # Single block using the appropriate parameters
         run_params['dir'] = args.save_dir
-        with mlflow.start_run(**run_params):
-            mlflow.log_params(vars(args))
+        with wb.start_run(**run_params):
+            wb.log_params(vars(args))
             if getattr(args, 'config_diff', {}):
-                mlflow.log_summary('stage_changes', args.config_diff)
-                mlflow.log_summary('stage_hash', args.stage_hash)
+                wb.log_summary('stage_changes', args.config_diff)
+                wb.log_summary('stage_hash', args.stage_hash)
 
             training_log, eval_log = training_loop(agent, envs, args, device, actor_critic,
                 training_log=training_log, eval_log=eval_log, eval_env=None, rollouts=rollouts)
     else:
-        print("MLflow is not enabled. Running training without logging.")
+        print("wandb is not enabled. Running training without logging.")
         training_log, eval_log = training_loop(agent, envs, args, device, actor_critic, 
             training_log=training_log, eval_log=eval_log, eval_env=None, rollouts=rollouts)
 

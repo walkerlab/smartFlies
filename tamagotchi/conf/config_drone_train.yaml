@@ -110,8 +110,8 @@ act_noise: 0.0
 if_vec_norm: 1
 if_train_actor_std: false
 
-# Logging (wandb via tamagotchi.wb shim). Name kept for backward compat.
-mlflow: 1
+# Logging (wandb via tamagotchi.wb)
+wandb: 1
 
 stage_name: ""      # non-empty triggers staged-training mode; short label for this stage
 resume_from: ""     # explicit .chkpt.pt path to load weights from (parent seed)

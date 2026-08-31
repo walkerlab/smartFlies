@@ -55,7 +55,7 @@ if_train_actor_std: true
 stray_max: 2.0
 if_vec_norm: 1
 obs_noise: 0.0
-mlflow: 0
+wandb: 0
 
 # loc_algo: on_plume_linear
 loc_algo: slice_linear

@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
 import pandas as pd
-from tamagotchi import wb as mlflow  # wandb shim with mlflow API
+from tamagotchi import wb
 import math
 
 def load_plume(
@@ -755,36 +755,36 @@ def update_eps_info(update_episodes_df, info, episode_counter, update_idx):
     return update_episodes_df
 
 
-def log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, aux_loss_dict=None, use_mlflow=True):
+def log_agent_learning(j, advantages, value_loss, action_loss, dist_entropy, clip_fraction, learning_rate, aux_loss_dict=None, use_wandb=True):
     """Log the per-update PPO metrics, plus wind-observer diagnostics when the
     auxiliary wind loss is active (aux_loss_dict is PPO.update()'s extras dict,
     None when auxiliary_arch='none')."""
-    if not use_mlflow:
+    if not use_wandb:
         return
-    mlflow.log_metric("ppo/advantages_mean", advantages.mean().item(), step=j)
-    mlflow.log_metric("ppo/advantages_std", advantages.std().item(), step=j)
-    mlflow.log_metric("ppo/advantages_max", advantages.max().item(), step=j)
-    mlflow.log_metric("ppo/advantages_min", advantages.min().item(), step=j)
-    mlflow.log_metric("ppo/value_loss", value_loss, step=j)
-    mlflow.log_metric("ppo/action_loss", action_loss, step=j)
-    mlflow.log_metric("ppo/dist_entropy", dist_entropy, step=j)
-    mlflow.log_metric("ppo/clip_fraction", clip_fraction, step=j)
-    mlflow.log_metric("ppo/learning_rate", learning_rate, step=j)
+    wb.log_metric("ppo/advantages_mean", advantages.mean().item(), step=j)
+    wb.log_metric("ppo/advantages_std", advantages.std().item(), step=j)
+    wb.log_metric("ppo/advantages_max", advantages.max().item(), step=j)
+    wb.log_metric("ppo/advantages_min", advantages.min().item(), step=j)
+    wb.log_metric("ppo/value_loss", value_loss, step=j)
+    wb.log_metric("ppo/action_loss", action_loss, step=j)
+    wb.log_metric("ppo/dist_entropy", dist_entropy, step=j)
+    wb.log_metric("ppo/clip_fraction", clip_fraction, step=j)
+    wb.log_metric("ppo/learning_rate", learning_rate, step=j)
 
     if aux_loss_dict is not None and len(aux_loss_dict['wind_nll_all']) > 0:
         all_wind_nll = aux_loss_dict['wind_nll_all']
         all_wind_sqerr = aux_loss_dict['wind_sqerr_all']
         all_wind_logvar = aux_loss_dict['wind_logvar_all']
-        mlflow.log_metric("wind_observer/wind_loss_mean", aux_loss_dict["wind_loss_epoch"], step=j)
-        mlflow.log_metric("wind_observer/wind_nll_mean", all_wind_nll.mean().item(), step=j)
-        mlflow.log_metric("wind_observer/wind_nll_std", all_wind_nll.std().item(), step=j)
-        mlflow.log_metric("wind_observer/wind_sqerr_mean", all_wind_sqerr.mean().item(), step=j)
-        mlflow.log_metric("wind_observer/wind_logvar_mean", all_wind_logvar.mean().item(), step=j)
+        wb.log_metric("wind_observer/wind_loss_mean", aux_loss_dict["wind_loss_epoch"], step=j)
+        wb.log_metric("wind_observer/wind_nll_mean", all_wind_nll.mean().item(), step=j)
+        wb.log_metric("wind_observer/wind_nll_std", all_wind_nll.std().item(), step=j)
+        wb.log_metric("wind_observer/wind_sqerr_mean", all_wind_sqerr.mean().item(), step=j)
+        wb.log_metric("wind_observer/wind_logvar_mean", all_wind_logvar.mean().item(), step=j)
 
 
-def log_curriculum_schedule(schedule_dict, j, use_mlflow=True):
+def log_curriculum_schedule(schedule_dict, j, use_wandb=True):
     """Log current curriculum variable values at update index j"""
-    if not use_mlflow:
+    if not use_wandb:
         return
 
     for lesson_name, lesson_schedule in schedule_dict.items():
@@ -796,9 +796,9 @@ def log_curriculum_schedule(schedule_dict, j, use_mlflow=True):
             if isinstance(current_value, (list, tuple)):
                 # e.g. {ds}_rotate_by holds an angle list ([0, 180] ... [0, 180, 90, -90, 45, -45, 135, -135]).
                 # A list is not a plottable metric, so log how many options are unlocked instead.
-                mlflow.log_metric(f"curriculum/{lesson_name}_n", len(current_value), step=j)
+                wb.log_metric(f"curriculum/{lesson_name}_n", len(current_value), step=j)
             else:
-                mlflow.log_metric(f"curriculum/{lesson_name}", current_value, step=j)
+                wb.log_metric(f"curriculum/{lesson_name}", current_value, step=j)
 
 
 def _log_outcome_group(j, df, prefix):
@@ -809,11 +809,11 @@ def _log_outcome_group(j, df, prefix):
     n = len(df)
     if n == 0:
         return
-    mlflow.log_metric(f"{prefix}num_episodes", n, step=j)
+    wb.log_metric(f"{prefix}num_episodes", n, step=j)
     for outcome in ['HOME', 'OOB', 'OOT']:
         k = int((df['outcome'] == outcome).sum())
-        mlflow.log_metric(f"{prefix}{outcome}_num", k, step=j)
-        mlflow.log_metric(f"{prefix}{outcome}_ratio", k / n, step=j)
+        wb.log_metric(f"{prefix}{outcome}_num", k, step=j)
+        wb.log_metric(f"{prefix}{outcome}_ratio", k / n, step=j)
 
 
 def _log_trial_stats_group(j, df, prefix):
@@ -825,11 +825,11 @@ def _log_trial_stats_group(j, df, prefix):
     if n == 0:
         return
     # num_episodes repeated here so the tab is self-contained for pooling across seeds
-    mlflow.log_metric(f"{prefix}num_episodes", n, step=j)
+    wb.log_metric(f"{prefix}num_episodes", n, step=j)
 
     # Realized rotate_by diversity: what was actually sampled, not what the schedule holds
     if 'rotate_by' in df.columns:
-        mlflow.log_metric(f"{prefix}n_unique_rotate_by", int(df['rotate_by'].nunique()), step=j)
+        wb.log_metric(f"{prefix}n_unique_rotate_by", int(df['rotate_by'].nunique()), step=j)
 
     init_dist = df['location_initial'].apply(np.linalg.norm)
     for name, s in [('init_distance', init_dist),
@@ -837,14 +837,14 @@ def _log_trial_stats_group(j, df, prefix):
                     ('stray_initial', df['stray_initial'].astype(float))]:
         # mean + std + num_episodes is enough to recover the exact pooled mean/variance
         # across seeds later; the figure-2 density band is std**2.
-        mlflow.log_metric(f"{prefix}{name}_mean", s.mean(), step=j)
-        mlflow.log_metric(f"{prefix}{name}_std", s.std(ddof=1) if n > 1 else 0.0, step=j)
-        mlflow.log_metric(f"{prefix}{name}_min", s.min(), step=j)
-        mlflow.log_metric(f"{prefix}{name}_max", s.max(), step=j)
+        wb.log_metric(f"{prefix}{name}_mean", s.mean(), step=j)
+        wb.log_metric(f"{prefix}{name}_std", s.std(ddof=1) if n > 1 else 0.0, step=j)
+        wb.log_metric(f"{prefix}{name}_min", s.min(), step=j)
+        wb.log_metric(f"{prefix}{name}_max", s.max(), step=j)
 
 
-def log_eps_info(j, update_episodes_df, use_mlflow=True):
-    if not use_mlflow or len(update_episodes_df) == 0:
+def log_eps_info(j, update_episodes_df, use_wandb=True):
+    if not use_wandb or len(update_episodes_df) == 0:
         return
     # perf/ carries outcome info only; trial conditions live under trial_stats/
     _log_outcome_group(j, update_episodes_df, "perf/")
@@ -854,7 +854,7 @@ def log_eps_info(j, update_episodes_df, use_mlflow=True):
         _log_trial_stats_group(j, group, f"trial_stats/{ds}/")
 
 
-def log_update_wind_stats(j, wind_xy, use_mlflow=True, round_decimals=2):
+def log_update_wind_stats(j, wind_xy, use_wandb=True, round_decimals=2):
     """Log per-update ambient-wind diversity for this run.
 
     Args:
@@ -868,7 +868,7 @@ def log_update_wind_stats(j, wind_xy, use_mlflow=True, round_decimals=2):
     Note this counts uniques *within this run*; pooling across seeds is a mean of
     per-seed counts, not a set union.
     """
-    if not use_mlflow or wind_xy is None or len(wind_xy) == 0:
+    if not use_wandb or wind_xy is None or len(wind_xy) == 0:
         return
     wind_xy = np.asarray(wind_xy, dtype=np.float64)
     wind_dir = np.degrees(np.arctan2(wind_xy[:, 1], wind_xy[:, 0])) % 360.0
@@ -882,13 +882,13 @@ def log_update_wind_stats(j, wind_xy, use_mlflow=True, round_decimals=2):
     mag_i = np.rint(wind_mag * scale).astype(np.int64)
     n_unique_vels = len(np.unique(dir_i * (mag_i.max() + 1) + mag_i))
 
-    mlflow.log_metric("wind_stats/n_unique_wind_vels", n_unique_vels, step=j)
-    mlflow.log_metric("wind_stats/n_unique_wind_dirs", len(np.unique(dir_i)), step=j)
-    mlflow.log_metric("wind_stats/n_unique_wind_mags", len(np.unique(mag_i)), step=j)
+    wb.log_metric("wind_stats/n_unique_wind_vels", n_unique_vels, step=j)
+    wb.log_metric("wind_stats/n_unique_wind_dirs", len(np.unique(dir_i)), step=j)
+    wb.log_metric("wind_stats/n_unique_wind_mags", len(np.unique(mag_i)), step=j)
     # Denominator: lets counts be normalized across runs with different num_processes/num_steps
-    mlflow.log_metric("wind_stats/n_wind_samples", len(wind_xy), step=j)
+    wb.log_metric("wind_stats/n_wind_samples", len(wind_xy), step=j)
 
-def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifacts=True, plot=True,
+def log_eps_artifacts(j, args, update_episodes_df, use_wandb=True, log_artifacts=True, plot=True,
                       wind_xy=None):
     """
     Log episode statistics and plot a histogram of plume density for successful episodes.
@@ -902,20 +902,20 @@ def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifact
     """
 
     # Log episode statistics
-    if not use_mlflow:
+    if not use_wandb:
         return
 
     # Ambient wind is sampled every step regardless of whether any episode finished, so it
     # is logged before anything that keys off update_episodes_df (which may be empty).
-    log_update_wind_stats(j, wind_xy)
+    log_update_wind_stats(j, wind_xy, use_wandb=use_wandb)
 
-    log_eps_info(j, update_episodes_df)
+    log_eps_info(j, update_episodes_df, use_wandb=use_wandb)
 
     if log_artifacts:
         log_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '')}_eps_log_{j}.csv"
         update_episodes_df.to_csv(log_path, index=False)
         try:
-            mlflow.log_artifact(log_path, artifact_path=f"eps_log", step=j)
+            wb.log_artifact(log_path, artifact_path=f"eps_log", step=j)
         except Exception as e:
             print(f"Error logging artifact {log_path}: {e}")
     
@@ -953,12 +953,12 @@ def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifact
                 # Plot bars
                 plt.bar(bin_centers_shifted, success_rate.values, 
                         width=offset_factor * bin_width, 
-                        label=dataset, alpha=0.8, color=config.mlflow_colors[dataset])
+                        label=dataset, alpha=0.8, color=config.dataset_colors[dataset])
 
                 # Annotate number of successes, colored by group
                 for x, y, n in zip(bin_centers_shifted, success_rate.values, n_success.values):
                     if np.isfinite(x) and np.isfinite(y):
-                        plt.text(x, y + 0.02, str(n), ha='center', va='bottom', fontsize=8, color=config.mlflow_colors[dataset])
+                        plt.text(x, y + 0.02, str(n), ha='center', va='bottom', fontsize=8, color=config.dataset_colors[dataset])
 
             # Labels and formatting
             plt.xlabel('Plume Density')
@@ -972,9 +972,9 @@ def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifact
             plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}HOME_density_{j}_rate.png"
             plt.savefig(plt_path, dpi=100, bbox_inches='tight')
             plt.close()  # Close the figure to free memory
-            if use_mlflow: 
+            if use_wandb: 
                 try:
-                    mlflow.log_artifact(plt_path, artifact_path="figs/density", step=j)
+                    wb.log_artifact(plt_path, artifact_path="figs/density", step=j)
                 except Exception as e:
                     print(f"Error logging artifact {plt_path}: {e}")
         

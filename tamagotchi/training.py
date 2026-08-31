@@ -18,7 +18,7 @@ except ImportError:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from env import get_vec_normalize #hydra pipeline version
 import matplotlib.pyplot as plt
-from tamagotchi import wb as mlflow  # wandb shim with mlflow API
+from tamagotchi import wb
 
 def get_index_by_dataset(envs, dataset):
     """Get indices of the remotes that loaded the provided dataset."""
@@ -300,7 +300,7 @@ def build_tc_schedule_dict(args, total_number_periods, interleave=True, **kwargs
 
     return schedule_dict, restart_period
 
-def log_episode(training_log, j, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates, use_mlflow=True):
+def log_episode(training_log, j, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates, use_wandb=True):
     # update the training log with the current episode's statistics
     end = time.time()
     print(
@@ -342,9 +342,9 @@ def log_episode(training_log, j, total_num_steps, start, episode_rewards, episod
         }
     training_log.append(log_entry)
     
-    if use_mlflow:
+    if use_wandb:
         for k, v in log_entry.items():
-            mlflow.log_metric(k, v, step=j)
+            wb.log_metric(k, v, step=j)
         
     return training_log
 
@@ -844,7 +844,7 @@ def training_loop(agent, envs, args, device, actor_critic,
             updated_var = update_by_schedule(envs, schedule, j_global)
             
             ##############################################################################################################
-            utils.log_curriculum_schedule(schedule, j_global)
+            utils.log_curriculum_schedule(schedule, j_global, use_wandb=args.wandb)
             
         # Initialize df to track episode statistics
         update_episodes_df = pd.DataFrame(columns=[
@@ -920,25 +920,25 @@ def training_loop(agent, envs, args, device, actor_critic,
         #     summary = traj_storage.get_summary_counts()
             plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}trajectories_update{j_global}.png"
             plot_trajectories(traj_storage, envs, save_path=plt_path)
-            if args.mlflow:
+            if args.wandb:
                 try:
-                    mlflow.log_artifact(plt_path, artifact_path="figs/trajectories", step=j_global)
+                    wb.log_artifact(plt_path, artifact_path="figs/trajectories", step=j_global)
                 except Exception as e:
                     print(f"Error logging artifact {plt_path}: {e}")
                 
-        utils.log_agent_learning(j_global, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], aux_loss_dict=extras, use_mlflow=args.mlflow)
+        utils.log_agent_learning(j_global, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], aux_loss_dict=extras, use_wandb=args.wandb)
         # wind obsver v1 modification: plot success fractions every 20 updates
-        utils.log_eps_artifacts(j_global, args, update_episodes_df, use_mlflow=args.mlflow, log_artifacts=True, plot=(j % plot_every_n_updates == 0),
+        utils.log_eps_artifacts(j_global, args, update_episodes_df, use_wandb=args.wandb, log_artifacts=True, plot=(j % plot_every_n_updates == 0),
                                 wind_xy=np.concatenate(update_wind_xy, axis=0) if update_wind_xy else None)
 
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
         if j % args.log_interval == 0 and len(episode_rewards) > 1 and not args.dryrun:
-            training_log = log_episode(training_log, j_global, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates + stage_offset)
+            training_log = log_episode(training_log, j_global, total_num_steps, start, episode_rewards, episode_puffs, episode_plume_densities, episode_wind_directions, num_updates + stage_offset, use_wandb=args.wandb)
             # Save training curve
             pd.DataFrame(training_log).to_csv(args.training_log)
 
-        if args.mlflow:
-            mlflow.flush(j_global)
+        if args.wandb:
+            wb.flush(j_global)
         rollouts.after_update()
         ##############################################################################################################
         # save for every interval-th episode or for the last epoch
@@ -977,13 +977,13 @@ def training_loop(agent, envs, args, device, actor_critic,
                 ], fname)
                 print('Saved', fname)
     
-    # save the final model to mlflow
-    if args.mlflow:
-        # mlflow.log_artifact(args.model_fpath, artifact_path="weights") # 111725 1mb agent file too big - never used this so turn off
-        mlflow.log_artifact(args.training_log, artifact_path="training_logs")
+    # log the final training artifacts to wandb
+    if args.wandb:
+        # wb.log_artifact(args.model_fpath, artifact_path="weights") # 111725 1mb agent file too big - never used this so turn off
+        wb.log_artifact(args.training_log, artifact_path="training_logs")
         # if args.if_vec_norm:
         #     vecNormalize_state_fname = args.model_fpath.replace(".pt", "_vecNormalize.pkl")
-        #     mlflow.log_artifact(vecNormalize_state_fname, artifact_path="weights")
+        #     wb.log_artifact(vecNormalize_state_fname, artifact_path="weights")
         #     # save the final training log
         
     return training_log, eval_log
