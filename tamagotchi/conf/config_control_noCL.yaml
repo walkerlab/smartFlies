@@ -27,7 +27,7 @@ path:
 dataset: [constant_jitterx5b5, noisy_jitter_coveragex5b5]
 r_shaping: [step,missed_time_cost,rotate_by,cosine]
 loc_algo: slice_linear # already random by min max
-num_env_steps: 3000000 # set in cmd override string
+num_env_steps: 10800000 # set in cmd override string
 # these belong should not matter - actual numbers are handled by the curriculum config file - but need to be set to something
 qvar: [1.5, 1]
 birthx: 0.1
@@ -36,7 +36,7 @@ diff_min: [0.1, 0.1]
 precise_max: [8.0, 8.0] # not used 
 precise_min: [1.0, 1.0] # not used 
 birthx_linear_tc_steps: 6
-birthx_upper: 0 
+birthx_upper: 0.8
 odor_01: 1
 # PPO / optimizer
 algo: ppo
