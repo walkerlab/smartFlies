@@ -1,7 +1,7 @@
 # Hydra config for dronmagotchi. Override from CLI, e.g.:
-#   python -m tamagotchi.main_hydra outsuffix=run01 action_physics=ground_vel_angvel
+#   python -m tamagotchi.main_hydra outsuffix=run01 action_physics=force
 # Multirun sweep:
-#   python3 -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=air_vel_angvel,ground_vel_angvel
+#   python3 -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=kinematics,force
 #   python3 -m tamagotchi.main_hydra -m seed=1,2,3
 
 defaults:

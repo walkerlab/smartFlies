@@ -158,10 +158,9 @@ def get_args():
     parser.add_argument('--ou_eval', type=bool, default=False,
         help='enable OU noise during evaluation ablations; off by default')
     parser.add_argument('--mlflow', type=int, default=1) # whether to train the std of the stochastic policy
-    parser.add_argument('--action_physics', type=str, default='air_vel_angvel',
-        choices=['air_vel_angvel', 'ground_vel_angvel', 'force'],
-        help="Action space: 'air_vel_angvel' (forward air speed + angular velocity, wind drifts the agent), "
-             "'ground_vel_angvel' (forward ground speed + angular velocity, no wind drift), "
+    parser.add_argument('--action_physics', type=str, default='kinematics',
+        choices=['kinematics', 'force'],  
+        help="Action space: 'kinematics' (forward air speed + angular velocity, wind drifts the agent), "
              "or 'force' (body-frame thrust + yaw torque; requires explicit force_physics coefficients)")
     parser.add_argument('--stage_name', type=str, default='',
         help='name identifying this training stage; triggers staged training when non-empty')

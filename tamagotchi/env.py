@@ -1356,7 +1356,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
     def __init__(self, flip_ventral_optic_flow=False,
                  rotate_by=None,
                  double_drift=False,
-                 action_physics=None, # 'air_vel_angvel' (default/legacy) or 'force'. 'ground_vel_angvel' is deprecated.
+                 action_physics=None, # 'kinematics' (default/legacy) or 'force'.
                  obs_mask = [], # indices of observation channels to zero out; does NOT change obs space shape
                  odor_01 = False,
                  action_latency=None,       # seconds；None = off
@@ -2427,7 +2427,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         apparent_wind=args.apparent_wind,
                         flip_ventral_optic_flow=args.flip_ventral_optic_flow,
                         rotate_by=args.rotate_by,
-                        action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
+                        action_physics=getattr(args, 'action_physics', 'kinematics'),
                         birthx_upper=getattr(args, 'birthx_upper', 0),
                         force_physics=getattr(args, 'force_physics', None),
                         obs_mask=getattr(args, 'obs_mask', []),
@@ -2462,7 +2462,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                     obs_noise=args.obs_noise,
                     act_noise=args.act_noise,
                     action_latency=getattr(args, 'action_latency', None),
-                    action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
+                    action_physics=getattr(args, 'action_physics', 'kinematics'),
                     seed=args.seed
                     )
 
