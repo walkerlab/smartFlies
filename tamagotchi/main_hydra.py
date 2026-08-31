@@ -47,6 +47,9 @@ def run(cfg: DictConfig) -> None:
     # passes args.force_physics into PlumeEnvironment_v3, and it gets persisted in
     # _args.json for eval to reconstruct. There is no module-level default to fall back on:
     # PlumeEnvironment_v3 raises if action_physics='force' and no coefficients are supplied.
+    # This is set regardless of action_physics: under the original/kinematics action physics,
+    # PlumeEnvironment_v3 also reads move_capacity/turn_capacity overrides out of this same dict
+    # (fly.yaml's max_forward_airspeed/max_smooth_yaw_rate).
     if isinstance(cfg_dict.get("physics"), dict):
         cfg_dict["force_physics"] = cfg_dict.pop("physics")
 
