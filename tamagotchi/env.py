@@ -1356,10 +1356,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
     def __init__(self, flip_ventral_optic_flow=False,
                  rotate_by=None,
                  double_drift=False,
-                 action_physics=None, # or 'ground_vel_angvel': agent commands ground velocity instead of air velocity
+                 action_physics=None, # 'kinematics' (default/legacy) or 'force'.
                  obs_mask = [], # indices of observation channels to zero out; does NOT change obs space shape
                  odor_01 = False,
-                 action_delay_const=None, # seconds; first-order lag on actions (EMA). None = off
                  action_latency=None,       # seconds；None = off
                  obs_delayed_actions=False, # if True, obs includes last action (delayed by action_latency) as part of observation
                  force_physics=None, # dict of coefficients required by action_physics=='force'; also
@@ -1383,14 +1382,11 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.action_physics = action_physics
         self.now_init_long = 0.0 # long-axis init coordinate set directly by curriculum
         self.odor_01 = odor_01 # PEv3
-        self.ang_vel = 0.0 # angular velocity (rad/s); integrated by 'force' physics, left at 0 otherwise
+        self.ang_vel = 0.0 # angular velocity (rad/s); integrated by 'force' physics, tracks the capped yaw rate under kinematics accel caps, left at 0 otherwise
+        self.kin_accel_cap = None     # m/s^2; set below from physics coeffs if provided (kinematics mode only)
+        self.kin_ang_accel_cap = None # rad/s^2; same
         print(f"[DEBUG] PEv3 init self.rotate_by: {self.rotate_by}, self.mirror: {self.mirror}, self.action_physics: {self.action_physics} {action_physics}")
-        if self.action_physics == 'ground_vel_angvel':
-            # 3-dim action: [vel_x_ego, vel_y_ego, turn], all in [0, 1]
-            # vel_x: forward speed (0=stop, 1=full); vel_y: lateral (0.5=center, 0=full-left, 1=full-right); turn: same as air_vel_angvel
-            self.action_space = spaces.Box(low=0.0, high=1.0, shape=(3,), dtype=np.float32)
-            print(f"[DEBUG] PEv3 using ground velocity action physics; action space shape: {self.action_space.shape}")
-        elif self.action_physics == 'force':
+        if self.action_physics == 'force':
             # 3-dim action in [0, 1]:
             #   a[0]: parallel thrust   (0=no thrust, 1=full forward)
             #   a[1]: perp thrust       (0.5=no lateral, 0=full-left, 1=full-right)
@@ -1408,17 +1404,24 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print(f"[DEBUG] PEv3 using force action physics; action space shape: {self.action_space.shape}; "
                   f"tau_lin={pc['mass']/pc['drag']:.4g}s, tau_rot={pc['inertia']/pc['k_rot']:.4g}s, "
                   f"sub_dt={self.dt/pc['physics_substeps']:.4g}s; coeffs: {self.physics_coeff}")
-        else:
+        elif self.action_physics == 'kinematics':
             # Original physics (2-dim action: move, turn). move_capacity/turn_capacity default to the
-            # arbitrary values set in the base class __init__; if fly kinematic coefficients are
-            # supplied (e.g. conf/physics/fly.yaml, which is loaded as force_physics regardless of
-            # action_physics), use the measured airspeed/yaw-rate limits instead.
+            # arbitrary values set in the base class __init__; if fly kinematic coefficients are supplied, 
+            # use the measured airspeed/yaw-rate limits instead.
             if force_physics is not None and 'max_forward_airspeed' in force_physics:
                 self.move_capacity = force_physics['max_forward_airspeed']  # m/s
                 self.turn_capacity = np.deg2rad(force_physics['max_smooth_yaw_rate'])  # deg/s -> rad/s
                 print(f"[DEBUG] PEv3 using fly.yaml kinematic coefficients for original action physics: "
                       f"move_capacity={self.move_capacity:.4g} m/s, "
                       f"turn_capacity={np.rad2deg(self.turn_capacity):.4g} deg/s")
+            # Acceleration caps: if the physics coeffs carry peak accelerations, step() caps the
+            # per-step change in commanded airspeed / yaw rate at them; absent keys = uncapped as before.
+            if force_physics is not None and 'max_forward_accel' in force_physics:
+                self.kin_accel_cap = force_physics['max_forward_accel']  # m/s^2
+            if force_physics is not None and 'max_smooth_yaw_accel' in force_physics:
+                self.kin_ang_accel_cap = np.deg2rad(force_physics['max_smooth_yaw_accel'])  # deg/s^2 -> rad/s^2
+        else:
+            raise ValueError(f"action_physics='force' or 'kinematics'. Got: {self.action_physics!r}")
 
         # Options below only ever worked with the legacy 2-dim air-velocity physics; fail loudly
         # rather than silently ignoring them under the 3-dim action modes.
@@ -1466,21 +1469,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             self._null_action = np.array([0.0, 0.5, 0.5], dtype=np.float64)
         else:
             self._null_action = np.array([0.0, 0.5], dtype=np.float64)
-        # Action delay (first-order lag on actions and/or action feedback)
-        self.action_delay_const = action_delay_const
-        if self.action_delay_const is not None:
-            assert self.action_delay_const > 0
-            self.action_alpha = 1.0 - np.exp(-self.dt / self.action_delay_const)  # dt-invariant EMA coeff
-            self.action_applied = self._null_action.copy()
-            # Compatibility guard: these options mix commanded vs applied action semantics
-            incompatible = []
-            if self.action_feedback: incompatible.append("action_feedback")
-            if self.flipping: incompatible.append("flipping")
-            if incompatible:
-                raise ValueError(f"action_delay_const={self.action_delay_const} is incompatible with: "
-                                f"{', '.join(incompatible)}. Disable these or set action_delay_const=None.")
-            print(f"[DEBUG] PEv3 action EMA lag: tau={self.action_delay_const}s, dt={self.dt}, alpha={self.action_alpha:.4f}")
-        
+            
         # Action latency (fixed transport delay on actions)
         self.action_latency = action_latency
         self.obs_delayed_actions = obs_delayed_actions
@@ -1988,9 +1977,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # Wind can either be relative wind or apparent wind, depending on the setting
         if not self.loc_algo == self.angle_algo == self.time_algo == 'fixed': # Only sample rotate_by when in training. These three algos are used for eval.
             self.sample_rotate_by() # Sample a random rotation angle in degrees; possible values: [0, 90, 180, -90]
-        if self.action_delay_const is not None:
-            self.action_applied = self._null_action.copy()
-
+            
         # Zero out the velocity state at the start of each episode. Under 'force' this is the
         # integrator state; under the other modes it is recomputed each step, but it must not carry
         # the previous episode's value into the first observation.
@@ -2078,23 +2065,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # print(f"[DEBUG] now action: {self.action_commanded}\n")
             # print(f"[DEBUG] delayed: {delayed}\n")
             # print(f"[DEBUG] action buffer: {list(self.action_buffer)}\n")
-        # --- first-order actuator lag (EMA toward commanded action) ---
-        if self.action_delay_const is not None:
-            self.action_applied += self.action_alpha * (np.asarray(action, dtype=np.float64) - self.action_applied)
-            action = self.action_applied.copy()
 
-        if self.action_physics == 'ground_vel_angvel':
-            # action[0]: forward [0,1]; action[1]: lateral [0,1] -> [-1,1] (0.5=no lateral); action[2]: turn [0,1]
-            # NOTE: for obs in egocentric frame, Y direction is parallel to HD and X direction is perpendicular.
-            vel_ego = np.array([float(action[0]), float(action[1]) * 2.0 - 1.0])
-            vel_norm = np.linalg.norm(vel_ego)
-            speed = min(vel_norm, 1.0)  # clamp to [0, 1]
-            direction = vel_ego / (vel_norm + 1e-8)
-            move_action = direction * speed
-            turn_action = float(action[2])
-        else:
-            move_action = action[0] # Move [0, 1], with 0.0 = no movement
-            turn_action = action[1] # Turn [0, 1], with 0.5 = no turn
+        move_action = action[0] # Move [0, 1], with 0.0 = no movement
+        turn_action = action[1] # Turn [0, 1], with 0.5 = no turn
 
         # Flipping arena?
         if self.flipping and self.flipx < 0:
@@ -2137,41 +2110,35 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             # Turn/Update orientation and move to new location
             turn_amount = self.turn_action_to_turn_amount(turn_action, radian=True) # in radians
             # print(f"[DEBUG] PEv3 turn_amount: {np.rad2deg(turn_amount):.4f}, turn_action: {turn_action:.4f}, move_action: {move_action:.4f}")
+            if self.kin_ang_accel_cap is not None:
+                # Cap angular acceleration: limit yaw-rate change per step vs last step's yaw rate.
+                dw_max = self.kin_ang_accel_cap * self.dt
+                self.ang_vel = np.clip(turn_amount / self.dt, self.ang_vel - dw_max, self.ang_vel + dw_max)
+                turn_amount = self.ang_vel * self.dt
 
             new_angle_radians = old_angle_radians + turn_amount
             self.agent_angle = [ np.cos(new_angle_radians), np.sin(new_angle_radians) ]
 
             # New location = old location + agent movement + wind advection
 
-            if self.action_physics == 'ground_vel_angvel':
-                # Agent commands an egocentric 2D ground velocity (decoupled from heading).
-                # move_action = direction * speed, where direction is the unit egocentric vector and
-                # speed = min(||vel_ego||, 1). Ground velocity = rotate(move_action, heading) * move_capacity.
-                # No wind advection; air_velocity = ground_velocity - ambient_wind.
-                ground_speed = self.move_capacity * self.movex
-                cos_h, sin_h = self.agent_angle[0], self.agent_angle[1]
-                # Rotate unit egocentric vector to allocentric frame (ego x=forward, ego y=left CCW)
-                ground_vel_x = (cos_h * move_action[0] - sin_h * move_action[1]) * ground_speed
-                ground_vel_y = (sin_h * move_action[0] + cos_h * move_action[1]) * ground_speed
-                self.agent_location = [
-                    self.agent_location[0] + ground_vel_x * self.dt,
-                    self.agent_location[1] + ground_vel_y * self.dt,
-                ]
-                self.ground_velocity = np.array([ground_vel_x, ground_vel_y])
-                self.air_velocity = self.ground_velocity - np.array(self.ambient_wind)
-            else:
-                # Original physics: agent commands air velocity in heading direction; wind drifts it.
-                agent_move_x = self.agent_angle[0]*self.move_capacity*self.movex*move_action*self.dt
-                agent_move_y = self.agent_angle[1]*self.move_capacity*self.movex*move_action*self.dt
-                wind_drift_x = self.ambient_wind[0]*self.dt
-                wind_drift_y = self.ambient_wind[1]*self.dt
-                self.agent_location = [
-                self.agent_location[0] + agent_move_x + wind_drift_x,
-                self.agent_location[1] + agent_move_y + wind_drift_y,
-                ]
-                # Air and ground velocity
-                self.air_velocity = np.array([agent_move_x, agent_move_y])/self.dt # Rel_wind = Amb_wind - Air_vel
-                self.ground_velocity = (np.array(self.agent_location) - self.agent_location_last)/self.dt
+            # Original physics: agent commands air velocity in heading direction; wind drifts it.
+            airspeed = self.move_capacity*self.movex*move_action
+            if self.kin_accel_cap is not None:
+                # Cap linear acceleration: limit airspeed change per step vs last step's airspeed.
+                dv_max = self.kin_accel_cap * self.dt
+                prev_airspeed = np.linalg.norm(self.air_velocity)
+                airspeed = np.clip(airspeed, prev_airspeed - dv_max, prev_airspeed + dv_max)
+            agent_move_x = self.agent_angle[0]*airspeed*self.dt
+            agent_move_y = self.agent_angle[1]*airspeed*self.dt
+            wind_drift_x = self.ambient_wind[0]*self.dt
+            wind_drift_y = self.ambient_wind[1]*self.dt
+            self.agent_location = [
+            self.agent_location[0] + agent_move_x + wind_drift_x,
+            self.agent_location[1] + agent_move_y + wind_drift_y,
+            ]
+            # Air and ground velocity
+            self.air_velocity = np.array([agent_move_x, agent_move_y])/self.dt # Rel_wind = Amb_wind - Air_vel
+            self.ground_velocity = (np.array(self.agent_location) - self.agent_location_last)/self.dt
         # print(f"[DEBUG] PEv3 step: air_velocity: {self.air_velocity}, ambient_wind: {self.ambient_wind}, agent_location: {self.agent_location}")
         # print(f"[DEBUG] PEv3 step: ground_velocity: {self.ground_velocity}")
 
@@ -2479,12 +2446,11 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         apparent_wind=args.apparent_wind,
                         flip_ventral_optic_flow=args.flip_ventral_optic_flow,
                         rotate_by=args.rotate_by,
-                        action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
+                        action_physics=getattr(args, 'action_physics', 'kinematics'),
                         birthx_upper=getattr(args, 'birthx_upper', 0),
                         force_physics=getattr(args, 'force_physics', None),
                         obs_mask=getattr(args, 'obs_mask', []),
                         odor_01=getattr(args, 'odor_01', False),
-                        action_delay_const=getattr(args, 'action_delay_const', None),
                         action_latency=getattr(args, 'action_latency', None),
                         )
             else:
@@ -2514,9 +2480,8 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                     stray_max=args.stray_max,
                     obs_noise=args.obs_noise,
                     act_noise=args.act_noise,
-                    action_delay_const=args.action_delay_const,
                     action_latency=getattr(args, 'action_latency', None),
-                    action_physics=getattr(args, 'action_physics', 'air_vel_angvel'),
+                    action_physics=getattr(args, 'action_physics', 'kinematics'),
                     seed=args.seed
                     )
 
