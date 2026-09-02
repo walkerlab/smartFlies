@@ -982,9 +982,6 @@ def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifact
         
 
 # from a2c_ppo_acktr/storage.py
-import torch
-from torch.utils.data.sampler import BatchSampler, SubsetRandomSampler
-
 
 def _flatten_helper(T, N, _tensor):
     return _tensor.view(T * N, *_tensor.size()[2:])
@@ -1054,8 +1051,9 @@ def realign_schedule(schedule, num_updates, orig_num_updates):
     return realigned, realign_ratio
 
 
-def validate_tc_schedule_datasets(schedule, datasets):
-    """Fail fast when a per-dataset lesson key does not match any loaded dataset.
+def validate_tc_schedule_datasets(schedule, datasets, loc_algo=None):
+    """Fail fast when a per-dataset lesson key does not match any loaded dataset,
+    or when a lesson does not match the location algorithm that consumes it.
 
     Per-dataset lessons are keyed as ``{dataset}_{suffix}`` and dispatched in
     ``update_by_schedule`` by exact match of the dataset prefix against the envs'
@@ -1064,16 +1062,29 @@ def validate_tc_schedule_datasets(schedule, datasets):
     those lessons a silent no-op ("No remote found" print), while the curriculum
     metrics still log the intended schedule - the envs just never receive it.
 
+    Lessons are only read by the matching branch of
+    ``PlumeEnvironment.get_initial_location``: ``diff_max``/``diff_min`` drive the
+    ``'slice'`` branch and ``now_init_long`` drives the ``'precise'`` branch. Scheduling
+    one against the wrong ``loc_algo`` (e.g. a curriculum saved for ``slice_linear``
+    reused with ``linear_precise``) is a silent no-op - the metrics still log the
+    intended schedule, but the initial locations never change.
+
     Args:
         schedule: dict[str, dict[int, value]] as returned by :func:`load_tc_schedule`.
         datasets: iterable of dataset names actually loaded (``args.dataset``).
+        loc_algo: the location algorithm string in use (``args.loc_algo``). When None,
+            the lesson/loc_algo consistency check is skipped.
 
     Raises:
         ValueError: if any per-dataset lesson key has an unknown dataset prefix
-            or an unknown suffix.
+            or an unknown suffix, or schedules a lesson the current ``loc_algo``
+            never reads.
     """
     global_keys = {'birthx', 'wind_cond'}
     per_ds_suffixes = ('_diff_max', '_diff_min', '_now_init_long', '_rotate_by')
+    # suffix -> substring that must appear in loc_algo for that lesson to be read by
+    # get_initial_location; suffixes absent here are loc_algo-independent.
+    loc_algo_by_suffix = {'_diff_max': 'slice', '_now_init_long': 'precise'}
     datasets = set(datasets)
     bad = []
     for k in schedule:
@@ -1088,6 +1099,12 @@ def validate_tc_schedule_datasets(schedule, datasets):
         if ds_name not in datasets:
             bad.append(f"'{k}': dataset prefix '{ds_name}' does not match any loaded "
                        f"dataset {sorted(datasets)} - this lesson would silently never apply")
+            continue
+        required = loc_algo_by_suffix.get(suffix)
+        if loc_algo is not None and required is not None and required not in loc_algo:
+            bad.append(f"'{k}': '{suffix.lstrip('_')}' lessons are only read by the "
+                       f"'{required}' branch of get_initial_location, but loc_algo="
+                       f"'{loc_algo}' - this lesson would silently never apply")
     if bad:
         raise ValueError("Invalid curriculum schedule keys:\n  " + "\n  ".join(bad))
 

@@ -4,35 +4,16 @@
 #               --out_dir eval \
 #               --time_offsets 0.0 1.0 10.0 11.0 20.0 21.0 30.0 31.0 \
 #               --viz_episodes 20
-#
+
 # Discovers all seed checkpoints in {from_folder}/weights/ and submits one
 # SLURM eval job per checkpoint. Logs are saved alongside weights with the
 # same stem but in {from_folder}/{out_dir}/*.evallog
-#
+
 # Email: --mail-type=FAIL only -- mail on a real failure, not on a normal finish or on
 # scancel. Eval jobs are one-shot (no --requeue), so a preemption does still mail you.
 # Set the address with --mail_user (or --mail_user "" for none).
-#
+
 # Cancel all your jobs: squeue -u $USER -h | awk '{print $1}' | xargs scancel
-
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ --dataset eval_noisy_jitterx5b5 --substr stage --dry_run  --extra_args "--no_viz False --test_sparsity"
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ --dataset eval_noisy_jitterx5b5 --substr stage --dry_run  --extra_args="--only_test_sparsity"
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ --dataset eval_constant_jitterx5b5 --substr stage --extra_args "--no_viz False --test_sparsity"
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/CTL_noCL/ --dataset eval_noisy_jitterx5b5 --substr chkpt --dry_run  --extra_args "--no_viz False --test_sparsity"
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/CTL_noCL/ --dataset eval_constant_jitterx5b5 --substr chkpt  --extra_args "--no_viz False --test_sparsity"
-
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_uncertainty/ --dataset poisson_mag_narrow_noisy3x5b5 --substr stage 
-
-# Base evals
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/CTL_noCL_base/ --dataset eval_noisy_jitterx5b5 --substr chkpt --extra_args "--no_viz False --test_sparsity"
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/CTL_noCL_base/ --dataset eval_constant_jitterx5b5 --substr chkpt  --extra_args "--no_viz False --test_sparsity"
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_base/ --dataset eval_noisy_jitterx5b5 --substr stage  --extra_args="--test_sparsity"
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/force_physics_base/ --dataset eval_constant_jitterx5b5 --substr stage --extra_args "--no_viz False --test_sparsity"
-
-# Drone native runs 
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/drone_naive/ --dataset eval_constant_jitterx5b5 --substr chkpt --extra_args "--no_viz False --test_sparsity"
-# python3 scripts/slurm-eval_ckpt.py --from_folder /gscratch/portia/jqhu/work/active_sensing/smartFlies/data/wind_sensing/apparent_wind_visual_feedback/drone_naive_delay/ --dataset eval_constant_jitterx5b5 --substr chkpt --extra_args "--no_viz False --test_sparsity"
-
 
 import argparse
 import glob
@@ -208,6 +189,12 @@ def main():
                     if re.search(r'seed-\d+-[0-9a-f]{8}_stage_[0-9a-f]+\.chkpt\.pt$', f)
                     and not f.endswith('_vecNormalize.pkl')]
         print('\n'.join(pt_files))
+    elif 'stage' in args.substr:
+        print(f'Filtering for stage checkpoints containing "{args.substr}"...')
+        pt_files = [f for f in pt_files
+                    if re.search(r'seed-\d+-[0-9a-f]{8}_stage_[0-9a-f]+\.chkpt\.pt$', f)
+                    and not f.endswith('_vecNormalize.pkl')
+                    and (args.substr in os.path.basename(f))]
     elif args.substr:
         print(f'Filtering for checkpoints containing "{args.substr}"...')
         pt_files = [f for f in pt_files

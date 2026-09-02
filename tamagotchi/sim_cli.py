@@ -1,5 +1,8 @@
 """
-python -u sim_cli.py --duration 10 # test ~20s
+--seed is required (no default). Historical values: 6 for eval regimes,
+337 for coverage regimes, 0 otherwise - pass those to reproduce old datasets.
+
+python -u sim_cli.py --duration 10 --seed 0 # test ~20s
 python -u sim_cli.py --duration 120 # test ~3.5min
 
 # Real datasets, T=120s is enough!
@@ -97,6 +100,9 @@ parser.add_argument('--wind_y_varx',  type=float, default=1.0)
 parser.add_argument('--birth_rate',  type=float, 
 	help='poisson birth_rate parameter', default=0.2)
 parser.add_argument('--outdir',  type=str, default=config.datadir)
+parser.add_argument('--seed',  type=int, required=True,
+	help='RandomState seed for the wind noise; no default - must be given explicitly. '
+	     'Historical values: 6 for eval regimes, 337 for coverage regimes, 0 otherwise.')
 
 args = parser.parse_args()
 print(args)
@@ -105,6 +111,7 @@ wind_df = sim_utils.get_wind_xyt(
 	args.duration+1, 
 	dt=args.dt,
 	wind_magnitude=args.wind_magnitude,
+	seed=args.seed,
 	regime=args.dataset_name
 	)
 wind_df['tidx'] = np.arange(len(wind_df), dtype=int) 

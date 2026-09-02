@@ -48,6 +48,7 @@ def get_wind_vectors_flexible(T, wind_magnitude, local_state=None, regime=None):
     '''
     if local_state is None:
         local_state = np.random.RandomState(0)
+        print(f"[LOG] Using seed {0} for regime {regime} to generate wind data")
 
     # Setup baseline wind vectors: L --> R with 
     wind_degrees = np.zeros(len(T))
@@ -96,6 +97,71 @@ def get_wind_vectors_flexible(T, wind_magnitude, local_state=None, regime=None):
 
         wind_speeds = wind_speeds * mag_ratios
 
+    # Noisy jitter: larger direction changes (±60°) with max 20° change per jump
+    elif 'noisy_jitter_coverage' in regime:
+        # /src/tamagotchi_boilerplate/see_plume_data.ipynb
+        # Poisson events: average 1 jump every 3 seconds
+        dt = 1 / 100  # s
+
+        # ------------------------------------------------------------------
+        # Wind direction: Poisson resampling
+        # ------------------------------------------------------------------
+
+        # Average one new direction every 3 s
+        lambda_ = 1 / 3  # events / s
+        dir_sample_std = 25.0  # deg
+        dir_events = local_state.poisson(lambda_ * dt, len(T))
+        dir_switch_idxs = np.where(dir_events > 0)[0]
+
+        dir_base = 0.0
+        wind_degrees_base = np.zeros(len(T))
+
+        for i in range(len(T)):
+            if i in dir_switch_idxs:
+                # No clipping: each event independently samples a new direction
+                dir_base = local_state.normal(0.0, dir_sample_std)
+            wind_degrees_base[i] = dir_base
+
+        # ------------------------------------------------------------------
+        # Extra directional variability: mean-reverting random walk
+        # ------------------------------------------------------------------
+        
+        extra_std = 3.0   # deg
+        tau = 1.0         # s
+
+        # Exact discrete-time OU coefficient
+        alpha = np.exp(-dt / tau)
+        dir_extra = np.zeros(len(T))
+        for i in range(1, len(T)):
+            dir_extra[i] = (
+                alpha * dir_extra[i - 1]
+                + extra_std * np.sqrt(1 - alpha**2) * local_state.randn()
+            )
+        # Final wind direction
+        wind_degrees = wind_degrees_base + dir_extra
+
+        # ------------------------------------------------------------------
+        # Wind magnitude
+        # ------------------------------------------------------------------
+
+        # Uniform 0.45–0.55 m/s, resampled at independent Poisson events
+        mag_events = local_state.poisson(lambda_ * dt, len(T))
+        mag_switch_idxs = np.where(mag_events > 0)[0]
+
+        mag_x = 0.5
+
+        wind_speeds = np.full(len(T), wind_magnitude)
+        mag_ratios = np.ones(len(T))
+
+        for i in range(len(T)):
+            if i in mag_switch_idxs:
+                mag_x = local_state.uniform(0.45, 0.55)
+
+            mag_ratios[i] = mag_x / wind_magnitude
+
+        wind_speeds = wind_speeds * mag_ratios
+        
+        
     # Noisy jitter: larger direction changes (±60°) with max 20° change per jump
     elif 'noisy_jitter' in regime:
         # Poisson events: average 1 jump every 3 seconds
@@ -235,21 +301,24 @@ def get_wind_vectors_flexible(T, wind_magnitude, local_state=None, regime=None):
     return wind_x, wind_y
 
 
-def get_wind_xyt(duration, dt, wind_magnitude, verbose=True, regime='noisy3'):
+def get_wind_xyt(duration, dt, wind_magnitude, seed, verbose=True, regime='noisy3'):
+    '''
+    seed: required, no default. Seeds the RandomState used to generate the wind
+        direction/magnitude noise. Historically the seed was picked from the
+        regime name; those values are kept here for reference so old datasets
+        can be reproduced by passing them explicitly:
+            'eval' (without 'coverage') -> 6
+            'coverage'                  -> 337
+                see /src/tamagotchi_boilerplate/see_plume_data.ipynb
+            everything else             -> 0
+    '''
     T = np.arange(0, duration, dt).astype('float64')
     if verbose:
         print("Generate and save wind data ... ")
 
-    # if not flexible:
-    #     wind_x, wind_y = get_wind_vectors_original(T, 
-    #         wind_magnitude=wind_magnitude, 
-    #         noisy=wind_noisy, 
-    #         switch_direction=switch_direction)
 
-    if 'eval' in regime:
-        local_state = np.random.RandomState(6) # seed for eval_noisy with a good range of wind directions NOTE: 060826 - did not check for eval_noisy_jitter - more formal eval requires online simulation and purposeful coverage of wind dir...
-    else:
-        local_state = None # init in function 
+    local_state = np.random.RandomState(seed)
+    print(f"[LOG] Using seed {seed} for regime {regime} to generate wind data")
     wind_x, wind_y = get_wind_vectors_flexible(T, wind_magnitude, regime=regime, local_state=local_state)
 
     data_wind = pd.DataFrame({'wind_x': wind_x[0:len(T)],

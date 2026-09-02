@@ -5,7 +5,7 @@ converts it to the argparse.Namespace that main.main() expects, and runs it.
 
 Usage:
     python3 -m tamagotchi.main_hydra env_name=plume outsuffix=run01
-    python3 -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=air_vel_angvel,ground_vel_angvel
+    python3 -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=kinematics,force
     python3 -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=force OU_exploration=medium_anneal experiment_name=force_physics r_shaping='r_shaping=[OU_locked_to_schedule,missed_time_cost,rotate_by,birthx_cl_last,cosine]'
 """
 import argparse
@@ -30,7 +30,7 @@ from tamagotchi import main_wind_obsver_v1
 
 def _auto_outsuffix(cfg_dict: dict) -> str:
     """Build a unique per-job outsuffix: seed-{seed}-{hash}, hash over the full override string."""
-    override_dirname = HydraConfig.get().job.override_dirname  # e.g. "seed=1,action_physics=air_vel_angvel"
+    override_dirname = HydraConfig.get().job.override_dirname  # e.g. "seed=1,action_physics=kinematics"
     # take out seed if present
     if "seed" in override_dirname:
         override_dirname = ",".join([part for part in override_dirname.split(",") if not part.startswith("seed=")])
@@ -47,6 +47,9 @@ def run(cfg: DictConfig) -> None:
     # passes args.force_physics into PlumeEnvironment_v3, and it gets persisted in
     # _args.json for eval to reconstruct. There is no module-level default to fall back on:
     # PlumeEnvironment_v3 raises if action_physics='force' and no coefficients are supplied.
+    # This is set regardless of action_physics: under the original/kinematics action physics,
+    # PlumeEnvironment_v3 also reads move_capacity/turn_capacity overrides out of this same dict
+    # (fly.yaml's max_forward_airspeed/max_smooth_yaw_rate).
     if isinstance(cfg_dict.get("physics"), dict):
         cfg_dict["force_physics"] = cfg_dict.pop("physics")
 

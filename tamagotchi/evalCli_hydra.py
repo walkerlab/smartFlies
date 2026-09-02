@@ -39,7 +39,6 @@ def build_evalcli_defaults() -> dict:
     parser.add_argument('--env_version', type=str, default='v3')
     parser.add_argument('--obs_mask', type=int, nargs='*', default=[])
 
-
     # Hardcoded values that evalCli.__main__ sets after parse_args
     hardcoded = {
         'det': True,
@@ -196,6 +195,9 @@ def main():
     parser.add_argument('--device', default='cpu')
     # Eval experiments
     parser.add_argument('--flip_ventral_optic_flow', type=bool, default=False)
+    parser.add_argument('--eval_rotate_by', type=float, default=None,
+                        help='degrees; rotate plume/wind data by this fixed angle for the whole eval '
+                             '(start grid is built in the plume frame, then mapped into the rotated frame)')
     parser.add_argument('--perturb_RNN_by_ortho_set', type=str, default=False)
     parser.add_argument('--perturb_RNN_by', type=str, default=False)
     args = parser.parse_args()
@@ -228,7 +230,6 @@ def main():
     # WARNING: keys NOT listed here are not inherited from the training config - eval falls back to the
     # argparse defaults in build_evalcli_defaults(). Known gaps: action_latency, movex, turnx, walking.
     env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'env_version', 'odor_01', 'action_delay_const', 'env_dt', 'stray_max', 'obs_mask']
-    # env_setting = ['apparent_wind', 'action_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'rotate_by', 'visual_feedback'] # just keep rotate_by off for now
     #'ou_eval' set to true
     args = apply_configs(args, train_cfg, keys=agent_setting + env_setting)
     if train_cfg.get('action_physics') == 'force' and 'force_physics' not in train_cfg:
