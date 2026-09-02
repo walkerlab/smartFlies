@@ -29,8 +29,7 @@ a base config on disk.
 Generated families are *not* checked in - run this (or the notebook) wherever you
 submit from. Keep the prefixes disjoint so one ``--sweep_config`` never mixes two
 families: this script writes ``sweep_diff_base_*`` by default and the notebook writes
-``sweep_diff_const_*`` / ``sweep_diff_noisy_*``, while the shared ``sweep_diff`` root
-is there when you do want to sweep every diff family at once.
+its own per-dataset ``swp_diff_*`` families.
 
 Examples
 --------
@@ -137,14 +136,33 @@ def stage_layout(base_schedule, dataset, total_num_updates):
         return [(0, total_num_updates)]
 
     birthx_times = sorted(int(t) for t in base_schedule.get('birthx', {}))
+    # The birthx tail owns the run after the last rotate_by stage - every CL config in
+    # conf/curriculum follows that, and build_tc_schedule_dict's 'birthx_cl_last' puts
+    # the lessons there explicitly. A birthx lesson landing *between* the first and last
+    # stage means the tail is interleaved with the ladder, which is a skeleton mistake:
+    # catch it here rather than let it silently stretch the final stage. (A lesson at or
+    # before the first stage start is fine - that is the no-CL control's flat birthx.)
+    interior = [t for t in birthx_times if starts[0] < t <= starts[-1]]
+    if interior:
+        raise ValueError(
+            f'birthx lessons {interior} fall inside the rotate_by stages '
+            f'(stages start at {starts}), so the birthx tail is interleaved with the '
+            f'diff ladder. The tail must open after the last stage starts - move it to '
+            f'{starts[-1] + (starts[1] - starts[0] if len(starts) > 1 else 0)} or later.')
+
     tail_end = next((t for t in birthx_times if t > starts[-1]), total_num_updates)
 
     layout = []
     for i, start in enumerate(starts):
         end = starts[i + 1] if i + 1 < len(starts) else tail_end
         if end <= start:
-            raise ValueError(f'stage starting at {start} has non-positive duration '
-                             f'(next boundary {end}); check the base config.')
+            raise ValueError(
+                f'rotate_by stage starting at update {start} ends at {end}, so it has '
+                f'a duration of {end - start}. The boundary comes from '
+                + ('the first birthx lesson after that stage' if end in birthx_times
+                   else 'meta.total_num_updates')
+                + f' - the birthx tail must open *after* the last rotate_by stage '
+                  f'(stages start at {starts}, birthx lessons at {birthx_times}).')
         layout.append((start, end - start))
     return layout
 
