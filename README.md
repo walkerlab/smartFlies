@@ -21,6 +21,8 @@ tamagotchi/
   config.py        per-host data directory resolution
   a2c_ppo_acktr/   Policy/MLPBase model, PPO update, rollout storage
   conf/            Hydra configs: OU_exploration/, path/, physics/, curriculum/
+scripts/
+  gen_cl_sweep_diff.py  generates curriculum-config families sweeping the diff_min/diff_max ladder
 ```
 
 ## Training
@@ -43,8 +45,10 @@ Key config groups (see `conf/config.yaml` for the full surface):
   actor-critic; `default`, `separate_wind_head`, `wind_cond_policy`, and
   `wind_cond_policy_detached` add wind-prediction heads trained with an NLL
   auxiliary loss weighted by `wind_loss_coef`.
-- `action_physics` — `air_vel_angvel`, `ground_vel_angvel`, or `force`
-  (`force` requires a `physics=` group from `conf/physics/`).
+- `action_physics` — `kinematics` (forward air speed + angular velocity, wind
+  drifts the agent) or `force` (body-frame thrust + yaw torque). Both read the
+  `physics=` group from `conf/physics/`: `force` requires its coefficients, and
+  `kinematics` uses its speed/yaw-rate limits and optional acceleration caps.
 - `OU_exploration` — Ornstein-Uhlenbeck action-noise presets.
 - `path` — per-cluster data/save directories; `path.curriculum_name` selects a
   JSON curriculum schedule from `conf/curriculum/`.
