@@ -1,0 +1,91 @@
+{
+  "birthx": {
+    "400": 0.7,
+    "425": 0.365931,
+    "450": 0.191293,
+    "475": 0.1
+  },
+  "wind_cond": {
+    "0": 1
+  },
+  "constant_jitterx5b5_rotate_by": {
+    "0": [
+      0,
+      180
+    ],
+    "100": [
+      90,
+      -90
+    ],
+    "200": [
+      0,
+      90,
+      180,
+      -90
+    ],
+    "300": [
+      0,
+      180,
+      90,
+      -90,
+      45,
+      -45,
+      135,
+      -135
+    ]
+  },
+  "meta": {
+    "restart_period": 101,
+    "total_num_updates": 500,
+    "note": "diff-ladder sweep off 081626_const_jitter: 4 lesson(s) per rotate_by stage, diff_min 0.1->0.5, diff_max 0.2->0.6 (endpoint-inclusive, evenly spaced, restarted each stage). Everything else is copied from the base. Use with loc_algo=linear.",
+    "sweep": {
+      "base": "081626_const_jitter",
+      "variable": "diff_ladder_num_lessons",
+      "num_lessons": 4,
+      "diff_min_range": [
+        0.1,
+        0.5
+      ],
+      "diff_max_range": [
+        0.2,
+        0.6
+      ]
+    }
+  },
+  "constant_jitterx5b5_diff_min": {
+    "0": 0.1,
+    "25": 0.233333,
+    "50": 0.366667,
+    "75": 0.5,
+    "100": 0.1,
+    "125": 0.233333,
+    "150": 0.366667,
+    "175": 0.5,
+    "200": 0.1,
+    "225": 0.233333,
+    "250": 0.366667,
+    "275": 0.5,
+    "300": 0.1,
+    "325": 0.233333,
+    "350": 0.366667,
+    "375": 0.5
+  },
+  "constant_jitterx5b5_diff_max": {
+    "0": 0.2,
+    "25": 0.333333,
+    "50": 0.466667,
+    "75": 0.6,
+    "100": 0.2,
+    "125": 0.333333,
+    "150": 0.466667,
+    "175": 0.6,
+    "200": 0.2,
+    "225": 0.333333,
+    "250": 0.466667,
+    "275": 0.6,
+    "300": 0.2,
+    "325": 0.333333,
+    "350": 0.466667,
+    "375": 0.6
+  }
+}

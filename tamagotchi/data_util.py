@@ -1026,12 +1026,14 @@ def realign_schedule(schedule, num_updates, orig_num_updates):
         round_up: ceil when True (default), otherwise round to nearest.
 
     Returns:
-        A new dict[str, dict[int, value]] with realigned integer update keys.
+        (schedule, realign_ratio): a new dict[str, dict[int, value]] with realigned
+        integer update keys, and the ratio the times were scaled by (1.0 when the
+        horizons already match).
     """
     if orig_num_updates == num_updates:
         # nothing to do (same horizon, or no reference to scale against)
-        return {var: (dict(v) if isinstance(v, dict) else v)
-                for var, v in schedule.items()}
+        return ({var: (dict(v) if isinstance(v, dict) else v)
+                 for var, v in schedule.items()}, 1.0)
 
     realign_ratio = num_updates / orig_num_updates
     _round = (lambda x: int(math.ceil(x)))
@@ -1123,8 +1125,11 @@ def load_tc_schedule(path, num_updates):
                 for var, lessons in raw.items()}
 
     orig_num_updates = meta.get('total_num_updates', None) if meta else None
+    realign_ratio = 1.0  # no meta.total_num_updates to scale against -> times as saved
     if orig_num_updates is not None:
         schedule, realign_ratio = realign_schedule(schedule, num_updates, orig_num_updates)
-    restart_period = math.ceil(meta.get('restart_period', None) * realign_ratio) if meta else None
+    raw_restart_period = meta.get('restart_period', None) if meta else None
+    restart_period = (math.ceil(raw_restart_period * realign_ratio)
+                      if raw_restart_period else None)
 
     return schedule, restart_period
