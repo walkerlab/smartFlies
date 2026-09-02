@@ -1,7 +1,7 @@
 # Hydra config for dronmagotchi. Override from CLI, e.g.:
-#   python -m tamagotchi.main_hydra outsuffix=run01 action_physics=ground_vel_angvel
+#   python -m tamagotchi.main_hydra outsuffix=run01 action_physics=force
 # Multirun sweep:
-#   python3 -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=air_vel_angvel,ground_vel_angvel
+#   python3 -m tamagotchi.main_hydra -m seed=1,2,3 action_physics=kinematics,force
 #   python3 -m tamagotchi.main_hydra -m seed=1,2,3
 
 # CL case: CL with wind change etc training 
@@ -107,7 +107,7 @@ if_train_actor_std: false
 # Logging (wandb via tamagotchi.wb)
 wandb: 1
 
-# New: action physics. 'air_vel_angvel' (legacy) or 'ground_vel_angvel', or 'force'.
+# New: action physics. 'kinematics' (legacy) or 'force'.
 action_physics: force
 
 stage_name: ""      # non-empty triggers staged-training mode; short label for this stage

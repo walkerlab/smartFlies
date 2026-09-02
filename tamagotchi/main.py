@@ -113,8 +113,7 @@ def get_args():
     parser.add_argument('--flip_ventral_optic_flow', type=bool, default=False) # PEv3: for eval to see the behavioral impact of flipping course direction perception.
     parser.add_argument('--rotate_by', type=int, default=0) # PEv3: for rotate the env by a given angle in degrees. Only None means no rotation - 0 will be transformed to None.
     parser.add_argument('--birthx_max',  type=float, default=1.0) # Only used for sparsity
-    parser.add_argument('--dryrun',  type=bool, default=False) 
-    parser.add_argument('--curriculum', type=bool, default=False) # not used 
+    parser.add_argument('--dryrun',  type=bool, default=False)
     parser.add_argument('--turnx',  type=float, default=1.0)
     parser.add_argument('--movex',  type=float, default=1.0)
     parser.add_argument('--auto_movex',  type=bool, default=False)
@@ -154,10 +153,9 @@ def get_args():
     parser.add_argument('--ou_eval', type=bool, default=False,
         help='enable OU noise during evaluation ablations; off by default')
     parser.add_argument('--wandb', type=int, default=1) # whether to log this run to wandb
-    parser.add_argument('--action_physics', type=str, default='air_vel_angvel',
-        choices=['air_vel_angvel', 'ground_vel_angvel', 'force'],
-        help="Action space: 'air_vel_angvel' (forward air speed + angular velocity, wind drifts the agent), "
-             "'ground_vel_angvel' (forward ground speed + angular velocity, no wind drift), "
+    parser.add_argument('--action_physics', type=str, default='kinematics',
+        choices=['kinematics', 'force'],
+        help="Action space: 'kinematics' (forward air speed + angular velocity, wind drifts the agent), "
              "or 'force' (body-frame thrust + yaw torque; requires explicit force_physics coefficients)")
     parser.add_argument('--stage_name', type=str, default='',
         help='name identifying this training stage; triggers staged training when non-empty')
