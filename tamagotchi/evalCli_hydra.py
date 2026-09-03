@@ -19,7 +19,7 @@ warnings.simplefilter(action='ignore', category=FutureWarning)
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-from evalCli import eval_loop
+from tamagotchi.evalCli import eval_loop
 import torch
 import json
 import argparse
@@ -189,7 +189,7 @@ def main():
     parser.add_argument('--only_test_sparsity', action='store_true', default=False)
     parser.add_argument('--no_vec_norm_stats', action='store_true', default=False)
     parser.add_argument('--dry_run', action='store_true', default=False)
-    parser.add_argument('--mlflow', type=bool, default=False)
+    parser.add_argument('--wandb', type=bool, default=False)
     parser.add_argument('--ou_eval', type=bool, default=True)
     parser.add_argument('--time_offsets', type=float, nargs='+', default=[0.0, 1.0])
     parser.add_argument('--device', default='cpu')
@@ -226,10 +226,10 @@ def main():
     compare_configs(train_cfg, eval_defaults)
 
     # Step. 4: inherit subset of args when relevant
-    agent_setting = ['if_vec_norm', 'if_train_actor_std', 'rnn_type', 'variant']
+    agent_setting = ['if_vec_norm', 'if_train_actor_std', 'rnn_type']
     # WARNING: keys NOT listed here are not inherited from the training config - eval falls back to the
     # argparse defaults in build_evalcli_defaults(). Known gaps: action_latency, movex, turnx, walking.
-    env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'env_version', 'odor_01', 'action_delay_const', 'env_dt', 'stray_max', 'obs_mask']
+    env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'wind_rel', 'squash_action', 'r_shaping', 'env_version', 'odor_01', 'env_dt', 'stray_max', 'obs_mask']
     #'ou_eval' set to true
     args = apply_configs(args, train_cfg, keys=agent_setting + env_setting)
     if train_cfg.get('action_physics') == 'force' and 'force_physics' not in train_cfg:

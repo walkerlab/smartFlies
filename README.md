@@ -21,8 +21,13 @@ tamagotchi/
   config.py        per-host data directory resolution
   a2c_ppo_acktr/   Policy/MLPBase model, PPO update, rollout storage
   conf/            Hydra configs: OU_exploration/, path/, physics/, curriculum/
+  evalCli.py       evaluation engine: assay rollouts -> eps logs (.pkl) + summary (.csv)
+  evalCli_hydra.py eval entry point: inherits the training run's _args.json, calls eval_loop
+  eval/            post-hoc analysis: traj/activity DataFrames, plots, videos, eigen analysis
 scripts/
   gen_cl_sweep_diff.py  generates curriculum-config families sweeping the diff_min/diff_max ladder
+  slurm-run_ckpt.py     submits training jobs (auto-requeue checkpointing, seed sweeps)
+  slurm-eval_ckpt.py    submits one eval job per checkpoint in an experiment folder
 ```
 
 ## Training
@@ -59,6 +64,22 @@ Runs write checkpoints (`weights/*.chkpt.pt`, rolling), training CSVs
 `path.save_dir`. Re-running the same command resumes from the rolling
 checkpoint. Staged training continues from a parent run via
 `stage_name=... resume_from=... outsuffix=...`.
+
+## Evaluation
+
+```bash
+# evaluate one checkpoint; config is inherited from the _args.json saved next to the weights
+python3 -m tamagotchi.evalCli_hydra --model_fname <save_dir>/weights/<ckpt>.pt --dataset constantx5b5
+
+# fan out over every checkpoint in an experiment folder on SLURM
+python3 scripts/slurm-eval_ckpt.py --from_folder <save_dir> --dataset constantx5b5
+```
+
+`evalCli_hydra` diffs the training config against the eval defaults and refuses to
+run without `--proceed` when they disagree. Results land in `<out_dir>/` as
+per-episode logs (`{dataset}.pkl`) and `{dataset}_summary.csv`; post-hoc tools in
+`tamagotchi/eval/` (trajectory videos via `postEvalCli.py`, success-rate tables via
+`tabulate_from_summary.py`, mp4 stitching via `vid_stitch_cli.py`) consume those.
 
 ## Data
 

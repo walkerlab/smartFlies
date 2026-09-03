@@ -21,10 +21,9 @@ import pandas as pd
 import numpy as np
 # import glob
 import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
-import agent_analysis
-import log_analysis
-import arch_utils as archu
+from tamagotchi.eval import agent_analysis
+from tamagotchi.eval import log_analysis
+from tamagotchi.eval import arch_utils as archu
 import sklearn.decomposition as skld
 
 

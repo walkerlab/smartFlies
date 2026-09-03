@@ -82,29 +82,3 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     main(args)
-    # mlflow.set_tracking_uri(uri="http://dev0.uwcnc.net:5000/")
-    # mlflow.set_system_metrics_sampling_interval(60)
-    # # Create a new MLflow Experiment
-    # experiment_name = os.path.basename(args.base_dir) 
-    # experiment = mlflow.get_experiment_by_name(experiment_name)
-    # experiment_id = experiment.experiment_id
-    # # Create an MLflow client
-    # client = mlflow.tracking.MlflowClient()
-    # # Get the list of runs for the experiment, sorted by start time
-    # runs = client.search_runs(experiment_ids=[experiment_id], order_by=["start_time DESC"])
-
-    # run_name = 'eval'
-    # mlflow.set_experiment(experiment_name)
-    # # Start an MLflow run
-    # with mlflow.start_run(run_name=run_name):
-    #     summary_dfs = main(args)
-    #     summary_dfs['condition'] = df['condition'].astype('category')
-    #     summary_dfs['seed'] = df['seed'].astype('category')
-
-    #     summary_dfs['experiment'] = [ps.split('/')[1] for ps in summary_dfs['model_dir']]
-
-    # print(set(df.experiment))
-    # print(len(set(df.seed)))
-    # # log summary df as a table artifact in mlflow
-    # mlflow.log_artifact(summary_dfs, artifact_path='summary_table')
-    

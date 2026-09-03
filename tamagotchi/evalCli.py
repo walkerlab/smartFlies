@@ -18,8 +18,9 @@ import matplotlib
 matplotlib.use("Agg")
 
 import numpy as np
-from env import make_vec_envs, PlumeEnvironment_v2, PlumeEnvironment_v3
-import eval.agent_analysis as agent_analysis
+from tamagotchi.env import make_vec_envs, PlumeEnvironment_v3
+import tamagotchi.eval.agent_analysis as agent_analysis
+from tamagotchi import wb
 import os
 # import log_analysis # for viz hidden trajectories
 
@@ -225,11 +226,10 @@ def evaluate_agent(actor_critic, env, args):
 
 ### BACK TO MAIN ###
 def eval_loop(args, actor_critic, test_sparsity=True):
-    # Extract default values from __init__ method
-    init_signature_vis_fb_params = inspect.signature(PlumeEnvironment_v3.__init__)
-    init_signature = inspect.signature(PlumeEnvironment_v2.__init__)
+    # Fill args with the env's constructor defaults for any key the training
+    # config did not carry - make_env reads these as plain attributes.
+    init_signature = inspect.signature(PlumeEnvironment_v3.__init__)
     defaults = {param.name: param.default for param in init_signature.parameters.values() if param.default != inspect.Parameter.empty}
-    defaults.update({param.name: param.default for param in init_signature_vis_fb_params.parameters.values() if param.default != inspect.Parameter.empty})
     # Write into args if not already present
     for key, value in defaults.items():
         if not hasattr(args, key):
@@ -271,14 +271,14 @@ def eval_loop(args, actor_critic, test_sparsity=True):
             with open(fname3, 'wb') as f_handle:
                 pickle.dump(episode_logs, f_handle)
                 print("Saving", fname3)
-            if args.mlflow:
-                mlflow.log_artifact(fname3)
+            if getattr(args, 'wandb', False):
+                wb.log_artifact(fname3)
 
             fname3 = f"{args.abs_out_dir}/{args.dataset}_summary.csv"
             pd.DataFrame(episode_summaries).to_csv(fname3)
             print("Saving", fname3)
-            if args.mlflow:
-                mlflow.log_artifact(fname3)
+            if getattr(args, 'wandb', False):
+                wb.log_artifact(fname3)
             # graph_abs_out_dir = f"{args.abs_out_dir}/eg_trajectory/"
             if not args.no_viz:
                 zoom = 1 if 'constant' in args.dataset else 2    
@@ -289,7 +289,7 @@ def eval_loop(args, actor_critic, test_sparsity=True):
                                                 animate=True, # Quick plot
                                                 fprefix=args.dataset,
                                                 diffusionx=args.diffusionx,
-                                                abs_out_dir=args.abs_out_dir
+                                                outprefix=args.abs_out_dir
                                                 )
 
             # for episode_idx in range(len(episode_logs[:args.viz_episodes])):
@@ -348,13 +348,13 @@ def eval_loop(args, actor_critic, test_sparsity=True):
                 with open(fname3, 'wb') as f_handle:
                     pickle.dump(episode_logs, f_handle)
                     print("Saving", fname3)
-                if args.mlflow:
-                    mlflow.log_artifact(fname3)
+                if getattr(args, 'wandb', False):
+                    wb.log_artifact(fname3)
                 fname3 = f"{args.abs_out_dir}/{args.dataset}_{birthx}_summary.csv"
                 pd.DataFrame(episode_summaries).to_csv(fname3)
                 print("Saving", fname3)
-                if args.mlflow:
-                    mlflow.log_artifact(fname3)
+                if getattr(args, 'wandb', False):
+                    wb.log_artifact(fname3)
 
                 # if not args.no_viz:
                 #     zoom = 1 if 'constant' in args.dataset else 2    
@@ -433,7 +433,7 @@ if __name__ == "__main__":
     parser.add_argument('--ou_eval', type=bool, default=False,
         help='enable OU noise during evaluation ablations; off by default')
     
-    parser.add_argument('--mlflow', type=bool, default=False)
+    parser.add_argument('--wandb', type=bool, default=False)
     parser.add_argument('--time_offsets', type=float, nargs='+', default=[0.0, 1.0])
     
     args = parser.parse_args()
@@ -509,18 +509,12 @@ if __name__ == "__main__":
         actor_critic, obs_rms = torch.load(args.model_fname, map_location=torch.device(args.device), weights_only=False)
     actor_critic.configure_ou(args)
     
-    if args.mlflow:
-        import mlflow
-        mlflow.set_tracking_uri(uri="https://dev0.uwcnc.net/mlflow/")
-        mlflow.set_system_metrics_sampling_interval(3600)
-        # Create a new MLflow Experiment
+    if args.wandb:
         experiment_name = os.path.basename(exp_dir) + "_eval"
         run_name = "_".join([args.f_prefix, args.dataset])
-        mlflow.set_experiment(experiment_name)
-        # Start an MLflow run
-        with mlflow.start_run(run_name=run_name, log_system_metrics=True):
-            # Log the hyperparameters dict to mlflow
-            mlflow.log_params(vars(args))
+        wb.set_experiment(experiment_name)
+        with wb.start_run(run_name=run_name):
+            wb.log_params(vars(args))
             eval_loop(args, actor_critic, test_sparsity=args.test_sparsity)
     else:
         eval_loop(args, actor_critic, test_sparsity=args.test_sparsity)

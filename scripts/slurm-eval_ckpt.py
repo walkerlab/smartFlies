@@ -22,7 +22,8 @@ import re
 import subprocess
 import sys
 
-PROJECT_DIR = '/gscratch/portia/jqhu/work/active_sensing/smartFlies/'
+# Repo root, derived from this file's location (scripts/ lives at the repo root).
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUTFILES_DIR = os.path.join(PROJECT_DIR, 'scripts/slurm_outfiles')
 DEFAULT_MAIL_USER = 'jqhu@uw.edu'
 MAIL_DIRECTIVES = """#SBATCH --mail-type=FAIL
@@ -115,7 +116,7 @@ export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 echo "Log directory = {logdir}"
 mkdir -p {logdir}
 echo "Saving eval logs in {logbase}"
-python3 -u tamagotchi/evalCli_hydra.py \\
+python3 -u -m tamagotchi.evalCli_hydra \\
     --dataset {dataset} \\
     --fixed_eval {modifier} \\
     --viz_episodes {viz_episodes} \\
@@ -140,7 +141,7 @@ exit $status
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Submit smartFlies eval jobs to SLURM — one job per checkpoint.')
+        description='Submit tamagotchi eval jobs to SLURM — one job per checkpoint.')
     parser.add_argument('--from_folder', type=str, required=True,
                         help='Path to experiment folder containing weights/ subdirectory')
     parser.add_argument('--dataset', type=str, required=True,

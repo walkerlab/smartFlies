@@ -329,11 +329,6 @@ def get_traj_and_activity_and_stack_them(eval_log_pkl_df: pd.DataFrame,
                     traj_df['wind_mu_y'] = wind_obsver_df['wind_mu_y']
                     traj_df['wind_logvar_x'] = wind_obsver_df['wind_logvar_x']
                     traj_df['wind_logvar_y'] = wind_obsver_df['wind_logvar_y']
-                    if 'vr_wind_mu_x' in wind_obsver_df.columns:
-                        traj_df['vr_wind_mu_x'] = wind_obsver_df['vr_wind_mu_x']
-                        traj_df['vr_wind_mu_y'] = wind_obsver_df['vr_wind_mu_y']
-                        traj_df['vr_wind_logvar_x'] = wind_obsver_df['vr_wind_logvar_x']
-                        traj_df['vr_wind_logvar_y'] = wind_obsver_df['vr_wind_logvar_y']
                 traj_dfs.append(traj_df)
     
         stacked_neural_activity = stacked_traj_df = 'DUMMY'
@@ -628,13 +623,8 @@ def get_traj_df_tmp(episode_log,
     elif obs.shape[1] == 7:
         obs =  obs.iloc[:, -7:] # obs in PEv3 has 7 columns - works as expected # this are normalized observations
         obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y']
-    elif obs.shape[1] == 9:
-        obs = obs.iloc[:, -9:] # haltere 
-        obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y', 'haltere_air_acc', 'haltere_ang_acc']
-    elif obs.shape[1] == 11: # VRVR experiment with modular wind observer 
-        obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y', 'vr_wind_mu_x', 'vr_wind_mu_y', 'vr_wind_logvar_x', 'vr_wind_logvar_y']
     else:
-        raise ValueError(f"Unexpected obs shape: {obs.shape}; [T, num_obs_vars]")  
+        raise ValueError(f"Unexpected obs shape: {obs.shape}; [T, num_obs_vars]")
     
     # write wind observation into df
     traj_df['wind_theta_obs'] = obs.apply(lambda row: vec2rad_norm_by_pi(row['wind_x'], row['wind_y']), axis=1)
@@ -672,13 +662,8 @@ def get_traj_df_tmp(episode_log,
         traj_df['ego_course_direction_y_obs'] = obs['ego_course_direction_y']
     
     # get true wind direction from info
-    if obs.shape[1] == 7 or obs.shape[1] == 9 or obs.shape[1] == 11: # 7 obs with visual cues; 9 obs with haltere; 11 obs with VR wind observer
-        true_wind_direction_key = 'ambient_wind'
-    else: # for relative wind agents - still consider true wind direction 
-        # get true wind info for action dist. around wind changes 
-        true_wind_direction_key = 'wind_ground' # 121625 - this is no longer the key in rel agent when running for Toha... 
-        true_wind_direction_key = 'ambient_wind' # TODO: clean up when git
-    traj_df['wind_angle_ground_theta'] = [ rad_over_pi_shift2_01( 
+    true_wind_direction_key = 'ambient_wind'
+    traj_df['wind_angle_ground_theta'] = [ rad_over_pi_shift2_01(
         vec2rad_norm_by_pi(record[0][true_wind_direction_key][0], record[0][true_wind_direction_key][1]) ) for record in episode_log['infos']]
     traj_df['wind_angle_ground_x'] = [ record[0][true_wind_direction_key][0] for record in episode_log['infos']]
     traj_df['wind_angle_ground_y'] = [ record[0][true_wind_direction_key][1] for record in episode_log['infos']]
@@ -878,6 +863,13 @@ def get_episode_metadata(log, odor_threshold=ODOR_THRESHOLD, squash_action=False
 def get_wind_module_outputs(log):
     df_act = pd.DataFrame(log['activity'])
 
+    # Agents trained with auxiliary_arch='none' have no wind heads; evalCli records
+    # wind_mu/wind_logvar as None for them, which np.stack would silently turn into
+    # an object array. Fail with a clear message instead.
+    if 'wind_mu' not in df_act.columns or df_act['wind_mu'].iloc[0] is None:
+        raise ValueError("this eval log has no wind-observer outputs (agent trained with "
+                         "auxiliary_arch='none') - run without obtain_wind_module_outputs")
+
     def stack_2d(key):
         arr = np.stack(df_act[key].to_list())  # (T, B, 2)
         return arr[:, 0, :] if arr.shape[1] == 1 else arr  # (T, 2)
@@ -891,17 +883,6 @@ def get_wind_module_outputs(log):
         'wind_logvar_x': wind_logvar[:, 0],
         'wind_logvar_y': wind_logvar[:, 1],
     })
-
-    if 'vr_wind_mu' in df_act.columns:
-        vr_wind_mu = stack_2d('vr_wind_mu')
-        vr_wind_logvar = stack_2d('vr_wind_logvar')
-
-        df = df.assign(
-            vr_wind_mu_x=vr_wind_mu[:, 0],
-            vr_wind_mu_y=vr_wind_mu[:, 1],
-            vr_wind_logvar_x=vr_wind_logvar[:, 0],
-            vr_wind_logvar_y=vr_wind_logvar[:, 1],
-        )
     return df
 
 
