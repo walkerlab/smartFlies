@@ -27,7 +27,13 @@ from tamagotchi import main as base_main
 from tamagotchi import main_wind_obsver_v1
 # main_wind_obsver_v2 is deprecated and raises on import; imported lazily in run() so
 # that selecting it still errors, but the other variants stay runnable.
-
+# ---- pipeline provenance check ----
+def _provenance():
+    import tamagotchi.env as _env
+    print('PEv3 class   :', _env.PlumeEnvironment_v3.__module__, '| mro:', [c.__name__ for c in _env.PlumeEnvironment_v3.__mro__])
+    print('=' * 79, flush=True)
+_provenance()
+# ---- end provenance check ----
 def _auto_outsuffix(cfg_dict: dict) -> str:
     """Build a unique per-job outsuffix: seed-{seed}-{hash}, hash over the full override string."""
     override_dirname = HydraConfig.get().job.override_dirname  # e.g. "seed=1,action_physics=kinematics"
@@ -37,7 +43,6 @@ def _auto_outsuffix(cfg_dict: dict) -> str:
     seed = cfg_dict.get("seed", "")
     h = hashlib.sha1(override_dirname.encode("utf-8")).hexdigest()[:8]
     return f"seed-{seed}-{h}"
-
 
 @hydra.main(version_base=None, config_path="conf", config_name="config")
 def run(cfg: DictConfig) -> None:
