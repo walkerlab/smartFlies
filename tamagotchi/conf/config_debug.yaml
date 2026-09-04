@@ -2,42 +2,32 @@ defaults:
   - config        # inherits base config
   - _self_
 
-dataset: [constantx5b5]
-# dataset: [constant_mag_narrowx5b5]
-# dataset: [poisson_noisy3x5b5]
-# dataset: [noisy3x5b5]
+dataset: [constant_jitterx5b5]
 action_latency: null
-qvar: [0.5]
-# qvar: [1.5]
-# qvar: [2.0]
-
-# diff_max: [0.4]
+qvar: [1.5]
+loc_algo: slice_linear
 diff_max: [0.8]
-
 diff_min: [0.2]
-# diff_min: [0.7]
-
+odor_scaling: false
 # 100 updates total: num_updates = num_env_steps // num_steps // num_processes
-num_env_steps: 50000
+num_env_steps: 100000
 # num_env_steps: 10000000
 
-birthx: 0.01
-flipping: false
+birthx: 0.1
 rotate_by: 1
 
 experiment_name: PE_test
 path:
-  curriculum_name: 060226_const_jitter
+  curriculum_name: 081626_const_jitter
 
 log_interval: 1
 
-r_shaping: [step, oob, rotate_by]
-# r_shaping: [step, oob]
+r_shaping: [step,missed_time_cost,rotate_by,birthx_cl_last,cosine]
 
 seed: 12685
 num_processes: 2
-# 500 env steps of data per update (num_steps * num_processes)
-num_steps: 250
+# 1000 env steps of data per update (num_steps * num_processes)
+num_steps: 500
 num_mini_batch: 2
 ppo_epoch: 5
 lr: 3e-4
@@ -46,17 +36,10 @@ outsuffix: debugger_test_hydra
 birthx_linear_tc_steps: 7
 dryrun: false
 
-apparent_wind: true
 env_version: v3
 # Observation channels: 0 wind_x, 1 wind_y, 2 odor, 3 head_x, 4 head_y, 5 course_x, 6 course_y
 # obs_mask lists indices to zero out; obs shape is unchanged.
 obs_mask: []
-if_train_actor_std: true
-stray_max: 2.0
+if_train_actor_std: false
 if_vec_norm: 1
-obs_noise: 0.0
-mlflow: 0
-
-# loc_algo: on_plume_linear
-loc_algo: slice_linear
-# loc_algo: slice
+wandb: 0
