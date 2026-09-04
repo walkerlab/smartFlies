@@ -826,7 +826,7 @@ class PlumeEnvironment_v2(gym.Env):
     self.agent_location = None
     self.agent_location_last = self.agent_location
     self.agent_location_init = self.agent_location
-    random_angle = np.pi * np.random.uniform(0, 2)
+    # random_angle = np.pi * np.random.uniform(0, 2)
     # self.agent_angle_radians = [np.cos(random_angle), np.sin(random_angle)] # Sin and Cos of angle of orientation
     self.step_offset = 0 # random offset per trial in reset()
     self.t_val = self.t_vals[self.episode_step + self.step_offset] 
