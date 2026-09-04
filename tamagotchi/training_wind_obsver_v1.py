@@ -787,7 +787,6 @@ def training_loop(agent, envs, args, device, actor_critic,
         for _ in range(warmup_steps):
             obs, reward, done, info = envs.step(actions[_])
         del actions
-    np.random.seed(42)
     obs = envs.reset()
     rollouts.obs[0].copy_(obs) # https://discuss.pytorch.org/t/which-copy-is-better/56393
     rollouts.to(device)
