@@ -44,6 +44,29 @@ for YVARX in 1 4 9 16 64; do
 done
 
 
+# Grid jitter: arena cut into cells, each with its own divergence-free jitter.
+# Puffs sharing a cell get translocated together -> coherent filaments/voids.
+# The wind field is saved next to the puffs so the agent senses the same
+# space-varying wind (windfield_data_*.npy/.json).
+python -u sim_cli.py --duration 120 --dataset_name constant \
+    --wind_magnitude 0.5 --birth_rate 1.0 \
+    --jitter_sigma 0.06 --jitter_cell 0.5 --jitter_tau 0.5 \
+    --fname_suffix x5b5j06
+
+# Same, but all of the lateral spread comes from the grid (no per-puff noise)
+python -u sim_cli.py --duration 120 --dataset_name constant \
+    --wind_magnitude 0.5 --birth_rate 1.0 --subgrid_y_var 0 \
+    --jitter_sigma 0.06 --fname_suffix x5b5jonly
+
+# Sweep eddy size/lifetime at matched diffusivity (sigma^2 * tau_eff const)
+for CELL in 0.25 0.5 1.0; do
+  python -u sim_cli.py --duration 120 --dataset_name constant \
+    --wind_magnitude 0.5 --birth_rate 1.0 \
+    --jitter_sigma 0.06 --jitter_cell ${CELL} --jitter_stride 4 \
+    --fname_suffix x5b5j06c${CELL} > constant_j06c${CELL}.log 2>&1 &
+done
+
+
 ## test new euler-step simulator ##
 python -u sim_cli.py --duration 120 --dataset_name constant --fname_suffix x5b5new --wind_magnitude 0.5 --birth_rate 1.0
 
@@ -93,6 +116,26 @@ parser.add_argument('--wind_y_varx',  type=float, default=1.0)
 parser.add_argument('--birth_rate',  type=float, 
 	help='poisson birth_rate parameter', default=0.2)
 parser.add_argument('--outdir',  type=str, default=config.datadir)
+# Per-puff iid lateral noise. Defaults to the historical
+# wind_magnitude/sqrt(wind_y_varx); set 0 for a purely grid-driven plume.
+parser.add_argument('--subgrid_y_var',  type=float, default=None,
+	help='per-puff iid lateral noise, m/s (default: wind_magnitude/sqrt(wind_y_varx))')
+# Grid jitter: cut the arena into cells that each carry their own jitter
+parser.add_argument('--jitter_sigma',  type=float, default=0.0,
+	help='grid jitter velocity std, m/s. 0 (default) = off, i.e. baseline plume')
+parser.add_argument('--jitter_cell',  type=float, default=0.5,
+	help='grid cell size, meters')
+parser.add_argument('--jitter_tau',  type=float, default=0.5,
+	help='eddy lifetime, seconds')
+parser.add_argument('--jitter_smooth',  type=int, default=0,
+	help='streamfunction smoothing passes; 0 = independent per-cell jitter')
+parser.add_argument('--jitter_bounds',  type=float, nargs=4, 
+	default=[-2.0, 10.0, -10.0, 10.0], 
+	metavar=('X_MIN', 'X_MAX', 'Y_MIN', 'Y_MAX'),
+	help='lattice extent; default covers the puff trim box in manual_integrator')
+parser.add_argument('--jitter_stride',  type=int, default=1,
+	help='save the wind field every Nth sim step (1=100Hz, 4=env_dt of 0.04)')
+parser.add_argument('--jitter_seed',  type=int, default=config.seed_global)
 
 args = parser.parse_args()
 print(args)
@@ -118,7 +161,30 @@ print("Saved", fname)
 
 # Using faster vectorized version
 wind_y_var = args.wind_magnitude/np.sqrt(args.wind_y_varx)
-puff_df = sim_utils.get_puffs_df_vector(wind_df, wind_y_var, args.birth_rate, verbose=True)
+if args.subgrid_y_var is not None:
+	wind_y_var = args.subgrid_y_var
+
+# Optional grid jitter: each cell of the arena carries its own divergence-free
+# jitter, so puffs sharing a cell are translocated together (see jitter_grid.py)
+jgrid = None
+if args.jitter_sigma > 0:
+	import jitter_grid
+	lattice = jitter_grid.Lattice(*args.jitter_bounds, cell=args.jitter_cell)
+	jgrid = jitter_grid.JitterGrid(
+		sigma=args.jitter_sigma,
+		tau=args.jitter_tau,
+		lattice=lattice,
+		smooth=args.jitter_smooth,
+		seed=args.jitter_seed,
+		record_stride=args.jitter_stride,
+		)
+	print(f"[sim_cli] jitter grid: {lattice.nx}x{lattice.ny} cells of "
+		f"{lattice.cell}m over x=[{lattice.x_min},{lattice.x_max}] "
+		f"y=[{lattice.y_min},{lattice.y_max}], sigma={args.jitter_sigma} m/s, "
+		f"tau={args.jitter_tau}s, subgrid_y_var={wind_y_var:.4f} m/s")
+
+puff_df = sim_utils.get_puffs_df_vector(wind_df, wind_y_var, args.birth_rate, 
+	verbose=True, jitter_grid=jgrid)
 
 fname = f'{args.outdir}/puff_data_{args.dataset_name}{args.fname_suffix}.pickle'
 puff_df.to_pickle(fname)
@@ -127,12 +193,19 @@ print(puff_df.tail())
 print(puff_df.head())
 print("Saved", fname)
 
+# Save the wind field itself, so the agent can sense the same space-varying
+# wind that moved the puffs (loaded by plume_env via sim_analysis.load_wind_field)
+if jgrid is not None:
+	fname = f'{args.outdir}/windfield_data_{args.dataset_name}{args.fname_suffix}'
+	jgrid.save(fname)
+	print("Saved", fname + '.npy/.json')
+
 
 ## -- Extra Viz -- ##
 # Plot puffs - also serves a good test
 # Need to add concentration & radius data before plotting
 import sim_analysis # load config later, eek!
-data_puffs, data_wind = sim_analysis.load_plume(f'{args.dataset_name}{args.fname_suffix}')
+data_puffs, data_wind = sim_analysis.load_plume(f'{args.dataset_name}{args.fname_suffix}', data_dir=args.outdir)
 t_val = data_puffs['time'].iloc[-1]
 fig, ax = sim_analysis.plot_puffs_and_wind_vectors(
 	data_puffs, 

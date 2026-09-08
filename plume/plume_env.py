@@ -61,6 +61,7 @@ class PlumeEnvironment(gym.Env):
     odor_scaling=False, # Generalization/reduce training data bias
     obs_noise=0.0, # Multiplicative: Wind & Odor observation noise.
     act_noise=0.0, # Multiplicative: Move & Turn action noise.
+    wind_field_obs=True, # Sense space-varying wind, if the dataset ships a jitter field
     dynamic=False,
     seed=137,
     verbose=0):
@@ -85,6 +86,8 @@ class PlumeEnvironment(gym.Env):
     self.squash_action = squash_action
     self.obs_noise = obs_noise
     self.act_noise = act_noise
+    self.wind_field_obs = wind_field_obs
+    self.wind_field = None # set by set_dataset()
     if self.squash_action:
         print("Squashing actions to 0-1")
 
@@ -215,6 +218,18 @@ class PlumeEnvironment(gym.Env):
         diffusion_multiplier=self.diffusion_max,
         radius_multiplier=self.radiusx,
         )
+    # Space-varying wind: datasets built with sim_cli --jitter_sigma ship the
+    # jitter field that moved their puffs, so the agent can sense the same
+    # wind at its own location instead of a single arena-wide vector.
+    # Older datasets have no such file and the agent falls back to uniform wind.
+    self.wind_field = None
+    if self.wind_field_obs:
+        self.wind_field = sim_analysis.load_wind_field(dataset,
+            verbose=self.verbose > 0)
+    if (self.wind_field is not None) and (self.wind_field.frame_dt > self.dt + 1e-9):
+        print(f"WARNING: {dataset} wind field was saved every "
+            f"{self.wind_field.frame_dt}s but env_dt is {self.dt}s, so the agent "
+            "will re-read stale frames. Regenerate with a smaller --jitter_stride.")
     if self.walking:
         self.data_puffs_all = self.data_puffs_all.query('x <= 0.5')
     self.data_puffs = self.data_puffs_all.copy() # trim this per episode
@@ -478,9 +493,17 @@ class PlumeEnvironment(gym.Env):
     return is_outofbounds
 
   def get_current_wind_xy(self):
+    """Wind at the agent: arena-wide mean plus the local grid jitter."""
     # df_idx = self.data_wind.query("time == {}".format(self.t_val)).index[0] # Safer
     df_idx = self.data_wind.query(f"tidx == {self.tidx}").index[0] # Safer
-    return self.data_wind.loc[df_idx,['wind_x', 'wind_y']].tolist() # Safer
+    wind = self.data_wind.loc[df_idx,['wind_x', 'wind_y']].tolist() # Safer
+    if (self.wind_field is not None) and (self.agent_location is not None):
+        # NOTE: if the flipx block in reset() is ever re-enabled, pass
+        # flipx=self.flipx here so the field mirrors with the puffs.
+        du, dv = self.wind_field.lookup(self.tidx,
+            self.agent_location[0], self.agent_location[1])
+        wind = [wind[0] + float(du), wind[1] + float(dv)]
+    return wind
 
   # "Transition function"
   def step(self, action):
@@ -710,6 +733,7 @@ class PlumeEnvironment(gym.Env):
   def close(self):
     del self.data_puffs_all
     del self.data_wind_all
+    self.wind_field = None
     pass
 
 

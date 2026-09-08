@@ -225,6 +225,24 @@ def load_plume(
 
     return data_puffs, data_wind
 
+def load_wind_field(dataset='constant', data_dir=config.datadir, mmap=True, verbose=True):
+    """Load the grid jitter field saved alongside a plume, or None if absent.
+
+    Datasets generated without --jitter_sigma have no field; callers should
+    treat None as "wind is uniform in space", i.e. the historical behavior.
+    """
+    import jitter_grid
+    prefix = f'{data_dir}/windfield_data_{dataset}'
+    if not os.path.exists(f'{prefix}.npy'):
+        return None
+    wind_field = jitter_grid.WindField.load(prefix, mmap=mmap)
+    if verbose:
+        m = wind_field.meta
+        print(f"[load_wind_field] {dataset}: {wind_field.psi.shape[0]} frames "
+              f"@ {wind_field.frame_dt}s, {m['nx']}x{m['ny']} cells of {m['cell']}m, "
+              f"sigma={m['sigma']} tau={m['tau']} smooth={m['smooth']}")
+    return wind_field
+
 def calculate_concentrations(data):
     # print("Using simpler calculate_concentrations()....")
     rad = data.radius

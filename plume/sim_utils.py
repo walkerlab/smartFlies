@@ -354,10 +354,28 @@ def manual_integrator(puff_t, wind_t, tidx,
                       rdot=0.01, 
                       birth_rate=1.0, 
                       min_radius=0.01, 
-                      wind_y_var=0.5):
+                      wind_y_var=0.5,
+                      jitter_grid=None):
+    """Advance every puff one dt.
+
+    :wind_y_var: per-puff i.i.d. lateral noise (the baseline behavior)
+    :jitter_grid: optional jitter_grid.JitterGrid. When given, puffs are also
+        translocated by a divergence-free perturbation field looked up at
+        their own (x,y), so puffs in the same grid cell move together instead
+        of scattering independently. Total lateral velocity variance is then
+        jitter_grid.sigma**2 + wind_y_var**2; set wind_y_var=0 for pure
+        grid-driven jitter.
+    """
     n_puffs = len(puff_t)
-    puff_t['x'] += wind_t['wind_x'].item()*dt
-    puff_t['y'] += wind_t['wind_y'].item()*dt + np.random.normal(0, wind_y_var, size=n_puffs)*dt
+    # Perturbation velocities, sampled at the pre-step positions so that x and
+    # y advance off the same lookup.
+    du, dv = 0.0, 0.0
+    if jitter_grid is not None:
+        du, dv = jitter_grid.velocity(puff_t['x'].values, puff_t['y'].values)
+    if wind_y_var > 0:
+        dv = dv + np.random.normal(0, wind_y_var, size=n_puffs)
+    puff_t['x'] += (wind_t['wind_x'].item() + du)*dt
+    puff_t['y'] += (wind_t['wind_y'].item() + dv)*dt
     puff_t['radius'] += dt * rdot
     puff_t['tidx'] = tidx
     puff_t['time'] = wind_t['time'].item()
@@ -370,8 +388,14 @@ def manual_integrator(puff_t, wind_t, tidx,
     
     return puff_t
 
-def get_puffs_df_vector(wind_df, wind_y_var, birth_rate, verbose=True):
-    """Fast vectorized euler stepper"""
+def get_puffs_df_vector(wind_df, wind_y_var, birth_rate, verbose=True,
+                        jitter_grid=None):
+    """Fast vectorized euler stepper
+
+    :jitter_grid: optional JitterGrid; it is evolved alongside the puffs and
+        tapes the field used at each tidx, so the exact same wind can later be
+        replayed for the agent (see jitter_grid.JitterGrid.save).
+    """
     print(wind_df.shape, wind_y_var, birth_rate)
     # Initialize
     n_steps = int((wind_df['time'].max() - wind_df['time'].min())*100)
@@ -382,11 +406,15 @@ def get_puffs_df_vector(wind_df, wind_y_var, birth_rate, verbose=True):
     # Main Euler integrator loop
     puff_dfs = []
     for i in tqdm.tqdm(range(n_steps)):
+        if jitter_grid is not None:
+            jitter_grid.record(tidx) # the field this step is about to use
         puff_t = manual_integrator(puff_t, wind_t, tidx, 
-            birth_rate=birth_rate, wind_y_var=wind_y_var)
+            birth_rate=birth_rate, wind_y_var=wind_y_var, jitter_grid=jitter_grid)
         puff_dfs.append( puff_t )
 
         tidx += 1
+        if jitter_grid is not None:
+            jitter_grid.step(jitter_grid.sim_dt) # evolve eddies to next tidx
         wind_t = wind_df.query("tidx == @tidx").copy(deep=True).reset_index(drop=True)
         if wind_t.shape[0] is not 1:
             print("Likely numerical error!:", tidx, wind_t)
