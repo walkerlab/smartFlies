@@ -614,9 +614,11 @@ def plot_trajectories(traj_storage, envs, save_path="/src/tamagotchi/debug_plot.
                                                           episode['episode_info']['t_val'], 
                                                           ax=ax, fig=fig, fname='', show=False)
                 
-                # Home region: 0.2m radius around the odor source at the origin
-                ax.add_patch(plt.Circle((0, 0), 0.2, facecolor='none',
-                                        edgecolor='black', linewidth=1.2, zorder=4))
+                # Success region: dist(agent, source) <= homed_radius ends the episode as HOME
+                homed_radius = envs.get_attr_at(get_ds_at, 'homed_radius')[0]
+                ax.add_patch(plt.Circle((0, 0), homed_radius, facecolor='none',
+                                        edgecolor='black', linewidth=1.2, linestyle='--',
+                                        zorder=4))
 
                 # Plot the trajectory
                 x, y, odor_obs = zip(*trajectory)
@@ -636,7 +638,7 @@ def plot_trajectories(traj_storage, envs, save_path="/src/tamagotchi/debug_plot.
                 
                 # Add trajectory info as text
                 traj_length = len(trajectory)
-                ax.text(0.02, 0.98, f'Length: {traj_length}', transform=ax.transAxes,
+                ax.text(0.02, 0.98, f'Length: {traj_length}\nHOME r: {homed_radius:.2f}m', transform=ax.transAxes,
                        fontsize=8, verticalalignment='top',
                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
                 
