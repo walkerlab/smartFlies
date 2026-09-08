@@ -622,7 +622,12 @@ def plot_trajectories(traj_storage, envs, save_path="/src/tamagotchi/debug_plot.
                 fig, ax = utils.plot_puffs_and_wind_vectors(data_puffs, data_wind, 
                                                           episode['episode_info']['t_val'], 
                                                           ax=ax, fig=fig, fname='', show=False)
-                
+
+                # Success region: dist(agent, source) <= 0.2m ends the episode as HOME
+                ax.add_patch(plt.Circle((0, 0), 0.2, facecolor='none',
+                                        edgecolor='black', linewidth=1.2, linestyle='--',
+                                        zorder=4))
+
                 # Plot the trajectory
                 x, y, odor_obs = zip(*trajectory)
                 # Create color array
