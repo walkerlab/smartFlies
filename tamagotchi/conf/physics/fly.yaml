@@ -10,12 +10,12 @@ max_forward_accel: 2.90          # m/s^2
 # van Breugel, Suver & Dickinson 2014 [FREE FLIGHT]:
 # maximum forward accelerations up to ~2.9 m/s^2.
 
-max_smooth_yaw_rate: 500         # deg/s
+max_smooth_yaw_rate: 501.7         # deg/s
 # Mronz & Lehmann 2008 [FREE FLIGHT]:
 # aggressive smooth optomotor turning around 500 deg/s;
 # saccades separately classified at >1000 deg/s.
 
-max_smooth_yaw_accel: 1550       # deg/s^2
+max_smooth_yaw_accel: 1553.6       # deg/s^2
 # DERIVED, not directly reported as a maximum.
 # Cellini, Salem & Mongeau 2022 [MAGNETIC TETHER, SMOOTH YAW]:
 # fitted intact-fly yaw dynamics have pole C/I = 3.1 s^-1.
