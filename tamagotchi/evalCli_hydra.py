@@ -232,6 +232,17 @@ def main():
     env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'env_version', 'odor_01', 'action_delay_const', 'env_dt', 'stray_max', 'obs_mask']
     #'ou_eval' set to true
     args = apply_configs(args, train_cfg, keys=agent_setting + env_setting)
+    if 'apparent_wind' not in train_cfg:
+        # Runs from the lolrenceH/tamagotchi training pipeline never write 'apparent_wind': there the
+        # env has no such switch and senses apparent wind (-air_velocity) unless wind_rel is set,
+        # which that pipeline only allows under action_physics='kinematics'. Without this, eval would
+        # keep the argparse defaults (apparent_wind=False, wind_rel=True) and sense a different wind
+        # than the agent was trained on. Older configs from that pipeline carry neither key and were
+        # trained on apparent wind, hence the wind_rel default of False here.
+        args.wind_rel = bool(train_cfg.get('wind_rel', False))
+        args.apparent_wind = not args.wind_rel
+        print(f"\n[Training config has no 'apparent_wind' - tamagotchi-pipeline run] "
+              f"wind_rel = {args.wind_rel}, apparent_wind = {args.apparent_wind}")
     if train_cfg.get('action_physics') == 'force' and 'force_physics' not in train_cfg:
         print("\n[ERROR] Training JSON has action_physics='force' but no 'force_physics' coefficients "
               "(run predates persisting them). There is no fallback any more - the env raises rather "
