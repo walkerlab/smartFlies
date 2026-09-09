@@ -622,7 +622,12 @@ def plot_trajectories(traj_storage, envs, save_path="/src/tamagotchi/debug_plot.
                 fig, ax = utils.plot_puffs_and_wind_vectors(data_puffs, data_wind, 
                                                           episode['episode_info']['t_val'], 
                                                           ax=ax, fig=fig, fname='', show=False)
-                
+
+                # Success region: dist(agent, source) <= 0.2m ends the episode as HOME
+                ax.add_patch(plt.Circle((0, 0), 0.2, facecolor='none',
+                                        edgecolor='black', linewidth=1.2, linestyle='--',
+                                        zorder=4))
+
                 # Plot the trajectory
                 x, y, odor_obs = zip(*trajectory)
                 # Create color array
@@ -787,7 +792,6 @@ def training_loop(agent, envs, args, device, actor_critic,
         for _ in range(warmup_steps):
             obs, reward, done, info = envs.step(actions[_])
         del actions
-    np.random.seed(42)
     obs = envs.reset()
     rollouts.obs[0].copy_(obs) # https://discuss.pytorch.org/t/which-copy-is-better/56393
     rollouts.to(device)

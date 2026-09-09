@@ -467,7 +467,7 @@ def plot_puffs(data, t_val, ax=None, fig=None, show=True, scatter_size_factor=No
     # alphas /= np.max(alphas)
     # alphas = np.clip(alphas, 0.0, 1.0)
 
-    alphas = c.values
+    alphas = np.array(c, dtype=float) # copy: in-place ops below need it writable
     alphas /= np.max(alphas) # 0...1
     alphas = np.power(alphas, 1/8) # See minimal2 notebook
     # alphas = np.power(alphas, 10)
