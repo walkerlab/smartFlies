@@ -1356,6 +1356,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  double_drift=False,
                  action_physics=None, # 'kinematics' (default/legacy) or 'force'.
                  obs_mask = [], # indices of observation channels to zero out; does NOT change obs space shape
+                 obs_time = False, # if True, append elapsed episode time (in seconds) as an extra observation channel
                  odor_01 = False,
                  action_latency=None,       # seconds；None = off
                  obs_delayed_actions=False, # if True, obs includes last action (delayed by action_latency) as part of observation
@@ -1433,6 +1434,14 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
 
         # Observation layout is fixed; whether the agent actually receives a channel is decided by obs_mask.
         obs_channels = ['wind_x', 'wind_y', 'odor', 'head_x', 'head_y', 'course_x', 'course_y']
+        # Elapsed time since episode start, in seconds (NOT normalized - it runs past the nominal
+        # [-1, 1] box bounds, same as the wind channels already do). Appended last so the indices of
+        # every other channel - and so every obs_mask index and downstream reader - stay unchanged.
+        self.obs_time = obs_time
+        if self.obs_time:
+            obs_channels = obs_channels + ['time']
+            print(f"[DEBUG] PEv3 obs_time on: appending elapsed episode time (seconds) as channel "
+                  f"{len(obs_channels) - 1}; obs_space {len(obs_channels)}")
         self.observation_space = spaces.Box(low=-1, high=+1,
                                     shape=(len(obs_channels),), dtype=np.float32)
 
@@ -1957,6 +1966,10 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.verbose > 1:
             print('observation', observation)
 
+        if self.obs_time:
+            # Elapsed time since reset, in actual seconds (episode_step is 0 at reset and is
+            # incremented at the top of step(), so this reads 0.0 for the reset observation).
+            observation = np.append(observation, np.float32(self.episode_step * self.dt))
         if len(self.obs_mask):
             # Zero in place - shape is preserved so downstream index-based readers stay valid
             observation[self.obs_mask] = 0.0
@@ -2448,6 +2461,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         birthx_upper=getattr(args, 'birthx_upper', 0),
                         force_physics=getattr(args, 'force_physics', None),
                         obs_mask=getattr(args, 'obs_mask', []),
+                        obs_time=getattr(args, 'obs_time', False),
                         odor_01=getattr(args, 'odor_01', False),
                         action_latency=getattr(args, 'action_latency', None),
                         )

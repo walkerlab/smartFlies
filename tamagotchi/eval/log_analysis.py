@@ -442,6 +442,9 @@ def get_traj_df(episode_log,
     elif obs.shape[1] == 7:
         obs =  obs.iloc[:, -7:] # obs in PEv3 has 7 columns - works as expected # this are normalized observations
         obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y']
+    elif obs.shape[1] == 8: # PEv3 with obs_time - elapsed episode time (seconds) appended last
+        obs = obs.iloc[:, -8:]
+        obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y', 'time']
     
     # write wind observation into df
     obs['wind_theta_obs'] = obs.apply(lambda row: vec2rad_norm_by_pi(row['wind_x'], row['wind_y']), axis=1)
@@ -628,6 +631,9 @@ def get_traj_df_tmp(episode_log,
     elif obs.shape[1] == 7:
         obs =  obs.iloc[:, -7:] # obs in PEv3 has 7 columns - works as expected # this are normalized observations
         obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y']
+    elif obs.shape[1] == 8: # PEv3 with obs_time - elapsed episode time (seconds) appended last
+        obs = obs.iloc[:, -8:]
+        obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y', 'time']
     elif obs.shape[1] == 9:
         obs = obs.iloc[:, -9:] # haltere 
         obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y', 'haltere_air_acc', 'haltere_ang_acc']
@@ -647,7 +653,7 @@ def get_traj_df_tmp(episode_log,
     traj_df['agent_angle_ground_theta'] = [ rad_over_pi_shift2_01( 
         vec2rad_norm_by_pi(record[0]['angle'][0], record[0]['angle'][1]) ) \
         for record in episode_log['infos']]
-    if obs.shape[1] == 7: # only consider these info if obs has visual feedback - earlier trials logs were different
+    if obs.shape[1] in (7, 8): # only consider these info if obs has visual feedback - earlier trials logs were different
         # calculate course direction from info
         allo_ground_velocity  = [record[0]['ground_velocity'] for record in episode_log['infos']]
         # same calc as vec2rad_norm_by_pi, except do not normalize by pi
@@ -670,9 +676,11 @@ def get_traj_df_tmp(episode_log,
         traj_df['agent_angle_y_obs'] = obs['agent_angle_y']
         traj_df['ego_course_direction_x_obs'] = obs['ego_course_direction_x']
         traj_df['ego_course_direction_y_obs'] = obs['ego_course_direction_y']
+    if 'time' in obs.columns: # obs_time agents - elapsed episode time (seconds) as seen by the policy
+        traj_df['time_obs'] = obs['time']
     
     # get true wind direction from info
-    if obs.shape[1] == 7 or obs.shape[1] == 9 or obs.shape[1] == 11: # 7 obs with visual cues; 9 obs with haltere; 11 obs with VR wind observer
+    if obs.shape[1] in (7, 8, 9, 11): # 7 obs with visual cues; 8 with elapsed time; 9 obs with haltere; 11 obs with VR wind observer
         true_wind_direction_key = 'ambient_wind'
     else: # for relative wind agents - still consider true wind direction 
         # get true wind info for action dist. around wind changes 
@@ -806,7 +814,7 @@ def get_traj_df_tmp(episode_log,
             'wind_speed_ground',
             'wind_angle_ground_theta' # discontinuous, but ok since limited to first/fourth quadrant
             ] 
-        if obs.shape[1] == 7:
+        if obs.shape[1] in (7, 8):
             colnames_diff.append('ego_course_direction_theta')
         for col in colnames_diff:
             if col in traj_df.columns:

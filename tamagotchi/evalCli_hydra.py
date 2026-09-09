@@ -38,6 +38,7 @@ def build_evalcli_defaults() -> dict:
     parser.add_argument('--apparent_wind', type=bool, default=False)
     parser.add_argument('--env_version', type=str, default='v3')
     parser.add_argument('--obs_mask', type=int, nargs='*', default=[])
+    parser.add_argument('--obs_time', type=bool, default=False)
 
     # Hardcoded values that evalCli.__main__ sets after parse_args
     hardcoded = {
@@ -229,7 +230,7 @@ def main():
     agent_setting = ['if_vec_norm', 'if_train_actor_std', 'rnn_type', 'variant']
     # WARNING: keys NOT listed here are not inherited from the training config - eval falls back to the
     # argparse defaults in build_evalcli_defaults(). Known gaps: action_latency, movex, turnx, walking.
-    env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'env_version', 'odor_01', 'action_delay_const', 'env_dt', 'stray_max', 'obs_mask']
+    env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'env_version', 'odor_01', 'action_delay_const', 'env_dt', 'stray_max', 'obs_mask', 'obs_time']
     #'ou_eval' set to true
     args = apply_configs(args, train_cfg, keys=agent_setting + env_setting)
     if train_cfg.get('action_physics') == 'force' and 'force_physics' not in train_cfg:
