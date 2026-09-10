@@ -156,7 +156,9 @@ def main():
                         help='SLURM partition (default: ckpt-all)')
     parser.add_argument('--job_name', type=str, default='',
                         help='SLURM job name shown in squeue; lets you target a batch, e.g. '
-                             'squeue -u $USER -h | grep <name> | awk \'{print $1}\' | xargs scancel '
+                             'squeue -u $USER -h | grep <name> | awk \'{print $1}\' | xargs scancel. '
+                             'Also logged on each wandb run as slurm_job_name, so the same '
+                             'name finds the batch in wandb '
                              '(default: the partition name)')
     parser.add_argument('--mail_user', type=str, default=DEFAULT_MAIL_USER,
                         help='Email address for crash notifications (sent when python exits '
