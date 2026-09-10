@@ -79,6 +79,11 @@ def run(cfg: DictConfig) -> None:
     if not cfg_dict.get("outsuffix"):
         cfg_dict["outsuffix"] = _auto_outsuffix(cfg_dict)
 
+    # SLURM job name (--job_name of the submitting batch), logged to wandb along with the
+    # rest of the params so a run can be traced back to its job. Empty off-cluster. Set
+    # here rather than as a hydra override so it stays out of the outsuffix hash.
+    cfg_dict["slurm_job_name"] = os.environ.get("SLURM_JOB_NAME", "")
+
     print("Running with config:")
     print(OmegaConf.to_yaml(cfg))
 
