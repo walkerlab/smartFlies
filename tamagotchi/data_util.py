@@ -333,11 +333,11 @@ def rotate_wind_and_puffs(data_wind, data_puffs, rotation_angle_degrees):
     return wind_rotated, puffs_rotated
 
 def get_concentration_at_tidx(data, tidx, x_val, y_val, rotate_by=0, mirror=False, odor_detection_radius=0):
-    # a puff is detected if the agent's sensing circle (detection_radius around x_val,y_val)
+    # a puff is detected if the agent's sensing circle (odor_detection_radius around x_val,y_val)
     # overlaps the puff's own circular footprint (radius around its center) - i.e. the
     # distance between the two centers is less than the sum of the two radii.
-    # (Ported from tamagotchi main; the previous bounding-box query treated each puff as a
-    # square of side 2*radius, so odor was sensed in the corners outside the puff circle.)
+    # (Replaces the earlier axis-aligned bounding-box test, x_minus_radius < x < x_plus_radius
+    # and likewise in y, whose footprint was the square circumscribing this circle.)
     data_t = data[data.tidx==tidx]
     if rotate_by:
         data_t = rotate_puffs_optimized(data_t, rotate_by, mirror)
