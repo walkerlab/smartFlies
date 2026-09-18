@@ -232,7 +232,7 @@ def main():
     # argparse defaults in build_evalcli_defaults(). Known gaps: movex, turnx, walking.
     # action_latency is inherited so an agent trained with an action transport delay is evaluated with
     # the same delay (make_env passes it as None otherwise, i.e. no delay).
-    env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'env_version', 'odor_01', 'action_delay_const', 'action_latency', 'env_dt', 'stray_max', 'obs_mask', 'obs_time']
+    env_setting = ['apparent_wind', 'action_physics', 'force_physics', 'apparent_wind_allo', 'wind_rel', 'squash_action', 'r_shaping', 'env_version', 'odor_01', 'odor_detection_radius', 'action_delay_const', 'action_latency', 'env_dt', 'stray_max', 'obs_mask', 'obs_time']
     #'ou_eval' set to true
     args = apply_configs(args, train_cfg, keys=agent_setting + env_setting)
     if train_cfg.get('action_physics') == 'force' and 'force_physics' not in train_cfg:

@@ -332,33 +332,22 @@ def rotate_wind_and_puffs(data_wind, data_puffs, rotation_angle_degrees):
     
     return wind_rotated, puffs_rotated
 
-def get_concentration_at_tidx(data, tidx, x_val, y_val, rotate_by=0, mirror=False):
-    # find the indices for all puffs that intersect the given x,y,time point
-    qx = str(x_val) + ' > x_minus_radius and ' + str(x_val) + ' < x_plus_radius'
-    qy = str(y_val) + ' > y_minus_radius and ' + str(y_val) + ' < y_plus_radius'
-    q = qx + ' and ' + qy
+def get_concentration_at_tidx(data, tidx, x_val, y_val, rotate_by=0, mirror=False, odor_detection_radius=0):
+    # a puff is detected if the agent's sensing circle (odor_detection_radius around x_val,y_val)
+    # overlaps the puff's own circular footprint (radius around its center) - i.e. the
+    # distance between the two centers is less than the sum of the two radii.
+    # (Replaces the earlier axis-aligned bounding-box test, x_minus_radius < x < x_plus_radius
+    # and likewise in y, whose footprint was the square circumscribing this circle.)
+    data_t = data[data.tidx==tidx]
     if rotate_by:
-        data_rot = rotate_puffs_optimized(data[data.tidx==tidx], rotate_by, mirror)
-        d = data_rot.query(q)
-        # t_val = wind[wind.tidx==tidx].time.values[0] 
-        # print("d.concentration.sum()", d.concentration.sum())
-        # if d.concentration.sum() < config.env['odor_threshold']:
-        #     print("No puffs at this location and time", tidx, x_val, y_val)
-        #     fig, ax = sim_analysis.plot_puffs_and_wind_vectors(
-        #         data_rot, 
-        #         wind, 
-        #         t_val, 
-        #         fname='/src/tamagotchi/puffs_and_wind_vectors_initial.png', 
-        #         plotsize=(8,8))
-        #     # plot all start locations
-        #     ax.scatter(x_val, y_val, c='red', s=2, label='Start Locations')
-        #     ax.legend()
-        #     fig.savefig('/src/tamagotchi/puffs_and_wind_vectors_initial.png')
-    else:
-        try:
-            d = data[data.tidx==tidx].query(q)
-        except Exception as e:
-            raise ValueError(f"Error occurred while querying data for tidx {tidx}: {e}; query: {q}")
+        data_t = rotate_puffs_optimized(data_t, rotate_by, mirror)
+    dx = data_t.x - x_val
+    dy = data_t.y - y_val
+    reach = data_t.radius + odor_detection_radius
+    mask = (dx * dx + dy * dy) < (reach * reach)
+    d = data_t[mask]
+    if odor_detection_radius > 0:
+        return d.concentration.max()
     return d.concentration.sum()
 
 def cleanup_log_dir(log_dir):

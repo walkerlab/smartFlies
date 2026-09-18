@@ -1358,6 +1358,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  obs_mask = [], # indices of observation channels to zero out; does NOT change obs space shape
                  obs_time = False, # if True, append elapsed episode time (in seconds) as an extra observation channel
                  odor_01 = False,
+                 odor_detection_radius=0, # meters, radius of the agent's own odor-sensing circle (0 = point sensor)
                  action_latency=None,       # seconds；None = off
                  obs_delayed_actions=False, # if True, obs includes last action (delayed by action_latency) as part of observation
                  force_physics=None, # dict of coefficients required by action_physics=='force'; also
@@ -1381,6 +1382,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         self.action_physics = action_physics
         self.now_init_long = 0.0 # long-axis init coordinate set directly by curriculum
         self.odor_01 = odor_01 # PEv3
+        self.odor_detection_radius = odor_detection_radius
         self.ang_vel = 0.0 # angular velocity (rad/s); integrated by 'force' physics, tracks the capped yaw rate under kinematics accel caps, left at 0 otherwise
         self.kin_accel_cap = None     # m/s^2; set below from physics coeffs if provided (kinematics mode only)
         self.kin_ang_accel_cap = None # rad/s^2; same
@@ -1924,7 +1926,8 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print('agent_angle', self.agent_angle)
 
         odor_observation = get_concentration_at_tidx(
-            self.data_puffs, self.tidx, self.agent_location[0], self.agent_location[1], rotate_by = self.rotate_by, mirror = self.mirror) # PEv3 - add option to rotate df by angle
+            self.data_puffs, self.tidx, self.agent_location[0], self.agent_location[1],
+            rotate_by = self.rotate_by, mirror = self.mirror, odor_detection_radius = self.odor_detection_radius) # PEv3 - add option to rotate df by angle
         
         if self.odor_scaling:
             odor_observation *= self.odorx # Random scaling to improve generalization 
@@ -2463,6 +2466,7 @@ def make_env(env_id, seed, rank, log_dir, allow_early_resets, args=None):
                         obs_mask=getattr(args, 'obs_mask', []),
                         obs_time=getattr(args, 'obs_time', False),
                         odor_01=getattr(args, 'odor_01', False),
+                        odor_detection_radius=getattr(args, 'odor_detection_radius', 0),
                         action_latency=getattr(args, 'action_latency', None),
                         )
             else:

@@ -106,6 +106,7 @@ squash_action: true
 flipping: false
 odor_scaling: true
 odor_01: false
+odor_detection_radius: 0 # meters; agent's own odor-sensing circle, added to each puff's radius (0 = point sensor)
 stray_max: 2.0
 test_episodes: 50
 viz_episodes: 10
