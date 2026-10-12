@@ -34,6 +34,12 @@ def _provenance():
     print('=' * 79, flush=True)
 _provenance()
 # ---- end provenance check ----
+def _filter_overrides(override_dirname: str, drop_keys) -> str:
+    """Drop the given key=value entries from a Hydra override_dirname string."""
+    parts = [p for p in override_dirname.split(",") if p.split("=", 1)[0].lstrip("+") not in drop_keys]
+    return ",".join(parts)
+
+
 def _auto_outsuffix(cfg_dict: dict) -> str:
     """Build a unique per-job outsuffix: seed-{seed}-{hash}, hash over the full override string."""
     override_dirname = HydraConfig.get().job.override_dirname  # e.g. "seed=1,action_physics=kinematics"
@@ -78,6 +84,14 @@ def run(cfg: DictConfig) -> None:
         )
     if not cfg_dict.get("outsuffix"):
         cfg_dict["outsuffix"] = _auto_outsuffix(cfg_dict)
+
+    # Full override string (minus seed/outsuffix/resume_from) for main.py to hash into
+    # stage_hash, so seeds and the resumed checkpoint path don't change a stage's hash,
+    # while everything else in the stage command (e.g. path.curriculum_name of a
+    # --sweep_config stage) does. Same scheme as tamagotchi main.
+    cfg_dict["stage_hash_input"] = _filter_overrides(
+        HydraConfig.get().job.override_dirname, {"seed", "outsuffix", "resume_from"}
+    )
 
     # SLURM job name (--job_name of the submitting batch), logged to wandb along with the
     # rest of the params so a run can be traced back to its job. Empty off-cluster. Set
