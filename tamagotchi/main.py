@@ -111,6 +111,7 @@ def get_args():
     parser.add_argument('--apparent_wind_allo', type=bool, default=False) 
     parser.add_argument('--env_version', type=str, default='v3') # PEv3: 'v3' selects PlumeEnvironment_v3
     parser.add_argument('--obs_mask', type=int, nargs='*', default=[]) # PEv3: observation channel indices to zero out; obs shape is unchanged
+    parser.add_argument('--obs_time', action='store_true', default=False) # PEv3: append time since the last odor encounter (seconds) as an extra observation channel
     parser.add_argument('--flip_ventral_optic_flow', type=bool, default=False) # PEv3: for eval to see the behavioral impact of flipping course direction perception.
     parser.add_argument('--rotate_by', type=int, default=0) # PEv3: for rotate the env by a given angle in degrees. Only None means no rotation - 0 will be transformed to None.
     parser.add_argument('--birthx_max',  type=float, default=1.0) # Only used for sparsity

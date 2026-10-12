@@ -442,9 +442,9 @@ def get_traj_df(episode_log,
     elif obs.shape[1] == 7:
         obs =  obs.iloc[:, -7:] # obs in PEv3 has 7 columns - works as expected # this are normalized observations
         obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y']
-    elif obs.shape[1] == 8: # PEv3 with obs_time - elapsed episode time (seconds) appended last
+    elif obs.shape[1] == 8: # PEv3 with obs_time - seconds since the last odor encounter appended last
         obs = obs.iloc[:, -8:]
-        obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y', 'time']
+        obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y', 'time_since_odor']
     
     # write wind observation into df
     obs['wind_theta_obs'] = obs.apply(lambda row: vec2rad_norm_by_pi(row['wind_x'], row['wind_y']), axis=1)
@@ -631,9 +631,9 @@ def get_traj_df_tmp(episode_log,
     elif obs.shape[1] == 7:
         obs =  obs.iloc[:, -7:] # obs in PEv3 has 7 columns - works as expected # this are normalized observations
         obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y']
-    elif obs.shape[1] == 8: # PEv3 with obs_time - elapsed episode time (seconds) appended last
+    elif obs.shape[1] == 8: # PEv3 with obs_time - seconds since the last odor encounter appended last
         obs = obs.iloc[:, -8:]
-        obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y', 'time']
+        obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y', 'time_since_odor']
     elif obs.shape[1] == 9:
         obs = obs.iloc[:, -9:] # haltere 
         obs.columns = ['wind_x', 'wind_y', 'odor', 'agent_angle_x', 'agent_angle_y', 'ego_course_direction_x', 'ego_course_direction_y', 'haltere_air_acc', 'haltere_ang_acc']
@@ -676,11 +676,11 @@ def get_traj_df_tmp(episode_log,
         traj_df['agent_angle_y_obs'] = obs['agent_angle_y']
         traj_df['ego_course_direction_x_obs'] = obs['ego_course_direction_x']
         traj_df['ego_course_direction_y_obs'] = obs['ego_course_direction_y']
-    if 'time' in obs.columns: # obs_time agents - elapsed episode time (seconds) as seen by the policy
-        traj_df['time_obs'] = obs['time']
+    if 'time_since_odor' in obs.columns: # obs_time agents - seconds since the last odor encounter, as seen by the policy
+        traj_df['time_obs'] = obs['time_since_odor']
     
     # get true wind direction from info
-    if obs.shape[1] in (7, 8, 9, 11): # 7 obs with visual cues; 8 with elapsed time; 9 obs with haltere; 11 obs with VR wind observer
+    if obs.shape[1] in (7, 8, 9, 11): # 7 obs with visual cues; 8 with odor clock (obs_time); 9 obs with haltere; 11 obs with VR wind observer
         true_wind_direction_key = 'ambient_wind'
     else: # for relative wind agents - still consider true wind direction 
         # get true wind info for action dist. around wind changes 
