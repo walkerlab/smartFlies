@@ -1356,7 +1356,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                  double_drift=False,
                  action_physics=None, # 'kinematics' (default/legacy) or 'force'.
                  obs_mask = [], # indices of observation channels to zero out; does NOT change obs space shape
-                 obs_time = False, # if True, append elapsed episode time (in seconds) as an extra observation channel
+                 obs_time = False, # if True, append time elapsed since the last odor encounter (in seconds) as an extra observation channel
                  odor_01 = False,
                  action_latency=None,       # seconds；None = off
                  obs_delayed_actions=False, # if True, obs includes last action (delayed by action_latency) as part of observation
@@ -1434,14 +1434,17 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
 
         # Observation layout is fixed; whether the agent actually receives a channel is decided by obs_mask.
         obs_channels = ['wind_x', 'wind_y', 'odor', 'head_x', 'head_y', 'course_x', 'course_y']
-        # Elapsed time since episode start, in seconds (NOT normalized - it runs past the nominal
-        # [-1, 1] box bounds, same as the wind channels already do). Appended last so the indices of
-        # every other channel - and so every obs_mask index and downstream reader - stay unchanged.
+        # Optional odor-clock channel: seconds since the last odor encounter (NOT normalized - it runs
+        # past the nominal [-1, 1] box bounds, same as the wind channels already do). Appended last so
+        # the indices of every other channel - and so every obs_mask index and downstream reader -
+        # stay unchanged.
         self.obs_time = obs_time
+        self.odor_lastenc_step = 0 # episode step of the most recent nonzero odor read; reset per episode
         if self.obs_time:
-            obs_channels = obs_channels + ['time']
-            print(f"[DEBUG] PEv3 obs_time on: appending elapsed episode time (seconds) as channel "
-                  f"{len(obs_channels) - 1}; obs_space {len(obs_channels)}")
+            obs_channels = obs_channels + ['time_since_odor']
+            print(f"[DEBUG] PEv3 obs_time on: appending time since last odor encounter (seconds) as channel "
+                  f"{len(obs_channels) - 1}; obs_space {len(obs_channels)}; "
+                  f"max {self.episode_steps_max * self.dt:.4g}s per episode")
         self.observation_space = spaces.Box(low=-1, high=+1,
                                     shape=(len(obs_channels),), dtype=np.float32)
 
@@ -1889,9 +1892,15 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         
         return is_outofbounds
 
+    def get_time_since_odor(self):
+        '''Seconds since the last odor encounter (nonzero odor read after thresholding).
+        Counts from the episode start until the first encounter, so it is 0.0 at reset.'''
+        return np.float32((self.episode_step - self.odor_lastenc_step) * self.dt)
+
     def sense_environment(self):
         '''
         Return an array with [wind x, y, odor, allocentric head direction x, y, egocentric course direction x, y]
+        plus, when obs_time is set, the time since the last odor encounter in seconds as a trailing channel.
         '''
         if (self.verbose > 1) and (self.episode_step >= self.episode_steps_max): # Debug mode
             pprint(vars(self))
@@ -1936,6 +1945,10 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print(f"odor_observation: {odor_observation} at tidx {self.tidx} for agent location {self.agent_location} with rotate_by {self.rotate_by}") 
         odor_observation = 0.0 if odor_observation < config.env['odor_threshold'] else odor_observation
         odor_observation = np.clip(odor_observation, 0.0, 1.0) # clip
+        if odor_observation > 0:
+            # Odor encounter: the (thresholded) odor read is nonzero. Tracked before obs_mask so the
+            # odor clock reflects what the plume did, not whether the odor channel is withheld.
+            self.odor_lastenc_step = self.episode_step
 
         observation = np.array(wind_observation + [odor_observation]).astype(np.float32) # per Gym spec
         # Visual feedback - always sensed; use obs_mask to withhold it from the agent
@@ -1967,9 +1980,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             print('observation', observation)
 
         if self.obs_time:
-            # Elapsed time since reset, in actual seconds (episode_step is 0 at reset and is
-            # incremented at the top of step(), so this reads 0.0 for the reset observation).
-            observation = np.append(observation, np.float32(self.episode_step * self.dt))
+            # Seconds since the last odor encounter (0.0 on the observation returned by reset(),
+            # and on any step where odor is sensed).
+            observation = np.append(observation, self.get_time_since_odor())
         if len(self.obs_mask):
             # Zero in place - shape is preserved so downstream index-based readers stay valid
             observation[self.obs_mask] = 0.0
@@ -2002,6 +2015,9 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
                 [self._null_action.copy()] * self.latency_steps,
                 maxlen=self.latency_steps)
 
+        # Odor clock counts from the episode start until the first encounter. Must be cleared before
+        # the base reset() senses the first observation (base reset zeroes episode_step itself).
+        self.odor_lastenc_step = 0
         observation = super(PlumeEnvironment_v3, self).reset() # PEv3.get_current_wind_xy will be used due to polymorphism in objective oriented programming
         # Course direction is undefined before the agent has moved.
         # Bounded slice only - an open-ended one would also wipe the appended action history.
@@ -2262,6 +2278,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
             'odor_obs': observation[2],
             'allocentric_head_direction': observation[3:5],
             'egocentric_course_direction': observation[5:7], # within SubprocVecEnv, unnormalized obs. Later nomalized in VecPyTorch
+            'time_obs': observation[7] if self.obs_time else None, # seconds since the last odor encounter
             'ang_vel': self.ang_vel if self.action_physics == 'force' else None
             }
 

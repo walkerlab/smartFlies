@@ -421,9 +421,9 @@ if __name__ == "__main__":
     parser.add_argument('--obs_mask', type=int, nargs='*', default=[],
         help='observation channel indices to zero out (shape is unchanged): '
              '0 wind_x, 1 wind_y, 2 odor, 3 head_x, 4 head_y, 5 course_x, 6 course_y, '
-             '7 time (only when obs_time is set)')
+             '7 time_since_odor (only when obs_time is set)')
     parser.add_argument('--obs_time', type=bool, default=False,
-        help='append elapsed episode time (in seconds) as observation channel 7; '
+        help='append time since the last odor encounter (in seconds) as observation channel 7; '
              'must match the setting the agent was trained with')
     parser.add_argument('--flip_ventral_optic_flow', type=bool, default=False) # for eval to see the behavioral impact of flipping course direction perception.
     parser.add_argument('--perturb_RNN_by_ortho_set', type=str, default=False, help='a file that stores an orthogonal basis, where the first vector is the wind encoding subspace')
