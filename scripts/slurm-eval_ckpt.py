@@ -63,6 +63,7 @@ def submit_eval(
         partition,
         extra_args,
         mail_user,
+        job_name,
         ):
     gpu_resource = GPU_CONFIGS[gpu_type]
     group_name = 'walkerlab' if partition == 'gpu-a100' else 'portia'
@@ -89,7 +90,7 @@ def submit_eval(
     mail_directives = MAIL_DIRECTIVES.format(mail_user=mail_user) if mail_user else ''
 
     script = f"""#!/bin/bash
-#SBATCH --job-name=eval-{partition}
+#SBATCH --job-name={job_name}
 #SBATCH --partition={partition}
 #SBATCH --account={group_name}
 #SBATCH --time={time}
@@ -173,6 +174,9 @@ def main():
                         help='Email address for crash notifications (--mail-type=FAIL only: '
                              'no mail on a normal finish or on preemption/requeue). '
                              f'Pass an empty string to disable mail entirely (default: {DEFAULT_MAIL_USER})')
+    parser.add_argument('--job_name', type=str, default='',
+                        help='SLURM job name shown in squeue; lets you target a batch, e.g. '
+                             'scancel -u $USER --name=<name> (default: eval-<partition>)')
     parser.add_argument('--dry_run', action='store_true', default=False,
                         help='Print the commands that would be executed without actually submitting the jobs')
 
@@ -227,6 +231,7 @@ def main():
             partition=args.partition,
             extra_args=args.extra_args,
             mail_user=args.mail_user,
+            job_name=args.job_name or f'eval-{args.partition}',
             dry_run=args.dry_run,
         )
 
