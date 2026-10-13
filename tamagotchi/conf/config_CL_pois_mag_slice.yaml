@@ -33,6 +33,7 @@ diff_min: [0.2]
 birthx_linear_tc_steps: 6 
 birthx_upper: 0
 plot_every_n_updates: 100
+plot_window_updates: 5  # the unrotated-trajectory grid and the density / radial-success figure pool the episodes of this many updates
 
 # PPO / optimizer
 algo: ppo

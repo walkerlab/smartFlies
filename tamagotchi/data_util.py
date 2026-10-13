@@ -428,7 +428,7 @@ def plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=False, win
 
     return ax
 
-def plot_puffs(data, t_val, ax=None, fig=None, show=True, scatter_size_factor=None):
+def plot_puffs(data, t_val, ax=None, fig=None, show=True, scatter_size_factor=None, threshold=None):
     # TODO check color to concentration mapping
     if ax is None:
         fig = plt.figure()
@@ -448,6 +448,8 @@ def plot_puffs(data, t_val, ax=None, fig=None, show=True, scatter_size_factor=No
     # data_at_t = data[data.time==t_val] # Float equals is dangerous!
     data_at_t = data[np.isclose(data.time, t_val, atol=1e-3)] # Smallest dt=0.01, so this is more than enough!
     # print("data_at_t.shape", data_at_t.shape, t_val, data.time.min(), data.time.max())
+    if len(data_at_t) == 0: # no plume frame at this time: leave the axes empty rather than fail the whole plot
+        return ax
 
     c = data_at_t.concentration
     # print(c, t_val)
@@ -493,7 +495,9 @@ def plot_puffs(data, t_val, ax=None, fig=None, show=True, scatter_size_factor=No
     s = k * (data_at_t.radius)**2
     # print('size', s) # 885
     ax.scatter(data_at_t.x, data_at_t.y, s=s, facecolor=rgba_colors, edgecolor='none')
-    
+    if threshold:  # None or 0 -> no highlight
+        mask = c.values > threshold
+        ax.scatter(data_at_t.x[mask], data_at_t.y[mask], s=s[mask], facecolor='red', edgecolor='none')
     # 070225 - branch for using radius as size 
     # from matplotlib.patches import Circle
     # for _, row in data_at_t.iterrows():
@@ -660,13 +664,18 @@ def make_animation_update(time_values, data_puffs, data_wind, traj_df,
 
 
 
-def plot_puffs_and_wind_vectors(data_puffs, data_wind, t_val, ax=None, fig=None, fname='', plotsize=(10,10), aspect_ratio=False, show=True, invert_colors=False, wind_vector=True, indicator_radius_pts=15):
+def plot_puffs_and_wind_vectors(data_puffs, data_wind, t_val, ax=None, fig=None, fname='', plotsize=(10,10), aspect_ratio=False, show=True, invert_colors=False, wind_vector=True, indicator_radius_pts=15, threshold=None, t_val_puffs=None):
+    """Draw the wind indicator at `t_val` and the puffs at `t_val_puffs` (default `t_val`); the two
+    differ when the puff frames of a plume file do not sit on the wind/env clock. Puffs above
+    `threshold` are highlighted in red."""
+    if t_val_puffs is None:
+        t_val_puffs = t_val
     if fig is None:
         fig = plt.figure(figsize=plotsize)
     if ax is None:
         ax = fig.add_subplot(111)
     ax = plot_wind_vectors(data_puffs, data_wind, t_val, ax, invert_colors=invert_colors, wind_vector=wind_vector, indicator_radius_pts=indicator_radius_pts)
-    ax = plot_puffs(data_puffs, t_val, ax=ax, fig=fig, show=False)
+    ax = plot_puffs(data_puffs, t_val_puffs, ax=ax, fig=fig, show=False, threshold=threshold)
     ax.patch.set_facecolor('none') 
     if aspect_ratio:
         ax.set_aspect(aspect_ratio)
@@ -880,10 +889,13 @@ def log_update_wind_stats(j, wind_xy, use_mlflow=True, round_decimals=2):
     mlflow.log_metric("wind_stats/n_wind_samples", len(wind_xy), step=j)
 
 def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifacts=True, plot=True,
-                      wind_xy=None):
+                      wind_xy=None, window_df=None):
     """
-    Log episode statistics and plot a histogram of plume density for successful episodes.
-    Just log episode statistics if not long_artifacts
+    Log episode statistics and plot the HOME rate by plume density (left) and by plume rotation
+    (right) in one figure, ``tmp/{stem}_HOME_density_radial_{j}.png``. ``window_df`` (episode rows
+    of the last few updates, same columns) is used for the figure when given so each bin has more
+    than one update's episodes behind it; the metrics always describe the current update only.
+    Just log episode statistics if not log_artifacts.
     Args:
         j (int): Update index for logging and for labeling the plot.
         args (Namespace): Contains `save_dir` for saving the plot.
@@ -911,64 +923,23 @@ def log_eps_artifacts(j, args, update_episodes_df, use_mlflow=True, log_artifact
             print(f"Error logging artifact {log_path}: {e}")
     
     if plot:
-        # Plot plume density histogram for successful episodes
-        successful_df = update_episodes_df[update_episodes_df['outcome'] == 'HOME']
-        # Check if there's any data to plot
-        if len(successful_df) > 0:        
-            # Plot success rate by plume density and dataset
-            # Define common bins for plume density
-            bins = np.linspace(update_episodes_df['plume_density'].min(), 
-                            update_episodes_df['plume_density'].max(), 10)
-            bin_width = bins[1] - bins[0]
-            # Get unique datasets
-            datasets = update_episodes_df['dataset'].unique()
-            # Set up the plot
-            plt.figure(figsize=(4, 4))
-            # Offset width to prevent bar overlap
-            offset_factor = 0.8 / len(datasets)
+        # HOME by plume density (left) and HOME by rotate_by (right) in one figure, drawn from the
+        # episode rows of the last few updates (window_df) when given, else this update only.
+        from tamagotchi.train_plots import plot_density_and_radial  # here: train_plots imports this module
+        eps_df = window_df if window_df is not None and len(window_df) else update_episodes_df
+        if len(eps_df) > 0:
+            plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}HOME_density_radial_{j}.png"
+            try:
+                plot_density_and_radial(eps_df, plt_path)
+            except Exception as e:
+                print(f"Error plotting {plt_path}: {e}")
+            else:
+                if use_mlflow:
+                    try:
+                        mlflow.log_artifact(plt_path, artifact_path="figs/density_radial", step=j)
+                    except Exception as e:
+                        print(f"Error logging artifact {plt_path}: {e}")
 
-            for i, dataset in enumerate(datasets):
-                subset = update_episodes_df[update_episodes_df['dataset'] == dataset].copy()
-                subset['plume_bin'] = pd.cut(subset['plume_density'], bins=bins)
-                
-                grouped = subset.groupby('plume_bin')
-                
-                # Compute success rate and number of successes
-                success_rate = grouped['outcome'].apply(lambda x: (x == 'HOME').mean())
-                n_success = grouped['outcome'].apply(lambda x: (x == 'HOME').sum())
-                bin_centers = grouped['plume_density'].apply(lambda x: x.mean()).values
-                
-                # Apply offset to bin centers to avoid bar overlap
-                bin_centers_shifted = bin_centers + (i - len(datasets)/2) * offset_factor * bin_width
-
-                # Plot bars
-                plt.bar(bin_centers_shifted, success_rate.values, 
-                        width=offset_factor * bin_width, 
-                        label=dataset, alpha=0.8, color=config.mlflow_colors[dataset])
-
-                # Annotate number of successes, colored by group
-                for x, y, n in zip(bin_centers_shifted, success_rate.values, n_success.values):
-                    if np.isfinite(x) and np.isfinite(y):
-                        plt.text(x, y + 0.02, str(n), ha='center', va='bottom', fontsize=8, color=config.mlflow_colors[dataset])
-
-            # Labels and formatting
-            plt.xlabel('Plume Density')
-            plt.ylabel('HOME fraction; n = {}'.format(len(update_episodes_df['outcome'])))
-            plt.title(f"Success Rate by Plume Density and Dataset (Update {int(update_episodes_df['update_idx'].min())} - {int(update_episodes_df['update_idx'].max())} )")
-            plt.ylim(0, 1.05)
-            plt.legend(title='Dataset')
-            plt.grid(True, alpha=0.3)
-            plt.tight_layout()
-            # Save the figure to a file in your update directory
-            plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}HOME_density_{j}_rate.png"
-            plt.savefig(plt_path, dpi=100, bbox_inches='tight')
-            plt.close()  # Close the figure to free memory
-            if use_mlflow: 
-                try:
-                    mlflow.log_artifact(plt_path, artifact_path="figs/density", step=j)
-                except Exception as e:
-                    print(f"Error logging artifact {plt_path}: {e}")
-        
 
 # from a2c_ppo_acktr/storage.py
 

@@ -20,6 +20,7 @@ defaults:
 variant: base
 experiment_name: default # should be overridden by CLI - acts as both suffix of save dir and wandb run name
 plot_every_n_updates: 5
+plot_window_updates: 5  # the unrotated-trajectory grid and the density / radial-success figure pool the episodes of this many updates
 auxiliary_arch: separate_wind_head
 
 path:
