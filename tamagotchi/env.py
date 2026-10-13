@@ -1931,7 +1931,7 @@ class PlumeEnvironment_v3(PlumeEnvironment_v2):
         if self.verbose > 1:
             print('wind egocentric', wind_observation)
             print('agent_angle', self.agent_angle)
-
+        # NOTE: minor difference is reproducibility may occur since <101226 version sense a box instead of a circle
         odor_observation = get_concentration_at_tidx(
             self.data_puffs, self.tidx, self.agent_location[0], self.agent_location[1], rotate_by = self.rotate_by, mirror = self.mirror) # PEv3 - add option to rotate df by angle
         
