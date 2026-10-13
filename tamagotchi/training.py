@@ -19,6 +19,8 @@ except ImportError:
     from env import get_vec_normalize #hydra pipeline version
 import matplotlib.pyplot as plt
 from tamagotchi import wb as mlflow  # wandb shim with mlflow API
+from tamagotchi.train_plots import plot_trajectories, plot_update_trajectories  # noqa: F401 (re-exported)
+from tamagotchi.eval.outcome_start_plots import StepFrameBuffer
 
 def get_index_by_dataset(envs, dataset):
     """Get indices of the remotes that loaded the provided dataset."""
@@ -352,19 +354,18 @@ def log_episode(training_log, j, total_num_steps, start, episode_rewards, episod
 class TrajectoryStorage:
     """
     Lightweight trajectory storage that tracks trajectories by dataset type and episode outcome.
-    Collects N trials per expected outcome for each expected dataset.
-    Optimizes memory usage by:
-    - Only tracking trajectories while still collecting (stops when target reached)
-    - Only storing locations for environments that will be used
-    - Automatically stopping collection once N trials per expected outcome per dataset are found
+    Collects N trials per expected outcome for each expected dataset; tracking runs the whole update.
+    HOME: 4 slots; slots 3-4 are replaced by longer HOME episodes until both reach max_traj_len.
     """
     def __init__(self, num_envs, possible_datasets, possible_outcomes):
         self.num_envs = num_envs
         self.possible_datasets = possible_datasets
         self.possible_outcomes = possible_outcomes  # Default outcomes
         self.expected_datasets = set()  # Datasets expected in current update
-        self.trajectories_per_outcome = 2  # Target number per outcome type (HOME/OOB)
-        self.is_full = False  # Flag to indicate if storage is full
+        self.trajectories_per_outcome = {o: (4 if o == 'HOME' else 2) for o in possible_outcomes}  # slots per outcome
+        self.n_replaceable = {'HOME': 2}  # last N slots of this outcome compete on length
+        self.max_traj_len = 298  # stop comparing once all replaceable slots hit this
+        self.is_full = False  # Flag to indicate if storage is full (informational only)
         self.reset_update()
         # Track ongoing trajectories for each env
         self.ongoing_trajectories = [[] for _ in range(num_envs)]
@@ -399,25 +400,17 @@ class TrajectoryStorage:
         self.ongoing_trajectories = [[] for _ in range(self.num_envs)]
     
     def add_step(self, infos):
-        """Add current step locations to ongoing trajectories (only if still collecting)"""
-        if self.is_full:
-            return  # Stop tracking once we have enough
-            
+        """Add current step locations to ongoing trajectories"""
         for i, info in enumerate(infos):
-            if 'location' in info and self.ongoing_trajectories[i] is not None:
-                # Only add to trajectories we're actively tracking (None means stopped)
+            if 'location' in info:
                 traj_pt = info['location'].copy()  # Copy to avoid reference issues
                 traj_pt.append(info['odor_obs'])
                 self.ongoing_trajectories[i].append(traj_pt)
 
     def check_episode_done(self, infos, done, tracked_ds=''):
-        """Check for completed episodes and store if needed. tracked_ds - stop tracking if this dataset is full."""
-        if self.is_full:
-            # print("[DEBUG] Storage already full. Skipping episode checks.")
-            return
-
+        """Check for completed episodes and store if needed. tracked_ds - dataset used for the is_full flag."""
         for i, (d, info) in enumerate(zip(done, infos)):
-            if d and 'dataset' in info and 'done' in info and self.ongoing_trajectories[i] is not None:
+            if d and 'dataset' in info and 'done' in info:
                 dataset = info['dataset']
                 outcome_type = info['done']
 
@@ -430,35 +423,37 @@ class TrajectoryStorage:
                     continue
 
                 current_count = self.dataset_counts[dataset][outcome_type]
-                if current_count < self.trajectories_per_outcome:
+                if current_count < self.trajectories_per_outcome[outcome_type]:
                     self.stored_trajectories[dataset][outcome_type].append({
                         'trajectory': self.ongoing_trajectories[i].copy(),
                         'episode_info': info.copy()
                     })
-                    # if len(self.ongoing_trajectories[i]) != 299:
-                        # print('here')
                     self.dataset_counts[dataset][outcome_type] += 1
-                    # print(f"[DEBUG] Env {i}: Stored trajectory for {dataset} ({outcome_type}) "
-                        # f"[{self.dataset_counts[dataset][outcome_type]}/{self.trajectories_per_outcome}]")
+                elif outcome_type in self.n_replaceable:
+                    # quota full: the last n slots compete on length; replace the shorter one (tie -> last slot)
+                    stored = self.stored_trajectories[dataset][outcome_type]
+                    n = self.n_replaceable[outcome_type]
+                    lens = [len(e['trajectory']) for e in stored[-n:]]
+                    new_len = len(self.ongoing_trajectories[i])
+                    if not all(l >= self.max_traj_len for l in lens) and new_len > min(lens):
+                        k = len(stored) - n + max(range(n), key=lambda j: (-lens[j], j))
+                        stored[k] = {
+                            'trajectory': self.ongoing_trajectories[i].copy(),
+                            'episode_info': info.copy()
+                        }
+                    self.ongoing_trajectories[i] = []
+                    continue
                 else:
                     # print(f"[DEBUG] Env {i}: Skipped storing trajectory for {dataset} ({outcome_type}) — quota full.")
                     self.ongoing_trajectories[i] = []
-                    continue  # Don’t start new tracking for over-quota outcome
+                    continue  # Don't start new tracking for over-quota outcome
 
                 # Check if collection is full after this update
                 if isinstance(tracked_ds, int):
                     tracked_ds = self.possible_datasets[tracked_ds - 1]
 
                 self.is_storage_full(tracked_ds)
-
-                if self.is_full:
-                    # print(f"[DEBUG] Env {i}: Storage is now full. Stopping tracking.")
-                    self.ongoing_trajectories[i] = None
-                else:
-                    # print(f"[DEBUG] Env {i}: Resetting trajectory buffer for next episode.")
-                    self.ongoing_trajectories[i] = []
-            elif d and self.ongoing_trajectories[i] is None:
-                print(f"[DEBUG] Env {i}: Episode done but storage full - skipping {info['done']}.")
+                self.ongoing_trajectories[i] = []
 
     def get_trajectories(self):
         """Get stored trajectories for current update"""
@@ -473,12 +468,12 @@ class TrajectoryStorage:
 
         if tracked_ds:  # If a specific dataset is requested, check only that one
             counts = {outcome: self.dataset_counts[tracked_ds][outcome] for outcome in self.possible_outcomes}
-            if any(count < self.trajectories_per_outcome for count in counts.values()):
+            if any(counts[o] < self.trajectories_per_outcome[o] for o in self.possible_outcomes):
                 return False
         else:  # Check if all datasets have reached their targets for both HOME and OOB
             for dataset in self.expected_datasets:
                 counts = {outcome: self.dataset_counts[dataset][outcome] for outcome in self.possible_outcomes}
-                if any(count < self.trajectories_per_outcome for count in counts.values()):
+                if any(counts[o] < self.trajectories_per_outcome[o] for o in self.possible_outcomes):
                     return False
                 
         self.is_full = True  # Set flag if all datasets are full
@@ -486,7 +481,7 @@ class TrajectoryStorage:
     
     def get_collection_status(self):
         """Get current collection status"""
-        active_envs = sum(1 for traj in self.ongoing_trajectories if traj is not None)
+        active_envs = len(self.ongoing_trajectories)
         status = {
             'expected_datasets': list(self.expected_datasets),
             'dataset_counts': self.dataset_counts.copy(),
@@ -509,180 +504,15 @@ class TrajectoryStorage:
         for dataset in self.expected_datasets:
             counts = {outcome: self.dataset_counts[dataset][outcome] for outcome in self.possible_outcomes}
             total_count = sum(counts.values())
-            target_total = self.trajectories_per_outcome * len(self.possible_outcomes)
+            target_total = sum(self.trajectories_per_outcome.values())
             summary[dataset] = f"{total_count}/{target_total} (H:{counts['HOME']}, O:{counts['OOB']}, OT:{counts['OOT']})"
         return summary
 
 
-def plot_trajectories(traj_storage, envs, save_path="/src/tamagotchi/debug_plot.png", title=None, figsize=None):
-    """
-    Plot collected trajectories in a grid layout.
-    Rows = datasets, Columns = individual trajectories
-    Each subplot shows one trajectory with environmental context.
-    """
-    trajectories = traj_storage.get_trajectories()
-    
-    if not trajectories:
-        print("No trajectories to plot")
-        return
-    
-    # Flatten trajectories by dataset and count max trajectories per dataset
-    dataset_trajs = {}
-    max_trajs = 0
-    
-    for dataset, outcomes in trajectories.items():
-        # Combine HOME and OOB trajectories for this dataset
-        all_trajs = []
-
-        for outcome in traj_storage.possible_outcomes:
-            if outcome not in outcomes:
-                continue
-            for episode in outcomes[outcome]:
-                episode_data = episode.copy()
-                episode_data['outcome'] = outcome
-                all_trajs.append(episode_data)
-
-        dataset_trajs[dataset] = all_trajs
-        max_trajs = max(max_trajs, len(all_trajs))
-
-    
-    if max_trajs == 0:
-        print("No trajectories to plot")
-        return
-    
-    # Create subplot grid: rows = datasets, cols = individual trajectories
-    datasets = list(dataset_trajs.keys())
-    n_rows = len(datasets)
-    n_cols = max_trajs
-    
-    # Set figure size
-    if figsize is None:
-        figsize = (4 * n_cols, 5 * n_rows)
-    
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
-    
-    # Handle edge cases for subplot indexing
-    if n_rows == 1 and n_cols == 1:
-        axes = [[axes]]
-    elif n_rows == 1:
-        axes = [axes] if n_cols > 1 else [[axes]]
-    elif n_cols == 1:
-        axes = [[ax] for ax in axes]
-    
-    # Plot each trajectory
-    for row, dataset in enumerate(datasets):
-        trajs = dataset_trajs[dataset]
-        
-        for col in range(n_cols):
-            ax = axes[row][col]
-            
-            if col < len(trajs):
-                # Plot this trajectory
-                episode = trajs[col]
-                trajectory = episode['trajectory']
-                outcome = episode['outcome']
-                color = 'green' if outcome == 'HOME' else 'red'
-                
-                # Set subplot title
-                traj_num = col + 1
-                ax.set_title(f"{dataset}\nTraj {traj_num} ({outcome.upper()})", 
-                            fontsize=9, pad=10)
-                
-                if len(trajectory) == 0:
-                    ax.text(0.5, 0.5, 'Empty\ntrajectory', 
-                           ha='center', va='center', transform=ax.transAxes,
-                           fontsize=10, alpha=0.6)
-                    ax.set_xlim(0, 1)
-                    ax.set_ylim(0, 1)
-                    continue
-                
-                # Load and prepare dataset for environmental context
-                get_ds_at = get_index_by_dataset(envs, episode['episode_info']['dataset'])[0] 
-                data_puffs = envs.get_attr_at(get_ds_at, 'data_puffs_all')[0]
-                data_wind = envs.get_attr_at(get_ds_at, 'data_wind_all')[0]
-                
-                # Apply episode-specific transformations
-                drop_idxs = data_puffs['puff_number'].unique()
-                drop_idxs = pd.Series(drop_idxs).sample(frac=(1 - episode['episode_info']['plume_density']))
-                data_puffs = data_puffs.query("puff_number not in @drop_idxs")
-                data_puffs = data_puffs[data_puffs['time'] == episode['episode_info']['t_val']]
-                data_puffs = utils.rotate_puffs_optimized(data_puffs, episode['episode_info']['rotate_by'], False)
-                data_wind = utils.rotate_wind_optimized(data_wind, episode['episode_info']['rotate_by'], False)
-
-                # Plot puffs and wind vectors
-                fig, ax = utils.plot_puffs_and_wind_vectors(data_puffs, data_wind, 
-                                                          episode['episode_info']['t_val'], 
-                                                          ax=ax, fig=fig, fname='', show=False)
-                
-                # Success region: dist(agent, source) <= 0.2m ends the episode as HOME
-                ax.add_patch(plt.Circle((0, 0), 0.2, facecolor='none',
-                                        edgecolor='black', linewidth=1.2, linestyle='--',
-                                        zorder=4))
-
-                # Plot the trajectory
-                x, y, odor_obs = zip(*trajectory)
-                # Create color array
-                colors = np.where(np.array(odor_obs) > 0, 'yellow', 'magenta')
-
-                # Scatter plot with color per point
-                ax.scatter(x, y, c=colors, s=5, alpha=0.8)
-                
-                # ax.plot(x, y, color=color, linewidth=2.5, alpha=0.8)
-                
-                # Mark start and end points
-                ax.plot(x[0], y[0], 'o', color=color, markersize=8, alpha=0.9, 
-                       markeredgecolor='black', markeredgewidth=1)  # start
-                ax.plot(x[-1], y[-1], 's', color=color, markersize=8, alpha=0.9,
-                       markeredgecolor='black', markeredgewidth=1)  # end
-                
-                # Add trajectory info as text
-                traj_length = len(trajectory)
-                ax.text(0.02, 0.98, f'Length: {traj_length}', transform=ax.transAxes,
-                       fontsize=8, verticalalignment='top',
-                       bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
-                
-            else:
-                # Empty subplot for datasets with fewer trajectories
-                ax.set_title(f"{dataset}\n(No trajectory)", fontsize=9, pad=10, alpha=0.6)
-                ax.text(0.5, 0.5, 'No trajectory\ncollected', 
-                       ha='center', va='center', transform=ax.transAxes,
-                       fontsize=10, alpha=0.4)
-                ax.set_xlim(0, 1)
-                ax.set_ylim(0, 1)
-            
-            # Set axis labels (only on edges to reduce clutter)
-            if row == n_rows - 1:  # bottom row
-                ax.set_xlabel('X position', fontsize=8)
-            if col == 0:  # left column
-                ax.set_ylabel('Y position', fontsize=8)
-            
-            # Make axis equal for proper visualization
-            ax.set_aspect('equal', adjustable='box')
-            
-            # Reduce tick label size
-            ax.tick_params(labelsize=7)
-    
-    # Add overall title
-    if title:
-        fig.suptitle(title, fontsize=16, y=0.95)
-    
-    plt.tight_layout()
-    
-    # Adjust layout to make room for suptitle and text
-    if title:
-        plt.subplots_adjust(top=0.90)
-    plt.subplots_adjust(bottom=0.12, left=0.08, right=0.92)
-    
-    fig.savefig(save_path, dpi=150, bbox_inches='tight')
-    plt.close(fig)
-    print(f"Trajectories plot saved to {save_path}")
+# plot_trajectories: moved to tamagotchi/train_plots.py (shared with tamagotchi main)
 
 
-def plot_update_trajectories(traj_storage, envs, update_num):
-    """Convenience function to plot trajectories for a specific update"""
-    title = f"Individual Trajectories - Update {update_num}"
-    save_path = f"/src/tamagotchi/trajectories_update_{update_num}.png"
-    plot_trajectories(traj_storage, envs, save_path=save_path, title=title)
+# plot_update_trajectories: moved to tamagotchi/train_plots.py (shared with tamagotchi main)
     
 
 def training_loop(agent, envs, args, device, actor_critic,
@@ -716,6 +546,11 @@ def training_loop(agent, envs, args, device, actor_critic,
     best_mean = 0.0
 
     traj_storage = TrajectoryStorage(num_envs=envs.num_envs, possible_datasets=args.dataset, possible_outcomes=['HOME', 'OOB', 'OOT'])
+    # every step of every env over the last plot_window_updates updates, for the unrotated outcome x
+    # start-time grid under the trajectory figure and the density / radial-success figure
+    plot_window_updates = getattr(args, 'plot_window_updates', 5)
+    step_buf = StepFrameBuffer(envs.num_envs, window_updates=plot_window_updates)
+    eps_window = deque(maxlen=plot_window_updates)  # per-update episode DataFrames (utils.update_eps_info columns)
         
     # track stats for logging
     episode_rewards = deque(maxlen=50) 
@@ -854,6 +689,7 @@ def training_loop(agent, envs, args, device, actor_critic,
         ]) # track stats of episodes
         episode_counter = 0
         update_wind_xy = [] # per-step ambient wind across all envs; for wind diversity metrics
+        step_buf.start_update()
         # do this every 10th update
         if j % plot_every_n_updates == 0:
             traj_storage.reset_update(expected_datasets = args.dataset[0:int(envs.wind_directions)]) # track few trajectories for plotting
@@ -869,6 +705,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                     ou_state=rollouts.ou_states[step])
             obs, reward, done, infos = envs.step(action)
             update_wind_xy.append(np.asarray([info['ambient_wind'] for info in infos], dtype=np.float64)) # for wind_stats/* metrics
+            step_buf.add_step(infos)
             if j % plot_every_n_updates == 0:
                 traj_storage.add_step(infos)
                 traj_storage.check_episode_done(infos, done, tracked_ds=int(envs.wind_directions)) 
@@ -882,6 +719,7 @@ def training_loop(agent, envs, args, device, actor_critic,
                         episode_puffs.append(infos[i]['num_puffs'])
                         episode_wind_directions.append(envs.ds2wind(infos[i]['dataset'])) # density and dataset are logged to see eps. statistics implemented by the curriculum
                         update_episodes_df = utils.update_eps_info(update_episodes_df, infos[i], episode_counter, j_global)
+                        step_buf.mark_done(i, episode_counter, infos[i])
                     except KeyError:
                         raise KeyError("Logging info not found... check why it's not here when done")
             
@@ -910,13 +748,14 @@ def training_loop(agent, envs, args, device, actor_critic,
                                 args.gae_lambda, args.use_proper_time_limits)
         value_loss, action_loss, dist_entropy, clip_fraction, advantages = agent.update(rollouts)
         
-        # After update, get stored trajectories
+        step_buf.end_update(j_global)
+        eps_window.append(update_episodes_df)
+        # After update, plot the sampled trajectories and, below them, every episode of the window
         if j % plot_every_n_updates == 0:
-        #     update_trajectories = traj_storage.get_trajectories()
-        #     status = traj_storage.get_collection_status()
-        #     summary = traj_storage.get_summary_counts()
+            lo, hi = step_buf.update_range() or (j_global, j_global)
+            update_label = f"update {hi}" if lo == hi else f"updates {lo}-{hi}"
             plt_path = f"{args.save_dir}/tmp/{args.model_fname.replace('.pt', '_')}trajectories_update{j_global}.png"
-            plot_trajectories(traj_storage, envs, save_path=plt_path)
+            plot_trajectories(traj_storage, envs, plt_path, args=args, unrotated_df=step_buf.frame(), update_label=update_label)
             if args.mlflow:
                 try:
                     mlflow.log_artifact(plt_path, artifact_path="figs/trajectories", step=j_global)
@@ -926,7 +765,8 @@ def training_loop(agent, envs, args, device, actor_critic,
         utils.log_agent_learning(j_global, advantages, value_loss, action_loss, dist_entropy, clip_fraction, agent.optimizer.param_groups[0]['lr'], use_mlflow=args.mlflow)
         # wind obsver v1 modification: plot success fractions every 20 updates
         utils.log_eps_artifacts(j_global, args, update_episodes_df, use_mlflow=args.mlflow, log_artifacts=True, plot=(j % plot_every_n_updates == 0),
-                                wind_xy=np.concatenate(update_wind_xy, axis=0) if update_wind_xy else None)
+                                wind_xy=np.concatenate(update_wind_xy, axis=0) if update_wind_xy else None,
+                                window_df=pd.concat(list(eps_window), ignore_index=True) if len(eps_window) else None)
 
         total_num_steps = (j + 1) * args.num_processes * args.num_steps
         if j % args.log_interval == 0 and len(episode_rewards) > 1 and not args.dryrun:

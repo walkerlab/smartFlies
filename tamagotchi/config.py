@@ -128,3 +128,4 @@ mlflow_colors = {
             'poisson_mag_noisy3x5b5': 'cyan',
             'poisson_noisy3x5b5': 'magenta'
         }
+dataset_colors = mlflow_colors  # name used by train_plots (tamagotchi main)
