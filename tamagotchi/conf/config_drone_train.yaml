@@ -34,6 +34,7 @@ action_delay_const: null
 action_latency: null
 
 plot_every_n_updates: 1
+plot_window_updates: 5  # the unrotated-trajectory grid and the density / radial-success figure pool the episodes of this many updates
 # PPO / optimizer
 algo: ppo
 lr: 0.0003
