@@ -38,6 +38,7 @@ precise_min: [1.0, 1.0] # not used
 birthx_linear_tc_steps: 6
 birthx_upper: 0.8
 odor_01: 1
+odor_detection_radius: 0 # meters; agent odor-sensing circle added to each puff radius (0 = point sensor)
 # PPO / optimizer
 algo: ppo
 lr: 0.0003

@@ -29,6 +29,7 @@ path:
 
 num_env_steps: 4000000
 odor_01: false
+odor_detection_radius: 0 # meters; agent odor-sensing circle added to each puff radius (0 = point sensor)
 action_delay_const: null
 action_latency: null
 
