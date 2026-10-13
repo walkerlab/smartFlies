@@ -199,6 +199,10 @@ def main():
     parser.add_argument('--eval_rotate_by', type=float, default=None,
                         help='degrees; rotate plume/wind data by this fixed angle for the whole eval '
                              '(start grid is built in the plume frame, then mapped into the rotated frame)')
+    parser.add_argument('--eval_rotations', action='store_true', default=False,
+                        help='in the same run, repeat the whole eval for the plume rotated by each angle of '
+                             'evalCli.ROTATE_SWEEP (0, 180, 90, -90, 45, -45, 135, -135 degrees); all rotations '
+                             'are saved to the same files, with a rotate_by column in the summary csv')
     parser.add_argument('--perturb_RNN_by_ortho_set', type=str, default=False)
     parser.add_argument('--perturb_RNN_by', type=str, default=False)
     args = parser.parse_args()

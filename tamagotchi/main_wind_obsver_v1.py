@@ -244,10 +244,17 @@ def set_up_staged_training(args):
         return
 
     args.staged_training = True
-    # Strip the seed so all seeds of one stage command share the same group hash:
-    # "seed-2-6c3046e0" -> "6c3046e0"
-    seedless = re.sub(r'^seed-\d+-', '', getattr(args, 'outsuffix', ''))
-    h_input = stage_name + seedless
+    # Hash over the full override string (minus seed/outsuffix/resume_from, set by
+    # main_hydra.py as stage_hash_input) so all seeds of one stage command share the same
+    # group hash, the hash doesn't change just because it resumes from a different
+    # checkpoint, and two stages that differ only in e.g. path.curriculum_name (a
+    # --sweep_config stage) get distinct checkpoint names. Same scheme as tamagotchi main.
+    # Fallback (no hydra, e.g. argparse main): stage_name + seed-stripped outsuffix,
+    # "seed-2-6c3046e0" -> "6c3046e0".
+    h_input = getattr(args, 'stage_hash_input', None)
+    if not h_input:
+        seedless = re.sub(r'^seed-\d+-', '', getattr(args, 'outsuffix', ''))
+        h_input = stage_name + seedless
     args.stage_hash = hashlib.sha1(h_input.encode()).hexdigest()[:8]
     args.stage_checkpoint_suffix = f'_stage_{args.stage_hash}'
     print(f"Staged training: stage_name={stage_name}, stage_hash={args.stage_hash}")
@@ -366,7 +373,7 @@ def main(args=None):
             _skip = {
                 'model_fpath', 'chkpt_fpath', 'init_fpath', 'final_fpath', 'model_fname',
                 'training_log', 'json_config', 'device', 'eval_log_dir', 'cuda',
-                'staged_training', 'stage_hash', 'stage_checkpoint_suffix',
+                'staged_training', 'stage_hash', 'stage_hash_input', 'stage_checkpoint_suffix',
                 'stage_update_offset', 'is_fresh_stage', 'config_diff', 'resume_from',
             }
             current = vars(args)

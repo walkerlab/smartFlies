@@ -6,6 +6,7 @@ import traceback
 import os
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"   # see issue #152 # this line is from #https://stackoverflow.com/questions/37893755/tensorflow-set-cuda-visible-devices-within-jupyter
+import copy
 import inspect
 import torch
 import argparse
@@ -22,6 +23,8 @@ from env import make_vec_envs, PlumeEnvironment_v2, PlumeEnvironment_v3
 import eval.agent_analysis as agent_analysis
 import os
 # import log_analysis # for viz hidden trajectories
+
+ROTATE_SWEEP = [0, 180, 90, -90, 45, -45, 135, -135]  # degrees; used by --eval_rotations
 
 ### UTILITY ###
 def evaluate_agent(actor_critic, env, args):
@@ -224,7 +227,34 @@ def evaluate_agent(actor_critic, env, args):
 
 
 ### BACK TO MAIN ###
+def accumulate_rotations(args, stem, episode_logs, episode_summaries):
+    """With --eval_rotations, append this rotation's results to those of the earlier rotations
+    saved under the same output `stem`, so every rotation lands in one file. `idx` stays the
+    index into the combined log list and `rotate_by` records the angle of each episode."""
+    if not getattr(args, 'eval_rotations', False):
+        return episode_logs, episode_summaries
+    logs, summaries = args.rot_results.setdefault(stem, ([], []))
+    for row in episode_summaries:
+        row['idx'] += len(logs)
+        row['rotate_by'] = args.eval_rotate_by
+    logs += episode_logs
+    summaries += episode_summaries
+    return logs, summaries
+
+
 def eval_loop(args, actor_critic, test_sparsity=True):
+    """Run the eval once, or once per angle of ROTATE_SWEEP with --eval_rotations
+    (all rotations are saved to the same files, with a rotate_by column in the summary csv)."""
+    if not getattr(args, 'eval_rotations', False):
+        return eval_loop_once(args, actor_critic, test_sparsity)
+    args.rot_results = {}  # stem -> (logs, summaries); shared by the per-rotation copies below
+    for angle in ROTATE_SWEEP:
+        rot_args = copy.copy(args)  # eval_loop_once mutates args (sparsity sweep), keep each rotation independent
+        rot_args.eval_rotate_by = angle  # evaluate_agent rotates the plume, wind and fixed-eval start grid
+        eval_loop_once(rot_args, actor_critic, test_sparsity)
+
+
+def eval_loop_once(args, actor_critic, test_sparsity=True):
     # Extract default values from __init__ method
     init_signature_vis_fb_params = inspect.signature(PlumeEnvironment_v3.__init__)
     init_signature = inspect.signature(PlumeEnvironment_v2.__init__)
@@ -266,6 +296,7 @@ def eval_loop(args, actor_critic, test_sparsity=True):
                 venv.reload_dataset()
 
             episode_logs, episode_summaries = evaluate_agent(actor_critic, env, args)
+            episode_logs, episode_summaries = accumulate_rotations(args, args.dataset, episode_logs, episode_summaries)
             # save the logs
             fname3 = f"{args.abs_out_dir}/{args.dataset}.pkl"
             with open(fname3, 'wb') as f_handle:
@@ -343,6 +374,7 @@ def eval_loop(args, actor_critic, test_sparsity=True):
                 env.eval() # stops vecNormalize from updating its stats, if it is being used.
 
                 episode_logs, episode_summaries = evaluate_agent(actor_critic, env, args)
+                episode_logs, episode_summaries = accumulate_rotations(args, f"{args.dataset}_{birthx}", episode_logs, episode_summaries)
 
                 fname3 = f"{args.abs_out_dir}/{args.dataset}_{birthx}.pkl"
                 with open(fname3, 'wb') as f_handle:
@@ -429,6 +461,13 @@ if __name__ == "__main__":
     parser.add_argument('--perturb_RNN_by_ortho_set', type=str, default=False, help='a file that stores an orthogonal basis, where the first vector is the wind encoding subspace')
     parser.add_argument('--perturb_RNN_by', type=str, default=False, help='set to "subspace" to perturb hidden states along the wind encoding subspace')
     parser.add_argument('--rotate_by', type=int, default=0, help='rotate wind direction on/off')
+    parser.add_argument('--eval_rotate_by', type=float, default=None,
+        help='degrees; rotate plume and wind by this fixed angle for the whole eval '
+             '(the fixed-eval grid is built in the plume frame, then mapped into the rotated frame)')
+    parser.add_argument('--eval_rotations', action='store_true', default=False,
+        help=f'in the same run, repeat the whole eval for the plume rotated by each of {ROTATE_SWEEP} '
+             'degrees (via eval_rotate_by); all rotations are saved to the same files, '
+             'with a rotate_by column in the summary csv')
     
     parser.add_argument('--no_vec_norm_stats', action='store_true', default=False, help='an agent that is trained without storing vecNormalize stats, or did not use it during training')
     parser.add_argument('--out_dir', type=str, default='eval')

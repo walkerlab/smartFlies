@@ -30,6 +30,8 @@ share/python-wheels/
 MANIFEST
 
 *json
+# but curriculum schedules are config, not data
+!tamagotchi/conf/curriculum/*.json
 
 .vscode/
 # PyInstaller
