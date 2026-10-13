@@ -120,6 +120,7 @@ mlflow_colors = {
             'constantx5b5': 'blue',
             'constant_mag_narrowx5b5': 'green',
             'constant_jitterx5b5': 'red',
+            'wide_jitterx5b5': 'red',
 			# 'constant_magx5b5': 'red',
             'noisy3x5b5': 'purple',
             'noisy_jitterx5b5': 'purple',
